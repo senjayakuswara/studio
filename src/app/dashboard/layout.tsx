@@ -91,7 +91,7 @@ export default function DashboardLayout({
                 <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/x">
+                      <Link href="/dashboard/e-absensi/x" asChild>
                         <SidebarMenuSubButton
                           isActive={isActive("/dashboard/e-absensi/x")}
                         >
@@ -100,7 +100,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xi">
+                      <Link href="/dashboard/e-absensi/xi" asChild>
                         <SidebarMenuSubButton
                           isActive={isActive("/dashboard/e-absensi/xi")}
                         >
@@ -109,7 +109,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xii">
+                      <Link href="/dashboard/e-absensi/xii" asChild>
                         <SidebarMenuSubButton
                           isActive={isActive("/dashboard/e-absensi/xii")}
                         >
