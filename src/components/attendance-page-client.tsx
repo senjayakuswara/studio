@@ -347,70 +347,69 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [handleScan]);
 
     useEffect(() => {
-      if (scanMode === 'camera' && !html5QrCodeRef.current) {
-          setIsCameraInitializing(true);
-          setCameraError(null);
+        if (scanMode !== 'camera') {
+            if (html5QrCodeRef.current?.isScanning) {
+                html5QrCodeRef.current.stop().catch(err => console.error("Gagal menghentikan pemindai.", err));
+            }
+            return;
+        }
 
-          const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
-          html5QrCodeRef.current = scanner;
+        setIsCameraInitializing(true);
+        setCameraError(null);
 
-          const config = {
-              fps: 10,
-              qrbox: { width: 250, height: 250 },
-              rememberLastUsedCamera: true,
-          };
+        const qrCodeScanner = new Html5Qrcode(scannerContainerId);
+        html5QrCodeRef.current = qrCodeScanner;
 
-          const qrCodeSuccessCallback = (decodedText: string) => {
-              handleScanRef.current(decodedText);
-              if (scanner.getState() === Html5QrcodeScannerState.SCANNING) {
-                  try {
-                      scanner.pause(true);
-                      setTimeout(() => {
-                          if (scanner.getState() === Html5QrcodeScannerState.PAUSED) {
-                              scanner.resume();
-                          }
-                      }, 2000); // Pause for 2 seconds to prevent rapid-fire scanning
-                  } catch (e) {
-                      console.warn("Error pausing/resuming scanner", e);
-                  }
-              }
-          };
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            rememberLastUsedCamera: true
+        };
 
-          scanner.start(
-              { facingMode: "environment" },
-              config,
-              qrCodeSuccessCallback,
-              (errorMessage) => { /* Optional error callback */ }
-          ).then(() => {
-              setIsCameraInitializing(false);
-          }).catch((err) => {
-              const errorMessage = err?.message || 'Unknown error';
-              setCameraError(errorMessage);
-              addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
-              toast({
-                  variant: 'destructive',
-                  title: 'Kamera Gagal Dimulai',
-                  description: 'Pastikan izin kamera sudah diberikan dan tidak ada aplikasi lain yang menggunakannya.',
-              });
-              setIsCameraInitializing(false);
-          });
-      }
+        const successCallback = (decodedText: string) => {
+            handleScanRef.current(decodedText);
+            if (qrCodeScanner.getState() === Html5QrcodeScannerState.SCANNING) {
+                qrCodeScanner.pause(true);
+                setTimeout(() => {
+                    if (qrCodeScanner.getState() === Html5QrcodeScannerState.PAUSED) {
+                        qrCodeScanner.resume();
+                    }
+                }, 2000);
+            }
+        };
 
-      return () => {
-          if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
-              html5QrCodeRef.current.stop().catch(err => {
-                  console.warn('Gagal menghentikan kamera saat cleanup.', err);
-              });
-              html5QrCodeRef.current = null;
-          }
-      };
+        // Corrected: Use { facingMode: "user" } for front camera on laptops/desktops.
+        qrCodeScanner.start(
+            { facingMode: "user" },
+            config,
+            successCallback,
+            (errorMessage) => { /* Optional error callback */ }
+        )
+        .then(() => {
+            setIsCameraInitializing(false);
+        })
+        .catch((err) => {
+            const errorMessage = err?.message || String(err);
+            setCameraError(errorMessage);
+            addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
+            toast({
+                variant: 'destructive',
+                title: 'Gagal Memulai Kamera',
+                description: 'Harap berikan izin kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.'
+            });
+            setIsCameraInitializing(false);
+        });
+
+        return () => {
+            if (html5QrCodeRef.current?.isScanning) {
+                html5QrCodeRef.current.stop().catch(err => {
+                    console.error("Gagal menghentikan pemindai saat cleanup.", err);
+                });
+            }
+        };
     }, [scanMode, scannerContainerId, addLog, toast]);
 
-    const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
-        return attendanceData[studentId] || { status: 'Belum Absen' };
-    }
-
-  return (
+    return (
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
             <div>
