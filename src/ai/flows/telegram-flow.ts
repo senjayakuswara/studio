@@ -15,7 +15,6 @@ import { id as localeID } from "date-fns/locale";
 
 // Types
 type TelegramSettings = {
-  botToken: string;
   groupChatId?: string;
   notifHadir: boolean;
   notifTerlambat: boolean;
@@ -54,6 +53,16 @@ type MonthlySummaryData = {
     attendance: { [day: number]: string },
     summary: { H: number, T: number, S: number, I: number, A: number, D: number }
 };
+
+// Internal helper to get bot token from environment variables
+function getBotToken(): string | null {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) {
+        console.error("TELEGRAM_BOT_TOKEN environment variable not set.");
+        return null;
+    }
+    return token;
+}
 
 // Internal helper to get Telegram config from Firestore
 async function getTelegramConfig(): Promise<TelegramSettings | null> {
@@ -98,21 +107,21 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
  * @param payload The request body from the Telegram webhook.
  */
 export async function processTelegramWebhook(payload: any) {
+    const botToken = getBotToken();
+    if (!botToken) {
+        console.error("Bot token not configured on server.");
+        return;
+    }
+
     const message = payload?.message;
     const chatId = message?.chat?.id;
     const text = message?.text?.trim();
 
     if (!chatId || !text) return;
 
-    const config = await getTelegramConfig();
-    if (!config?.botToken) {
-        console.error("Telegram bot token is not configured.");
-        return;
-    }
-
     if (text === '/start') {
         const welcomeMessage = "Selamat datang di Notifikasi AbsensiKu Cerdas SMAS PGRI Naringgul. Untuk menghubungkan akun Anda dengan data absensi putra/i Anda, silakan masukkan Nomor Induk Siswa Nasional (NISN) anak Anda.";
-        await sendTelegramMessage(config.botToken, String(chatId), welcomeMessage);
+        await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
         return;
     }
     
@@ -124,23 +133,23 @@ export async function processTelegramWebhook(payload: any) {
 
             if (querySnapshot.empty) {
                 const notFoundMessage = `NISN ${nisn} tidak ditemukan. Mohon periksa kembali NISN putra/i Anda dan coba lagi.`;
-                await sendTelegramMessage(config.botToken, String(chatId), notFoundMessage);
+                await sendTelegramMessage(botToken, String(chatId), notFoundMessage);
             } else {
                 const studentDoc = querySnapshot.docs[0];
                 await updateDoc(doc(db, "students", studentDoc.id), {
                     parentChatId: String(chatId)
                 });
                 const successMessage = `✅ Berhasil! Akun Telegram Anda telah terhubung dengan data absensi ananda *${studentDoc.data().nama}*. Anda akan menerima notifikasi absensi mulai sekarang.`;
-                await sendTelegramMessage(config.botToken, String(chatId), successMessage);
+                await sendTelegramMessage(botToken, String(chatId), successMessage);
             }
         } catch (error) {
             console.error("Error during NISN registration:", error);
             const errorMessage = "Terjadi kesalahan pada sistem. Mohon coba lagi nanti.";
-            await sendTelegramMessage(config.botToken, String(chatId), errorMessage);
+            await sendTelegramMessage(botToken, String(chatId), errorMessage);
         }
     } else {
         const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi.";
-        await sendTelegramMessage(config.botToken, String(chatId), defaultReply);
+        await sendTelegramMessage(botToken, String(chatId), defaultReply);
     }
 }
 
@@ -149,8 +158,11 @@ export async function processTelegramWebhook(payload: any) {
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyParentOnAttendance(record: SerializableAttendanceRecord) {
+    const botToken = getBotToken();
+    if (!botToken) return;
+
     const config = await getTelegramConfig();
-    if (!config?.botToken) return;
+    if (!config) return;
 
     const status = record.status;
     const isClockOut = !!record.timestampPulang;
@@ -205,7 +217,7 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     ];
     
     const message = messageLines.join("\n");
-    await sendTelegramMessage(config.botToken, parentChatId, message);
+    await sendTelegramMessage(botToken, parentChatId, message);
 }
 
 /**
@@ -219,8 +231,8 @@ export async function sendMonthlyRecapToParent(
     month: number,
     year: number
 ) {
-    const config = await getTelegramConfig();
-    if (!config?.botToken) return;
+    const botToken = getBotToken();
+    if (!botToken) return;
 
     const student = studentData.studentInfo;
     const summary = studentData.summary;
@@ -259,7 +271,7 @@ export async function sendMonthlyRecapToParent(
         "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
     ];
 
-    await sendTelegramMessage(config.botToken, parentChatId, messageLines.join("\n"));
+    await sendTelegramMessage(botToken, parentChatId, messageLines.join("\n"));
 }
 
 
@@ -278,8 +290,11 @@ export async function sendClassMonthlyRecap(
     year: number,
     summary: { [studentId: string]: MonthlySummaryData }
 ) {
+    const botToken = getBotToken();
+    if (!botToken) return;
+
     const config = await getTelegramConfig();
-    if (!config?.botToken || !config.groupChatId) return;
+    if (!config?.groupChatId) return;
 
     let totalPresent = 0;
     let totalLate = 0;
@@ -317,18 +332,18 @@ export async function sendClassMonthlyRecap(
         "_Pesan ini dikirim otomatis oleh sistem._"
     ];
 
-    await sendTelegramMessage(config.botToken, config.groupChatId, messageLines.join("\n"));
+    await sendTelegramMessage(botToken, config.groupChatId, messageLines.join("\n"));
 }
 
 
 /**
- * Tests the connection to the Telegram API using the provided bot token.
- * @param botToken The Telegram bot token to test.
+ * Tests the connection to the Telegram API using the bot token from environment variables.
  * @returns An object indicating success or failure, with a message.
  */
-export async function testTelegramConnection(botToken: string): Promise<{ success: boolean; message: string }> {
+export async function testTelegramConnection(): Promise<{ success: boolean; message: string }> {
+    const botToken = getBotToken();
     if (!botToken) {
-        return { success: false, message: "Token bot tidak boleh kosong." };
+        return { success: false, message: "Variabel lingkungan TELEGRAM_BOT_TOKEN belum diatur di server." };
     }
     const url = `https://api.telegram.org/bot${botToken}/getMe`;
     try {

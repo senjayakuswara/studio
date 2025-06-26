@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { doc, getDoc, setDoc } from "firebase/firestore"
-import { Loader2 } from "lucide-react"
+import { Loader2, Info } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -15,10 +15,10 @@ import { Input } from "@/components/ui/input"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { testTelegramConnection } from "@/ai/flows/telegram-flow"
 
 const telegramSettingsSchema = z.object({
-  botToken: z.string().min(1, "Token bot tidak boleh kosong."),
   groupChatId: z.string().optional().describe("Untuk notifikasi rekap ke grup wali kelas"),
   notifHadir: z.boolean().default(true),
   notifTerlambat: z.boolean().default(true),
@@ -35,7 +35,6 @@ export default function NotifikasiPage() {
     const form = useForm<TelegramSettings>({
         resolver: zodResolver(telegramSettingsSchema),
         defaultValues: {
-            botToken: "",
             groupChatId: "",
             notifHadir: true,
             notifTerlambat: true,
@@ -68,7 +67,7 @@ export default function NotifikasiPage() {
 
     async function onSubmit(values: TelegramSettings) {
         try {
-            await setDoc(doc(db, "settings", "telegramConfig"), values);
+            await setDoc(doc(db, "settings", "telegramConfig"), values, { merge: true });
             toast({
                 title: "Pengaturan Disimpan",
                 description: "Pengaturan notifikasi Telegram telah berhasil diperbarui.",
@@ -85,9 +84,7 @@ export default function NotifikasiPage() {
 
     async function handleTestConnection() {
         setIsTesting(true);
-        const botToken = form.getValues("botToken");
-        
-        const result = await testTelegramConnection(botToken);
+        const result = await testTelegramConnection();
 
         if (result.success) {
             toast({
@@ -112,6 +109,13 @@ export default function NotifikasiPage() {
                     <p className="text-muted-foreground">Konfigurasi notifikasi Telegram.</p>
                 </div>
             </div>
+             <Alert>
+                <Info className="h-4 w-4" />
+                <AlertTitle>Konfigurasi Token Bot</AlertTitle>
+                <AlertDescription>
+                  Token Bot Telegram Anda sekarang dikelola melalui environment variable di server untuk keamanan yang lebih baik. Jika Anda perlu mengubah token, silakan perbarui variabel `TELEGRAM_BOT_TOKEN` di pengaturan hosting Anda.
+                </AlertDescription>
+            </Alert>
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)}>
                     <Card>
@@ -125,25 +129,11 @@ export default function NotifikasiPage() {
                             {isLoading ? (
                                 <div className="space-y-6">
                                     <Skeleton className="h-10 w-full" />
-                                    <Skeleton className="h-10 w-full" />
                                     <Skeleton className="h-6 w-3/4" />
                                     <Skeleton className="h-6 w-3/4" />
                                 </div>
                             ) : (
                                 <>
-                                    <FormField
-                                        control={form.control}
-                                        name="botToken"
-                                        render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel>Token Bot Telegram</FormLabel>
-                                                <FormControl>
-                                                    <Input placeholder="Dapatkan token dari @BotFather di Telegram" {...field} />
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
-                                        )}
-                                    />
                                     <FormField
                                         control={form.control}
                                         name="groupChatId"
