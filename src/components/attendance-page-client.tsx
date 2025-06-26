@@ -5,6 +5,7 @@ import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, upda
 import { Html5Qrcode } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
+import { notifyParentOnAttendance } from "@/ai/flows/telegram-flow"
 import {
   Card,
   CardContent,
@@ -259,16 +260,21 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     recordDate: Timestamp.fromDate(startOfDay(now)),
                 };
     
+                let docId: string;
                 if (existingRecord?.id) {
-                    const docRef = doc(db, "attendance", existingRecord.id)
+                    docId = existingRecord.id;
+                    const docRef = doc(db, "attendance", docId)
                     await updateDoc(docRef, payload);
-                    setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload, id: docRef.id }}));
                 } else {
                     const docRef = await addDoc(collection(db, "attendance"), payload);
-                    setAttendanceData(prev => ({...prev, [student.id]: { ...payload, id: docRef.id }}));
+                    docId = docRef.id;
                 }
+                
+                const newRecord = { ...payload, id: docId };
+                setAttendanceData(prev => ({...prev, [student.id]: newRecord }));
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
+                notifyParentOnAttendance(newRecord);
             } 
             // --- Logic for Clock-out ---
             else if (!existingRecord.timestampPulang) {
@@ -279,9 +285,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 }
                  const payload = { timestampPulang: Timestamp.fromDate(now) };
                  await updateDoc(doc(db, "attendance", existingRecord.id!), payload);
-                 setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
+                 
+                 const updatedRecord = { ...existingRecord, ...payload };
+                 setAttendanceData(prev => ({...prev, [student.id]: updatedRecord}));
                  addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
                  toast({ title: "Absen Pulang Berhasil" });
+                 notifyParentOnAttendance(updatedRecord);
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
@@ -304,11 +313,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 .then(() => {
                     addLog("Kamera dinonaktifkan.", "info");
                     setIsCameraActive(false);
-                    html5QrCodeRef.current = null;
                 })
                 .catch(err => {
                     console.warn("Gagal menghentikan pemindai dengan bersih.", err);
-                    setIsCameraActive(false); // Force state update
+                    setIsCameraActive(false);
                 });
         }
     }, [addLog]);
@@ -319,9 +327,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setIsCameraInitializing(true);
         setCameraError(null);
         
-        html5QrCodeRef.current = new Html5Qrcode(scannerContainerId, { verbose: false });
+        const qrCode = new Html5Qrcode(scannerContainerId, { verbose: false });
+        html5QrCodeRef.current = qrCode;
 
-        html5QrCodeRef.current.start(
+        qrCode.start(
             { facingMode: "user" },
             { fps: 5, qrbox: { width: 250, height: 250 } },
             (decodedText) => handleScan(decodedText),
@@ -337,7 +346,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setCameraError(errorMessage);
             setIsCameraInitializing(false);
             setIsCameraActive(false);
-            html5QrCodeRef.current = null;
             addLog(`Error kamera: ${errorMessage}`, "error");
             toast({
                 variant: 'destructive',
@@ -348,9 +356,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [scannerContainerId, toast, addLog, handleScan, isCameraActive, isCameraInitializing]);
     
     useEffect(() => {
-        // Cleanup function to stop scanner on component unmount
         return () => {
-            if (html5QrCodeRef.current?.isScanning) {
+           if (html5QrCodeRef.current?.isScanning) {
                 stopScanner();
             }
         };
@@ -363,7 +370,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         const now = new Date();
         const existingRecord = attendanceData[studentId];
         
-        const payload: Omit<AttendanceRecord, 'id'> = {
+        const payload: Omit<AttendanceRecord, 'id' | 'timestampPulang'> & { timestampPulang: Timestamp | null } = {
             studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
             status,
             timestampMasuk: null,
@@ -377,18 +384,20 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (docId) {
                 await updateDoc(doc(db, "attendance", docId), payload as any);
             } else {
-                const newRecord = { ...payload };
-                const docRef = await addDoc(collection(db, "attendance"), newRecord);
+                const docRef = await addDoc(collection(db, "attendance"), payload);
                 docId = docRef.id;
             }
 
+            const newRecord = { ...payload, id: docId } as AttendanceRecord;
+
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { id: docId, ...payload } as AttendanceRecord
+                [student.id]: newRecord
             }));
 
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
+            notifyParentOnAttendance(newRecord);
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
@@ -438,30 +447,30 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                            <div id={scannerContainerId} className="w-full h-full" />
-                            
-                            {!isCameraActive && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
-                                {isCameraInitializing ? (
-                                    <>
-                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                        <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
-                                    </>
-                                ) : cameraError ? (
-                                    <Alert variant="destructive">
-                                        <ShieldAlert className="h-4 w-4" />
-                                        <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
-                                        <AlertDescription>{cameraError}</AlertDescription>
-                                    </Alert>
-                                ) : (
-                                    <>
-                                        <Video className="h-10 w-10 text-muted-foreground" />
-                                        <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
-                                        <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
-                                    </>
-                                )}
-                            </div>
+                        <div id={scannerContainerId} className="w-full h-full" />
+                        
+                        {!isCameraActive && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
+                            {isCameraInitializing ? (
+                                <>
+                                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                    <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
+                                </>
+                            ) : cameraError ? (
+                                <Alert variant="destructive">
+                                    <ShieldAlert className="h-4 w-4" />
+                                    <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
+                                    <AlertDescription>{cameraError}</AlertDescription>
+                                </Alert>
+                            ) : (
+                                <>
+                                    <Video className="h-10 w-10 text-muted-foreground" />
+                                    <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
+                                    <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
+                                </>
                             )}
+                        </div>
+                        )}
                     </div>
                     <div className="flex flex-wrap gap-2 justify-center">
                         <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
