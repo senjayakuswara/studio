@@ -80,6 +80,8 @@ async function getTelegramConfig(): Promise<TelegramSettings | null> {
 }
 
 // Internal helper to send a message via Telegram API
+// I'm removing parse_mode: 'Markdown' as it can cause silent failures if the text is not perfectly formatted.
+// This is a more robust approach to ensure messages are delivered.
 async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     try {
@@ -89,12 +91,11 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
             body: JSON.stringify({
                 chat_id: chatId,
                 text: text,
-                parse_mode: 'Markdown',
             }),
         });
         if (!response.ok) {
             const errorData = await response.json();
-            console.error("Telegram API Error:", errorData.description);
+            console.error("Telegram API Error:", errorData.description, errorData);
         }
     } catch (error) {
         console.error("Failed to send Telegram message:", error);
@@ -144,7 +145,7 @@ export async function processTelegramWebhook(payload: any) {
                 await updateDoc(doc(db, "students", studentDoc.id), {
                     parentChatId: String(chatId)
                 });
-                const successMessage = `✅ Berhasil! Akun Telegram Anda telah terhubung dengan data absensi ananda *${studentDoc.data().nama}*. Anda akan menerima notifikasi absensi mulai sekarang.`;
+                const successMessage = `✅ Berhasil! Akun Telegram Anda telah terhubung dengan data absensi ananda ${studentDoc.data().nama}. Anda akan menerima notifikasi absensi mulai sekarang.`;
                 await sendTelegramMessage(botToken, String(chatId), successMessage);
             }
         } catch (error) {
@@ -197,23 +198,22 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
         timestamp = new Date(record.timestampMasuk);
         title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else {
-        // This now correctly handles manual statuses (Sakit, Izin, Alfa, Dispen)
         timestamp = new Date(); // Use current time for manual status changes
         title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     }
 
     const messageLines = [
-        "🏫 *SMAS PGRI Naringgul*",
-        `*${title}*`,
+        "🏫 SMAS PGRI Naringgul",
+        title,
         "",
         `👤 Nama      : ${record.studentName}`,
         `🆔 NIS       : ${record.nisn}`,
         `📚 Kelas     : ${classInfo.name}`,
         `⏰ Jam       : ${format(timestamp, "HH:mm:ss")}`,
-        `👋 Status    : *${finalStatus}*`,
+        `👋 Status    : ${finalStatus}`,
         "",
         "--",
-        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
+        "Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas."
     ];
     
     const message = messageLines.join("\n");
@@ -249,8 +249,8 @@ export async function sendMonthlyRecapToParent(
     const totalSchoolDays = Object.values(summary).reduce((a, b) => a + b, 0);
 
     const messageLines = [
-        "🏫 *SMAS PGRI Naringgul*",
-        `*Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
+        "🏫 SMAS PGRI Naringgul",
+        `Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
         "",
         "Yth. Orang Tua/Wali dari:",
         `👤 Nama      : ${student.nama}`,
@@ -268,7 +268,7 @@ export async function sendMonthlyRecapToParent(
         `Dari total ${totalSchoolDays} hari sekolah efektif pada bulan ini.`,
         "",
         "--",
-        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
+        "Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas."
     ];
 
     await sendTelegramMessage(botToken, parentChatId, messageLines.join("\n"));
@@ -316,11 +316,11 @@ export async function sendClassMonthlyRecap(
     const totalKehadiran = totalPresent + totalLate;
 
     const messageLines = [
-        "🏫 *SMAS PGRI Naringgul*",
-        `*Laporan Bulanan Untuk Wali Kelas*`,
-        `*${className} (${grade}) - ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
+        "🏫 SMAS PGRI Naringgul",
+        `Laporan Bulanan Untuk Wali Kelas`,
+        `${className} (${grade}) - ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
         "",
-        `Berikut adalah rekapitulasi absensi untuk kelas Anda dengan total *${totalStudents}* siswa:`,
+        `Berikut adalah rekapitulasi absensi untuk kelas Anda dengan total ${totalStudents} siswa:`,
         `✅ Total Hadir      : ${totalKehadiran} Kehadiran`,
         `⏰ Total Terlambat  : ${totalLate} Pelanggaran`,
         `🤒 Total Sakit      : ${totalSick} Hari`,
@@ -329,7 +329,7 @@ export async function sendClassMonthlyRecap(
         `❌ Total Alfa       : ${totalAlfa} Hari`,
         "",
         "--",
-        "_Pesan ini dikirim otomatis oleh sistem._"
+        "Pesan ini dikirim otomatis oleh sistem."
     ];
 
     await sendTelegramMessage(botToken, config.groupChatId, messageLines.join("\n"));
