@@ -274,7 +274,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setAttendanceData(prev => ({...prev, [student.id]: newRecord }));
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
-                notifyParentOnAttendance(newRecord);
+                
+                const serializableRecord = {
+                    ...newRecord,
+                    timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
+                    recordDate: newRecord.recordDate.toDate().toISOString(),
+                };
+                notifyParentOnAttendance(serializableRecord);
             } 
             // --- Logic for Clock-out ---
             else if (!existingRecord.timestampPulang) {
@@ -290,7 +297,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  setAttendanceData(prev => ({...prev, [student.id]: updatedRecord}));
                  addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
                  toast({ title: "Absen Pulang Berhasil" });
-                 notifyParentOnAttendance(updatedRecord);
+                
+                const serializableRecord = {
+                    ...updatedRecord,
+                    id: updatedRecord.id!,
+                    timestampMasuk: updatedRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: updatedRecord.timestampPulang?.toDate().toISOString() ?? null,
+                    recordDate: updatedRecord.recordDate.toDate().toISOString(),
+                };
+                 notifyParentOnAttendance(serializableRecord);
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
@@ -397,7 +412,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
-            notifyParentOnAttendance(newRecord);
+            
+            const serializableRecord = {
+                ...newRecord,
+                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
+                recordDate: newRecord.recordDate.toDate().toISOString(),
+            };
+            notifyParentOnAttendance(serializableRecord);
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');

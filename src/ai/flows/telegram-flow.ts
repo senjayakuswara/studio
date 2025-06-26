@@ -35,6 +35,20 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
   recordDate: Timestamp
 };
+
+// New type for Server Action to avoid non-plain objects
+type SerializableAttendanceRecord = {
+  id?: string
+  studentId: string
+  nisn: string
+  studentName: string
+  classId: string
+  status: "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
+  timestampMasuk: string | null
+  timestampPulang: string | null
+  recordDate: string
+};
+
 type MonthlySummaryData = {
     studentInfo: Student,
     attendance: { [day: number]: string },
@@ -134,7 +148,7 @@ export async function processTelegramWebhook(payload: any) {
  * Formats and sends a daily attendance notification to a parent.
  * @param record The attendance record that triggered the notification.
  */
-export async function notifyParentOnAttendance(record: AttendanceRecord) {
+export async function notifyParentOnAttendance(record: SerializableAttendanceRecord) {
     const config = await getTelegramConfig();
     if (!config?.botToken) return;
 
@@ -158,14 +172,14 @@ export async function notifyParentOnAttendance(record: AttendanceRecord) {
     let title: string;
     const finalStatus = isClockOut ? 'Pulang' : record.status;
 
-    if (isClockOut) {
-        timestamp = record.timestampPulang!.toDate();
+    if (isClockOut && record.timestampPulang) {
+        timestamp = new Date(record.timestampPulang);
         title = `Absensi Pulang: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else if (record.timestampMasuk) {
-        timestamp = record.timestampMasuk!.toDate();
+        timestamp = new Date(record.timestampMasuk);
         title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else {
-        timestamp = record.recordDate.toDate();
+        timestamp = new Date(record.recordDate);
         title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     }
 
