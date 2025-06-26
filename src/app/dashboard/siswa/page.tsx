@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore"
+import { useState, useEffect, type ChangeEvent } from "react"
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
-import { MoreHorizontal, PlusCircle, FileUp } from "lucide-react"
+import * as xlsx from "xlsx"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2 } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -32,7 +33,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import {
   AlertDialog,
@@ -63,33 +63,38 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Separator } from "@/components/ui/separator"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
   nama: z.string().min(1, "Nama tidak boleh kosong."),
-  kelas: z.string().min(1, "Kelas harus dipilih."),
+  kelas: z.enum(["X", "XI", "XII"], { required_error: "Kelas harus dipilih."}),
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
     required_error: "Jenis kelamin harus dipilih.",
   }),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
+type NewStudent = z.infer<typeof studentSchema>;
 
 export default function SiswaPage() {
   const [students, setStudents] = useState<Student[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isAlertOpen, setIsAlertOpen] = useState(false)
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
+  const [parsedStudents, setParsedStudents] = useState<NewStudent[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
   const { toast } = useToast()
 
-  const form = useForm<z.infer<typeof studentSchema>>({
+  const form = useForm<NewStudent>({
     resolver: zodResolver(studentSchema),
     defaultValues: {
       nisn: "",
       nama: "",
-      kelas: "",
+      kelas: undefined,
       jenisKelamin: undefined,
     },
   })
@@ -102,7 +107,7 @@ export default function SiswaPage() {
         id: doc.id,
         ...doc.data(),
       })) as Student[]
-      setStudents(studentsList)
+      setStudents(studentsList.sort((a, b) => a.nama.localeCompare(b.nama)))
     } catch (error) {
       console.error("Error fetching students: ", error)
       toast({
@@ -119,7 +124,7 @@ export default function SiswaPage() {
     fetchStudents()
   }, [])
 
-  async function handleSaveStudent(values: z.infer<typeof studentSchema>) {
+  async function handleSaveStudent(values: NewStudent) {
     try {
       if (editingStudent) {
         const studentRef = doc(db, "students", editingStudent.id)
@@ -130,7 +135,7 @@ export default function SiswaPage() {
         toast({ title: "Sukses", description: "Siswa baru berhasil ditambahkan." })
       }
       await fetchStudents()
-      setIsDialogOpen(false)
+      setIsFormDialogOpen(false)
       setEditingStudent(null)
       form.reset()
     } catch (error) {
@@ -163,14 +168,14 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", kelas: "", jenisKelamin: undefined })
-    setIsDialogOpen(true)
+    form.reset({ nisn: "", nama: "", kelas: undefined, jenisKelamin: undefined })
+    setIsFormDialogOpen(true)
   }
 
   const openEditDialog = (student: Student) => {
     setEditingStudent(student)
     form.reset(student)
-    setIsDialogOpen(true)
+    setIsFormDialogOpen(true)
   }
 
   const openDeleteAlert = (studentId: string) => {
@@ -179,20 +184,111 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const csvHeader = "NISN,Nama,Kelas,Jenis Kelamin\n";
-    const csvExample = "1234567890,Budi Santoso,X,Laki-laki\n";
-    const csvContent = "data:text/csv;charset=utf-8," + encodeURI(csvHeader + csvExample);
-    const link = document.createElement("a");
-    link.setAttribute("href", csvContent);
-    link.setAttribute("download", "template_import_siswa.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast({
-        title: "Template Diunduh",
-        description: "Fungsi unggah file akan diimplementasikan selanjutnya.",
-    });
+    const header = ["NISN", "Nama", "Kelas", "Jenis Kelamin"];
+    const example = ["1234567890", "Budi Santoso", "X", "Laki-laki"];
+    const data = [header, example];
+    const worksheet = xlsx.utils.aoa_to_sheet(data);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "Siswa");
+    xlsx.writeFile(workbook, "template_import_siswa.xlsx");
   };
+
+  const handleFileImport = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        try {
+            const data = event.target?.result;
+            const workbook = xlsx.read(data, { type: 'binary' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const json: any[] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            // Remove header row
+            json.shift();
+
+            let validStudents: NewStudent[] = [];
+            let invalidCount = 0;
+
+            json.forEach((row: any[]) => {
+                const studentData = {
+                    nisn: String(row[0] || ""),
+                    nama: String(row[1] || ""),
+                    kelas: String(row[2] || ""),
+                    jenisKelamin: String(row[3] || ""),
+                };
+
+                const validation = studentSchema.safeParse(studentData);
+                if (validation.success) {
+                    validStudents.push(validation.data);
+                } else {
+                    invalidCount++;
+                }
+            });
+
+            setParsedStudents(validStudents);
+            
+            if (validStudents.length > 0) {
+                toast({
+                    title: "File Diproses",
+                    description: `Ditemukan ${validStudents.length} data siswa yang valid. ${invalidCount > 0 ? `${invalidCount} baris tidak valid.` : ''}`,
+                });
+            } else {
+                 toast({
+                    variant: "destructive",
+                    title: "Gagal Memproses File",
+                    description: "Tidak ada data siswa yang valid ditemukan dalam file. Pastikan formatnya sesuai template.",
+                });
+            }
+
+        } catch (error) {
+            console.error("Error parsing excel file: ", error);
+            toast({
+                variant: "destructive",
+                title: "File Tidak Valid",
+                description: "Terjadi kesalahan saat membaca file Excel.",
+            });
+            setParsedStudents([]);
+        }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = ''; // Reset file input
+  }
+  
+  const handleSaveImportedStudents = async () => {
+    if (parsedStudents.length === 0) {
+        toast({ variant: "destructive", title: "Tidak ada data untuk diimpor." });
+        return;
+    }
+    setIsImporting(true);
+    try {
+        const batch = writeBatch(db);
+        parsedStudents.forEach(student => {
+            const docRef = doc(collection(db, "students"));
+            batch.set(docRef, student);
+        });
+        await batch.commit();
+        toast({
+            title: "Impor Berhasil",
+            description: `${parsedStudents.length} siswa berhasil ditambahkan ke database.`,
+        });
+        await fetchStudents();
+        setIsImportDialogOpen(false);
+        setParsedStudents([]);
+    } catch (error) {
+         console.error("Error importing students: ", error);
+         toast({
+            variant: "destructive",
+            title: "Gagal Mengimpor",
+            description: "Terjadi kesalahan saat menyimpan data ke database.",
+        });
+    } finally {
+        setIsImporting(false);
+    }
+  }
+
 
   return (
     <div className="flex flex-col gap-6">
@@ -202,18 +298,18 @@ export default function SiswaPage() {
           <p className="text-muted-foreground">Kelola data siswa di sini.</p>
         </div>
         <div className="flex gap-2">
-            <Button variant="outline" onClick={handleDownloadTemplate}>
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
                 <FileUp className="mr-2 h-4 w-4" />
                 Impor Siswa
             </Button>
             <Button onClick={openAddDialog}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Tambah Siswa
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Tambah Siswa
             </Button>
         </div>
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isFormDialogOpen} onOpenChange={setIsFormDialogOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>{editingStudent ? "Edit Siswa" : "Tambah Siswa"}</DialogTitle>
@@ -309,6 +405,69 @@ export default function SiswaPage() {
         </DialogContent>
       </Dialog>
       
+      <Dialog open={isImportDialogOpen} onOpenChange={(isOpen) => { setIsImportDialogOpen(isOpen); if (!isOpen) setParsedStudents([]); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Impor Data Siswa</DialogTitle>
+            <DialogDescription>
+              Unggah file Excel (.xlsx) untuk menambahkan banyak siswa sekaligus.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-2">
+            <div className="p-4 border rounded-md space-y-3">
+                <h3 className="font-medium">Langkah 1: Unduh Template</h3>
+                <p className="text-sm text-muted-foreground">Unduh dan isi file template dengan data siswa Anda. Pastikan format kolom sesuai dengan template.</p>
+                <Button variant="secondary" onClick={handleDownloadTemplate}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Unduh Template Excel
+                </Button>
+            </div>
+             <div className="p-4 border rounded-md space-y-3">
+                <h3 className="font-medium">Langkah 2: Unggah File</h3>
+                <p className="text-sm text-muted-foreground">Pilih file Excel yang sudah Anda isi untuk diunggah.</p>
+                <Input
+                    type="file"
+                    accept=".xlsx, .xls"
+                    onChange={handleFileImport}
+                    className="file:font-medium file:text-primary"
+                />
+            </div>
+            {parsedStudents.length > 0 && (
+                <div className="space-y-3">
+                    <h3 className="font-medium">Pratinjau Data ({parsedStudents.length} siswa)</h3>
+                    <div className="max-h-60 overflow-auto rounded-md border">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>NISN</TableHead>
+                                    <TableHead>Nama</TableHead>
+                                    <TableHead>Kelas</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {parsedStudents.map((student, index) => (
+                                    <TableRow key={index}>
+                                        <TableCell>{student.nisn}</TableCell>
+                                        <TableCell>{student.nama}</TableCell>
+                                        <TableCell>{student.kelas}</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setIsImportDialogOpen(false)}>Batal</Button>
+            <Button onClick={handleSaveImportedStudents} disabled={parsedStudents.length === 0 || isImporting}>
+              {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Simpan ke Database
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={isAlertOpen} onOpenChange={setIsAlertOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -339,56 +498,58 @@ export default function SiswaPage() {
                 <Skeleton className="h-12 w-full" />
              </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>NISN</TableHead>
-                  <TableHead>Nama</TableHead>
-                  <TableHead>Kelas</TableHead>
-                  <TableHead>Jenis Kelamin</TableHead>
-                  <TableHead>
-                    <span className="sr-only">Aksi</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {students.length > 0 ? (
-                  students.map((student) => (
-                    <TableRow key={student.id}>
-                      <TableCell>{student.nisn}</TableCell>
-                      <TableCell className="font-medium">{student.nama}</TableCell>
-                      <TableCell>{student.kelas}</TableCell>
-                      <TableCell>{student.jenisKelamin}</TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0">
-                              <span className="sr-only">Buka menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Aksi</DropdownMenuLabel>
-                            <DropdownMenuItem onClick={() => openEditDialog(student)}>
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
-                              Hapus
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+            <div className="border rounded-md">
+                <Table>
+                <TableHeader>
+                    <TableRow>
+                    <TableHead>NISN</TableHead>
+                    <TableHead>Nama</TableHead>
+                    <TableHead>Kelas</TableHead>
+                    <TableHead>Jenis Kelamin</TableHead>
+                    <TableHead>
+                        <span className="sr-only">Aksi</span>
+                    </TableHead>
                     </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center">
-                      Belum ada data siswa.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                    {students.length > 0 ? (
+                    students.map((student) => (
+                        <TableRow key={student.id}>
+                        <TableCell>{student.nisn}</TableCell>
+                        <TableCell className="font-medium">{student.nama}</TableCell>
+                        <TableCell>{student.kelas}</TableCell>
+                        <TableCell>{student.jenisKelamin}</TableCell>
+                        <TableCell>
+                            <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Buka menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Aksi</DropdownMenuLabel>
+                                <DropdownMenuItem onClick={() => openEditDialog(student)}>
+                                Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
+                                Hapus
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                            </DropdownMenu>
+                        </TableCell>
+                        </TableRow>
+                    ))
+                    ) : (
+                    <TableRow>
+                        <TableCell colSpan={5} className="h-24 text-center">
+                        Belum ada data siswa.
+                        </TableCell>
+                    </TableRow>
+                    )}
+                </TableBody>
+                </Table>
+            </div>
            )}
         </CardContent>
       </Card>
