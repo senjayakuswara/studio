@@ -3,6 +3,7 @@
  * @fileOverview Handles all Telegram bot interactions.
  * - processTelegramWebhook: Processes incoming messages from the Telegram webhook for user registration.
  * - notifyParentOnAttendance: Sends attendance notifications to parents.
+ * - testTelegramConnection: Tests the validity of a bot token.
  */
 
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp } from "firebase/firestore";
@@ -149,7 +150,7 @@ export async function notifyParentOnAttendance(record: AttendanceRecord) {
         timestamp = record.timestampPulang!.toDate();
         title = `Absensi Pulang: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else if (record.timestampMasuk) {
-        timestamp = record.timestampMasuk.toDate();
+        timestamp = record.timestampMasuk!.toDate();
         title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else {
         timestamp = record.recordDate.toDate();
@@ -172,4 +173,30 @@ export async function notifyParentOnAttendance(record: AttendanceRecord) {
     
     const message = messageLines.join("\n");
     await sendTelegramMessage(config.botToken, parentChatId, message);
+}
+
+/**
+ * Tests the connection to the Telegram API using the provided bot token.
+ * @param botToken The Telegram bot token to test.
+ * @returns An object indicating success or failure, with a message.
+ */
+export async function testTelegramConnection(botToken: string): Promise<{ success: boolean; message: string }> {
+    if (!botToken) {
+        return { success: false, message: "Token bot tidak boleh kosong." };
+    }
+    const url = `https://api.telegram.org/bot${botToken}/getMe`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.ok) {
+            return { success: true, message: `Koneksi berhasil! Terhubung dengan bot: ${data.result.first_name} (@${data.result.username}).` };
+        } else {
+            // Error from Telegram API (e.g., invalid token)
+            return { success: false, message: `Gagal terhubung ke Telegram: ${data.description}` };
+        }
+    } catch (error) {
+        console.error("Failed to test Telegram connection:", error);
+        return { success: false, message: "Gagal terhubung ke server Telegram. Periksa koneksi internet Anda." };
+    }
 }

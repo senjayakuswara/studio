@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
+import { testTelegramConnection } from "@/ai/flows/telegram-flow"
 
 const telegramSettingsSchema = z.object({
   botToken: z.string().min(1, "Token bot tidak boleh kosong."),
@@ -28,6 +29,7 @@ type TelegramSettings = z.infer<typeof telegramSettingsSchema>;
 
 export default function NotifikasiPage() {
     const [isLoading, setIsLoading] = useState(true);
+    const [isTesting, setIsTesting] = useState(false);
     const { toast } = useToast();
 
     const form = useForm<TelegramSettings>({
@@ -79,6 +81,27 @@ export default function NotifikasiPage() {
                 description: "Terjadi kesalahan saat menyimpan pengaturan.",
             });
         }
+    }
+
+    async function handleTestConnection() {
+        setIsTesting(true);
+        const botToken = form.getValues("botToken");
+        
+        const result = await testTelegramConnection(botToken);
+
+        if (result.success) {
+            toast({
+                title: "Koneksi Berhasil",
+                description: result.message,
+            });
+        } else {
+            toast({
+                variant: "destructive",
+                title: "Koneksi Gagal",
+                description: result.message,
+            });
+        }
+        setIsTesting(false);
     }
 
     return (
@@ -205,7 +228,15 @@ export default function NotifikasiPage() {
                         </CardContent>
                     </Card>
                     <div className="mt-6 flex justify-end gap-2">
-                        <Button variant="outline" disabled={true}>Test Notifikasi</Button>
+                        <Button
+                           variant="outline"
+                           type="button"
+                           onClick={handleTestConnection}
+                           disabled={isTesting || isLoading || form.formState.isSubmitting}
+                        >
+                            {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Test Notifikasi
+                        </Button>
                         <Button type="submit" disabled={form.formState.isSubmitting || isLoading}>
                           {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                           Simpan Pengaturan
