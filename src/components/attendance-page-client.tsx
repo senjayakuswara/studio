@@ -40,7 +40,9 @@ type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dis
 type AttendanceRecord = {
   id?: string
   status: AttendanceStatus
-  timestamp: Timestamp
+  timestampMasuk: Timestamp | null
+  timestampPulang: Timestamp | null
+  recordDate: Timestamp
   notes?: string
 }
 type LogMessage = {
@@ -128,8 +130,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                              const attendanceQuery = query(
                                 collection(db, "attendance"),
                                 where("studentId", "in", chunk),
-                                where("timestamp", ">=", todayStart),
-                                where("timestamp", "<=", todayEnd)
+                                where("recordDate", ">=", todayStart),
+                                where("recordDate", "<=", todayEnd)
                             );
                             const attendanceSnapshot = await getDocs(attendanceQuery);
                             attendanceSnapshot.forEach(doc => {
@@ -137,7 +139,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 initialAttendanceData[data.studentId] = {
                                     id: doc.id,
                                     status: data.status,
-                                    timestamp: data.timestamp,
+                                    timestampMasuk: data.timestampMasuk || null,
+                                    timestampPulang: data.timestampPulang || null,
+                                    recordDate: data.recordDate,
                                     notes: data.notes
                                 };
                             });
@@ -162,7 +166,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [grade, toast])
     
     useEffect(() => {
-        // Auto-focus on the scanner input when data is ready
         if (!isLoading) {
             setTimeout(() => scannerInputRef.current?.focus(), 100);
         }
@@ -174,15 +177,16 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             message,
             type
         };
-        setLogMessages(prev => [newLog, ...prev].slice(0, 50)); // Keep last 50 logs
+        setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }
 
     const handleScan = async (nisn: string) => {
         if (!nisn.trim()) return;
+        if (scannerInputRef.current) scannerInputRef.current.value = "";
 
         if (!schoolHours) {
             addLog("Error: Pengaturan jam belum dimuat.", "error");
-            toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap", description: "Tunggu sebentar hingga pengaturan jam berhasil dimuat." });
+            toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
             return;
         }
 
@@ -197,53 +201,79 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         if (student.grade !== grade) {
             const studentClass = classMap.get(student.classId)
             addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
-            toast({
-                variant: "destructive",
-                title: "Salah Ruang Absen!",
-                description: `Siswa ini dari Kelas ${student.grade}. Harap absen di ruangan yang benar.`
-            });
+            toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
             return;
         }
 
-        if (attendanceData[student.id]) {
-            addLog(`Siswa ${student.nama} sudah absen hari ini.`, 'info');
-            toast({ title: "Sudah Absen", description: `${student.nama} sudah tercatat absen hari ini.`});
-            return;
-        }
-        
+        const existingRecord = attendanceData[student.id];
         const now = new Date();
-        const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-        const deadline = new Date();
-        deadline.setHours(hours, minutes + parseInt(schoolHours.toleransi, 10), 0, 0);
 
-        const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
-        const newTimestamp = Timestamp.fromDate(now);
+        if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
+            addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
+            toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
+            return;
+        }
 
-        try {
-            const newRecord = {
-                studentId: student.id,
-                nisn: student.nisn,
-                studentName: student.nama,
-                classId: student.classId,
-                status: status,
-                timestamp: newTimestamp,
+        const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
+        const jamPulangTime = new Date();
+        jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
+
+        // --- Logic for Clock-in ---
+        if (!existingRecord || !existingRecord.timestampMasuk) {
+             if (now > jamPulangTime) {
+                addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
+                toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
+                return;
             }
-            const docRef = await addDoc(collection(db, "attendance"), newRecord)
-            
-            setAttendanceData(prev => ({
-                ...prev,
-                [student.id]: { id: docRef.id, status, timestamp: newTimestamp }
-            }));
-            
-            addLog(`Berhasil: ${student.nama} (${student.nisn}) tercatat ${status}.`, 'success');
-            toast({ title: "Absen Berhasil", description: `${student.nama} tercatat ${status}.` });
 
-        } catch (error) {
-            console.error("Error saving attendance: ", error);
-            addLog(`Gagal menyimpan absensi untuk ${student.nama}.`, 'error');
-            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan pada database." });
-        } finally {
-            if (scannerInputRef.current) scannerInputRef.current.value = "";
+            const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+            const deadline = new Date();
+            deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
+            const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
+            
+            const payload = {
+                studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
+                status,
+                timestampMasuk: Timestamp.fromDate(now),
+                timestampPulang: null,
+                recordDate: Timestamp.fromDate(now),
+            };
+
+            try {
+                if (existingRecord?.id) {
+                    await updateDoc(doc(db, "attendance", existingRecord.id), payload);
+                    setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
+                } else {
+                    const docRef = await addDoc(collection(db, "attendance"), payload);
+                    setAttendanceData(prev => ({...prev, [student.id]: { id: docRef.id, ...payload }}));
+                }
+                addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
+                toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
+            } catch (error) {
+                 addLog(`Gagal menyimpan absensi untuk ${student.nama}.`, 'error');
+                 toast({ variant: "destructive", title: "Gagal Menyimpan" });
+            }
+        } 
+        // --- Logic for Clock-out ---
+        else if (!existingRecord.timestampPulang) {
+            if (now < jamPulangTime) {
+                addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
+                toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
+                return;
+            }
+             const payload = { timestampPulang: Timestamp.fromDate(now) };
+             try {
+                await updateDoc(doc(db, "attendance", existingRecord.id), payload);
+                setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
+                addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
+                toast({ title: "Absen Pulang Berhasil" });
+             } catch (error) {
+                addLog(`Gagal menyimpan absen pulang untuk ${student.nama}.`, 'error');
+                toast({ variant: "destructive", title: "Gagal Menyimpan" });
+             }
+        } else {
+            addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
+            toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
         }
     }
 
@@ -252,33 +282,28 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         if (!student) return;
 
         const now = new Date();
-        const newTimestamp = Timestamp.fromDate(now);
-        const newRecordPayload = {
-            studentId: student.id,
-            nisn: student.nisn,
-            studentName: student.nama,
-            classId: student.classId,
-            status: status,
-            timestamp: newTimestamp,
-        }
+        const existingRecord = attendanceData[studentId];
+        
+        const payload: Omit<AttendanceRecord, 'id'> = {
+            studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
+            status,
+            timestampMasuk: null,
+            timestampPulang: null,
+            recordDate: existingRecord?.recordDate || Timestamp.fromDate(now),
+        };
 
         try {
-            const existingRecord = attendanceData[studentId];
             let docId = existingRecord?.id;
-            
             if (docId) {
-                // Update the existing document
-                const docRef = doc(db, "attendance", docId);
-                await updateDoc(docRef, newRecordPayload);
+                await updateDoc(doc(db, "attendance", docId), payload);
             } else {
-                // Add a new document
-                const docRef = await addDoc(collection(db, "attendance"), newRecordPayload);
+                const docRef = await addDoc(collection(db, "attendance"), payload);
                 docId = docRef.id;
             }
 
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { id: docId, status, timestamp: newTimestamp }
+                [student.id]: { id: docId, ...payload }
             }));
 
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
@@ -286,22 +311,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
-            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan pada database." });
+            toast({ variant: "destructive", title: "Gagal Menyimpan" });
         }
     }
 
-    const sortedStudents = useMemo(() => {
-       return [...allStudents].sort((a, b) => {
-            const classA = classMap.get(a.classId)?.name || '';
-            const classB = classMap.get(b.classId)?.name || '';
-            if (classA < classB) return -1;
-            if (classA > classB) return 1;
-            return a.nama.localeCompare(b.nama);
-        })
-    }, [allStudents, classMap]);
-
-    const getStudentStatus = (studentId: string): AttendanceRecord => {
-        return attendanceData[studentId] || { status: 'Belum Absen', timestamp: Timestamp.now() };
+    const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
+        return attendanceData[studentId] || { status: 'Belum Absen' };
     }
 
   return (
@@ -309,7 +324,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Pindai barcode siswa untuk mencatat kehadiran.</p>
+            <p className="text-muted-foreground">Pindai barcode untuk absen masuk & pulang.</p>
             </div>
         </div>
 
@@ -318,13 +333,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardHeader>
                     <CardTitle>Pemindai Barcode / QR Code</CardTitle>
                     <CardDescription>
-                        Gunakan pemindai USB untuk memasukkan NISN siswa.
+                        Arahkan pemindai ke barcode siswa untuk mencatat absensi.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <Input
                         ref={scannerInputRef}
-                        placeholder={isLoading ? "Memuat data siswa..." : "Arahkan pemindai barcode..."}
+                        placeholder={isLoading ? "Memuat data..." : "Tunggu pemindaian NISN..."}
                         disabled={isLoading}
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
@@ -374,11 +389,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     <Table>
                     <TableHeader>
                         <TableRow>
-                        <TableHead className="w-[150px]">NISN</TableHead>
+                        <TableHead className="w-[120px]">NISN</TableHead>
                         <TableHead>Nama Siswa</TableHead>
                         <TableHead>Kelas</TableHead>
-                        <TableHead className="w-[150px] text-center">Status</TableHead>
-                        <TableHead className="w-[150px] text-center">Jam Absen</TableHead>
+                        <TableHead className="w-[120px] text-center">Status</TableHead>
+                        <TableHead className="w-[120px] text-center">Jam Masuk</TableHead>
+                        <TableHead className="w-[120px] text-center">Jam Pulang</TableHead>
                         <TableHead className="w-[50px] text-right">Aksi</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -392,11 +408,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                             </TableRow>
                         ))
                         ) : sortedStudents.length > 0 ? (
                             sortedStudents.map((student) => {
-                                const { status, timestamp } = getStudentStatus(student.id);
+                                const { status, timestampMasuk, timestampPulang } = getAttendanceRecord(student.id);
                                 const studentClass = classMap.get(student.classId);
                                 return (
                                     <TableRow key={student.id} data-status={status}>
@@ -404,10 +421,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                         <TableCell className="font-medium">{student.nama}</TableCell>
                                         <TableCell>{studentClass?.name || 'N/A'}</TableCell>
                                         <TableCell className="text-center">
-                                            <Badge variant={statusBadgeVariant[status]}>{status}</Badge>
+                                            <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
                                         </TableCell>
                                         <TableCell className="text-center font-mono">
-                                            {status !== 'Belum Absen' ? format(timestamp.toDate(), "HH:mm:ss") : "--:--:--"}
+                                            {timestampMasuk ? format(timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
+                                        </TableCell>
+                                        <TableCell className="text-center font-mono">
+                                            {timestampPulang ? format(timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <DropdownMenu>
@@ -430,7 +450,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             })
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={6} className="h-24 text-center">
+                                <TableCell colSpan={7} className="h-24 text-center">
                                     Tidak ada siswa terdaftar untuk Kelas {grade}.
                                 </TableCell>
                             </TableRow>
