@@ -25,13 +25,73 @@ type ThemeSettings = {
     accent: string;
 }
 
+// --- Color Conversion Utilities ---
+function hslStringToHex(hslString: string): string {
+    const [h, s, l] = hslString.split(" ").map(val => parseFloat(val.replace('%', '')));
+    const s_norm = s / 100;
+    const l_norm = l / 100;
+    const c = (1 - Math.abs(2 * l_norm - 1)) * s_norm;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = l_norm - c / 2;
+    let r = 0, g = 0, b = 0;
+
+    if (h >= 0 && h < 60) { [r, g, b] = [c, x, 0]; }
+    else if (h >= 60 && h < 120) { [r, g, b] = [x, c, 0]; }
+    else if (h >= 120 && h < 180) { [r, g, b] = [0, c, x]; }
+    else if (h >= 180 && h < 240) { [r, g, b] = [0, x, c]; }
+    else if (h >= 240 && h < 300) { [r, g, b] = [x, 0, c]; }
+    else if (h >= 300 && h < 360) { [r, g, b] = [c, 0, x]; }
+
+    const toHex = (c: number) => {
+        const hex = Math.round((c + m) * 255).toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+    };
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function hexToHslString(hex: string): string {
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 4) {
+        r = parseInt(hex[1] + hex[1], 16);
+        g = parseInt(hex[2] + hex[2], 16);
+        b = parseInt(hex[3] + hex[3], 16);
+    } else if (hex.length === 7) {
+        r = parseInt(hex.substring(1, 3), 16);
+        g = parseInt(hex.substring(3, 5), 16);
+        b = parseInt(hex.substring(5, 7), 16);
+    }
+    r /= 255; g /= 255; b /= 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0, s = 0, l = (max + min) / 2;
+
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    
+    h = Math.round(h * 360);
+    s = Math.round(s * 100);
+    l = Math.round(l * 100);
+
+    return `${h} ${s}% ${l}%`;
+}
+
+
 export default function AppSettingsPage() {
     const [appName, setAppName] = useState("")
     const [logoUrl, setLogoUrl] = useState<string | null>(null)
     const [theme, setTheme] = useState<ThemeSettings>({
-        primary: "222.2 47.4% 11.2%",
-        background: "0 0% 98%",
-        accent: "351 100% 89%",
+        primary: "#0f172a",
+        background: "#fafafa",
+        accent: "#ffb6c1",
     })
     const [isSaving, setIsSaving] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
@@ -48,7 +108,11 @@ export default function AppSettingsPage() {
                     setAppName(data.appName || "AbTrack")
                     setLogoUrl(data.logoUrl || null)
                     if (data.theme) {
-                        setTheme(data.theme)
+                         setTheme({
+                            primary: hslStringToHex(data.theme.primary),
+                            background: hslStringToHex(data.theme.background),
+                            accent: hslStringToHex(data.theme.accent),
+                        });
                     }
                 } else {
                     setAppName("AbTrack")
@@ -78,37 +142,42 @@ export default function AppSettingsPage() {
         }
     }
 
-    const handleThemeChange = (e: ChangeEvent<HTMLInputElement>) => {
-        const { id, value } = e.target
+    const handleThemeChange = (id: keyof ThemeSettings, value: string) => {
         setTheme(prev => ({ ...prev, [id]: value }))
     }
 
     const handleSave = async () => {
-        setIsSaving(true)
+        setIsSaving(true);
         try {
-            const docRef = doc(db, "settings", "appConfig")
-            await setDoc(docRef, { appName, logoUrl, theme }, { merge: true })
+            const themeToSave = {
+                primary: hexToHslString(theme.primary),
+                background: hexToHslString(theme.background),
+                accent: hexToHslString(theme.accent),
+            };
+
+            const docRef = doc(db, "settings", "appConfig");
+            await setDoc(docRef, { appName, logoUrl, theme: themeToSave }, { merge: true });
 
             // Apply theme immediately
-            document.documentElement.style.setProperty('--primary', theme.primary);
-            document.documentElement.style.setProperty('--background', theme.background);
-            document.documentElement.style.setProperty('--accent', theme.accent);
+            document.documentElement.style.setProperty('--primary', themeToSave.primary);
+            document.documentElement.style.setProperty('--background', themeToSave.background);
+            document.documentElement.style.setProperty('--accent', themeToSave.accent);
 
             toast({
                 title: "Pengaturan Disimpan",
                 description: "Informasi aplikasi dan tema telah berhasil diperbarui.",
-            })
+            });
         } catch (error) {
-            console.error("Error saving settings:", error)
+            console.error("Error saving settings:", error);
             toast({
                 variant: "destructive",
                 title: "Gagal menyimpan",
                 description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
-            })
+            });
         } finally {
-            setIsSaving(false)
+            setIsSaving(false);
         }
-    }
+    };
 
   return (
     <div className="flex flex-col gap-6">
@@ -168,7 +237,7 @@ export default function AppSettingsPage() {
         <CardHeader>
           <CardTitle>Tema & Tampilan</CardTitle>
           <CardDescription>
-            Ubah skema warna aplikasi. Anda dapat menggunakan HSL color picker online untuk mendapatkan nilai warna.
+            Ubah skema warna aplikasi menggunakan pemilih warna di bawah ini.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -182,22 +251,31 @@ export default function AppSettingsPage() {
             ) : (
                 <>
                 <div className="space-y-2">
-                    <Label htmlFor="primary">Warna Primer (HSL)</Label>
-                    <Input id="primary" value={theme.primary} onChange={handleThemeChange} placeholder="Contoh: 222.2 47.4% 11.2%" />
+                    <Label htmlFor="primary">Warna Primer</Label>
+                    <div className="flex items-center gap-2 border rounded-md pr-2">
+                       <Input type="color" value={theme.primary} onChange={(e) => handleThemeChange('primary', e.target.value)} className="h-auto w-12 p-1 border-0" />
+                       <Input id="primary" value={theme.primary} onChange={(e) => handleThemeChange('primary', e.target.value)} className="border-0 focus-visible:ring-0"/>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                        Warna utama untuk tombol dan elemen penting lainnya.
+                        Warna utama untuk tombol dan elemen penting.
                     </p>
                 </div>
                 <div className="space-y-2">
-                    <Label htmlFor="background">Warna Background (HSL)</Label>
-                    <Input id="background" value={theme.background} onChange={handleThemeChange} placeholder="Contoh: 0 0% 98%" />
+                    <Label htmlFor="background">Warna Background</Label>
+                    <div className="flex items-center gap-2 border rounded-md pr-2">
+                       <Input type="color" value={theme.background} onChange={(e) => handleThemeChange('background', e.target.value)} className="h-auto w-12 p-1 border-0" />
+                       <Input id="background" value={theme.background} onChange={(e) => handleThemeChange('background', e.target.value)} className="border-0 focus-visible:ring-0"/>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                         Warna latar belakang utama aplikasi.
                     </p>
                 </div>
                 <div className="space-y-2">
-                    <Label htmlFor="accent">Warna Aksen (HSL)</Label>
-                    <Input id="accent" value={theme.accent} onChange={handleThemeChange} placeholder="Contoh: 351 100% 89%" />
+                    <Label htmlFor="accent">Warna Aksen</Label>
+                    <div className="flex items-center gap-2 border rounded-md pr-2">
+                       <Input type="color" value={theme.accent} onChange={(e) => handleThemeChange('accent', e.target.value)} className="h-auto w-12 p-1 border-0" />
+                       <Input id="accent" value={theme.accent} onChange={(e) => handleThemeChange('accent', e.target.value)} className="border-0 focus-visible:ring-0"/>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                         Warna untuk sorotan, seperti saat hover.
                     </p>
