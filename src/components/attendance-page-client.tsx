@@ -5,7 +5,7 @@ import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, upda
 import { Html5Qrcode } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { notifyParentOnAttendance } from "@/ai/flows/telegram-flow"
+import { notifyParentOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/telegram-flow"
 import {
   Card,
   CardContent,
@@ -115,42 +115,66 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [attendanceData]);
 
     useEffect(() => {
-        // Initialize AudioContext on the client side
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        // Initialize AudioContext on the client side after a user interaction
+        const initAudio = () => {
+            if (!audioContextRef.current) {
+                try {
+                    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+                } catch(e) {
+                    console.error("Web Audio API is not supported in this browser");
+                }
+            }
+            document.removeEventListener('click', initAudio);
+            document.removeEventListener('keydown', initAudio);
+        };
+        document.addEventListener('click', initAudio);
+        document.addEventListener('keydown', initAudio);
+
+        return () => {
+            document.removeEventListener('click', initAudio);
+            document.removeEventListener('keydown', initAudio);
+        }
     }, []);
 
     const playSound = useCallback((type: 'success' | 'error') => {
         const audioCtx = audioContextRef.current;
         if (!audioCtx) return;
 
-        // Browsers require user interaction to start AudioContext.
-        // We resume it here to be safe.
         if (audioCtx.state === 'suspended') {
             audioCtx.resume();
         }
 
         const oscillator = audioCtx.createOscillator();
         const gainNode = audioCtx.createGain();
-
         oscillator.connect(gainNode);
         gainNode.connect(audioCtx.destination);
 
         if (type === 'success') {
             oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // High-pitched beep
-            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime); // Gain < 1 to prevent clipping
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.2);
+            oscillator.frequency.setValueAtTime(1046.50, audioCtx.currentTime); // High C note for a clear bell sound
+            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime); // High volume
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5); // Decay over 1.5 seconds
             oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.2);
+            oscillator.stop(audioCtx.currentTime + 1.5);
         } else { // error
-            oscillator.type = 'square';
-            oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Low-pitched buzz
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+            oscillator.type = 'sawtooth'; // A more grating, "buzzy" sound for errors
+            oscillator.frequency.setValueAtTime(164.81, audioCtx.currentTime); // Low E note
+            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime); // High volume
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
             oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 0.3);
+            oscillator.stop(audioCtx.currentTime + 1.5);
         }
     }, []);
+
+    const serializableRecordForTele = (record: AttendanceRecord): SerializableAttendanceRecord => {
+        return {
+            ...record,
+            id: record.id ?? undefined,
+            timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
+            timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
+            recordDate: record.recordDate.toDate().toISOString(),
+        }
+    }
 
     useEffect(() => {
         async function fetchData() {
@@ -320,13 +344,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
                 playSound('success');
                 
-                const serializableRecord = {
-                    ...newRecord,
-                    timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                    timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
-                    recordDate: newRecord.recordDate.toDate().toISOString(),
-                };
-                notifyParentOnAttendance(serializableRecord);
+                notifyParentOnAttendance(serializableRecordForTele(newRecord));
             } 
             // --- Logic for Clock-out ---
             else if (!existingRecord.timestampPulang) {
@@ -345,14 +363,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  toast({ title: "Absen Pulang Berhasil" });
                  playSound('success');
                 
-                const serializableRecord = {
-                    ...updatedRecord,
-                    id: updatedRecord.id!,
-                    timestampMasuk: updatedRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                    timestampPulang: updatedRecord.timestampPulang?.toDate().toISOString() ?? null,
-                    recordDate: updatedRecord.recordDate.toDate().toISOString(),
-                };
-                 notifyParentOnAttendance(serializableRecord);
+                 notifyParentOnAttendance(serializableRecordForTele(updatedRecord as AttendanceRecord));
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
@@ -467,13 +478,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
             
-            const serializableRecord = {
-                ...newRecord,
-                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
-                recordDate: newRecord.recordDate.toDate().toISOString(),
-            };
-            notifyParentOnAttendance(serializableRecord);
+            notifyParentOnAttendance(serializableRecordForTele(newRecord));
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');

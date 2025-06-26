@@ -37,7 +37,7 @@ type AttendanceRecord = {
 };
 
 // New type for Server Action to avoid non-plain objects
-type SerializableAttendanceRecord = {
+export type SerializableAttendanceRecord = {
   id?: string
   studentId: string
   nisn: string
