@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 type ReportSettings = {
   title: string
+  reportLocation: string
   signatoryName: string
   signatoryNpa: string
   principalName: string
@@ -32,6 +33,7 @@ type ReportSettings = {
 export default function LaporanPage() {
   const [settings, setSettings] = useState<ReportSettings>({
     title: "",
+    reportLocation: "",
     signatoryName: "",
     signatoryNpa: "",
     principalName: "",
@@ -53,6 +55,7 @@ export default function LaporanPage() {
         } else {
             setSettings({
                 title: "Laporan E-Absensi SMAS PGRI Naringgul",
+                reportLocation: "Naringgul",
                 signatoryName: "(.........................)",
                 signatoryNpa: "NPA: .....................",
                 principalName: "(.........................)",
@@ -166,6 +169,10 @@ export default function LaporanPage() {
                     <div className="space-y-2">
                         <Label htmlFor="title">Judul / Kop Laporan</Label>
                         <Textarea id="title" placeholder="Contoh: Laporan Kehadiran Siswa&#10;SMK Teknologi Bangsa" value={settings.title} onChange={handleChange} />
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="reportLocation">Lokasi Laporan</Label>
+                        <Input id="reportLocation" placeholder="Contoh: Jakarta, Bandung" value={settings.reportLocation} onChange={handleChange} />
                     </div>
                 </div>
                 

@@ -61,6 +61,7 @@ type AttendanceRecord = {
 type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
 type ReportConfig = {
     title: string;
+    reportLocation: string;
     signatoryName: string;
     signatoryNpa: string;
     principalName: string;
@@ -227,7 +228,7 @@ export default function AbsensiPage() {
       doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
 
       // Right side: Officer
-      doc.text("Naringgul, " + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
+      doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
       doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
       doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
       doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
