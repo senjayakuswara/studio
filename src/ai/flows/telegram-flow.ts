@@ -5,10 +5,10 @@
  * - notifyParentOnAttendance: Sends daily attendance notifications to parents.
  * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
  * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
- * - testTelegramConnection: Tests the validity of a bot token.
+ * - syncTelegramMessages: Fetches and processes new messages from Telegram upon manual request.
  */
 
-import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
@@ -101,9 +101,9 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
 }
 
 /**
- * Processes incoming webhook requests from Telegram.
+ * Processes a single incoming update (message) from Telegram.
  * Handles user registration by matching NISN to a student.
- * @param payload The request body from the Telegram webhook.
+ * @param payload The update object from Telegram.
  */
 export async function processTelegramWebhook(payload: any) {
     const botToken = getBotToken();
@@ -114,7 +114,7 @@ export async function processTelegramWebhook(payload: any) {
 
     const message = payload.message || payload.edited_message;
     if (!message) {
-        console.log("Received a non-message update, skipping:", payload);
+        // This is not a message we can process (e.g., a channel post update). Skip.
         return;
     }
 
@@ -122,7 +122,7 @@ export async function processTelegramWebhook(payload: any) {
     const text = message.text?.trim();
 
     if (!chatId || !text) {
-        console.log("Update does not have a chat ID or text, skipping:", message);
+        // Not a text message we can process. Skip.
         return;
     }
 
@@ -342,26 +342,59 @@ export async function sendClassMonthlyRecap(
 
 
 /**
- * Tests the connection to the Telegram API using the bot token from environment variables.
+ * Fetches new messages from Telegram, processes them, and updates the last processed ID.
+ * This is an alternative to using webhooks, triggered manually by the user.
  * @returns An object indicating success or failure, with a message.
  */
-export async function testTelegramConnection(): Promise<{ success: boolean; message: string }> {
+export async function syncTelegramMessages(): Promise<{ success: boolean; message: string }> {
     const botToken = getBotToken();
     if (!botToken) {
-        return { success: false, message: "Variabel lingkungan TELEGRAM_BOT_TOKEN belum diatur di server." };
+        return { success: false, message: "Token bot tidak diatur di file .env server." };
     }
-    const url = `https://api.telegram.org/bot${botToken}/getMe`;
+
+    // 1. Get last processed update_id
+    const stateDocRef = doc(db, "settings", "telegramState");
+    const stateDocSnap = await getDoc(stateDocRef);
+    const lastUpdateId = stateDocSnap.exists() ? stateDocSnap.data().lastUpdateId || 0 : 0;
+    const offset = lastUpdateId + 1;
+
+    // 2. Fetch updates from Telegram using the getUpdates method
+    const url = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=10`;
+    let updates: any[] = [];
     try {
         const response = await fetch(url);
         const data = await response.json();
-        
-        if (data.ok) {
-            return { success: true, message: `Koneksi berhasil! Terhubung dengan bot: ${data.result.first_name} (@${data.result.username}).` };
-        } else {
-            return { success: false, message: `Gagal terhubung ke Telegram: ${data.description || 'Unknown error'}` };
+        if (!data.ok) {
+            console.error("Telegram getUpdates API Error:", data.description);
+            return { success: false, message: `Gagal mengambil pesan: ${data.description}` };
         }
+        updates = data.result;
     } catch (error) {
-        console.error("Failed to test Telegram connection:", error);
-        return { success: false, message: "Gagal terhubung ke server Telegram. Periksa koneksi internet Anda." };
+        console.error("Failed to fetch Telegram updates:", error);
+        return { success: false, message: "Gagal terhubung ke server Telegram. Periksa koneksi jaringan server." };
     }
+
+    if (updates.length === 0) {
+        return { success: true, message: "Tidak ada pesan baru untuk diproses." };
+    }
+
+    // 3. Process each update sequentially
+    let highestUpdateId = lastUpdateId;
+    for (const update of updates) {
+        try {
+            // processTelegramWebhook is designed to handle one update object at a time
+            await processTelegramWebhook(update); 
+        } catch (e) {
+            console.error(`Error processing update ID ${update.update_id}:`, e);
+            // Continue to the next update even if one fails
+        }
+        highestUpdateId = Math.max(highestUpdateId, update.update_id);
+    }
+
+    // 4. Save the new highest update_id to prevent re-processing
+    if (highestUpdateId > lastUpdateId) {
+        await setDoc(stateDocRef, { lastUpdateId: highestUpdateId }, { merge: true });
+    }
+
+    return { success: true, message: `Berhasil memproses ${updates.length} pesan baru.` };
 }

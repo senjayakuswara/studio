@@ -16,7 +16,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { testTelegramConnection } from "@/ai/flows/telegram-flow"
+import { syncTelegramMessages } from "@/ai/flows/telegram-flow"
 
 const telegramSettingsSchema = z.object({
   groupChatId: z.string().optional().describe("Untuk notifikasi rekap ke grup wali kelas"),
@@ -29,7 +29,7 @@ type TelegramSettings = z.infer<typeof telegramSettingsSchema>;
 
 export default function NotifikasiPage() {
     const [isLoading, setIsLoading] = useState(true);
-    const [isTesting, setIsTesting] = useState(false);
+    const [isSyncing, setIsSyncing] = useState(false);
     const { toast } = useToast();
 
     const form = useForm<TelegramSettings>({
@@ -82,23 +82,27 @@ export default function NotifikasiPage() {
         }
     }
 
-    async function handleTestConnection() {
-        setIsTesting(true);
-        const result = await testTelegramConnection();
+    async function handleSyncMessages() {
+        setIsSyncing(true);
+        toast({
+            title: "Memeriksa Pesan...",
+            description: "Menghubungi server Telegram untuk mengambil pesan baru.",
+        });
+        const result = await syncTelegramMessages();
 
         if (result.success) {
             toast({
-                title: "Koneksi Berhasil",
+                title: "Sinkronisasi Selesai",
                 description: result.message,
             });
         } else {
             toast({
                 variant: "destructive",
-                title: "Koneksi Gagal",
+                title: "Sinkronisasi Gagal",
                 description: result.message,
             });
         }
-        setIsTesting(false);
+        setIsSyncing(false);
     }
 
     return (
@@ -111,9 +115,9 @@ export default function NotifikasiPage() {
             </div>
              <Alert>
                 <Info className="h-4 w-4" />
-                <AlertTitle>Konfigurasi Token Bot</AlertTitle>
+                <AlertTitle>Konfigurasi Token Bot & Pesan Masuk</AlertTitle>
                 <AlertDescription>
-                  Token Bot Telegram Anda sekarang dikelola melalui environment variable di server untuk keamanan yang lebih baik. Jika Anda perlu mengubah token, silakan perbarui variabel `TELEGRAM_BOT_TOKEN` di pengaturan hosting Anda.
+                  Token Bot Telegram dikelola melalui `TELEGRAM_BOT_TOKEN` di server. Untuk memproses pendaftaran orang tua baru, klik tombol **Periksa Pesan Baru**.
                 </AlertDescription>
             </Alert>
             <Form {...form}>
@@ -221,11 +225,11 @@ export default function NotifikasiPage() {
                         <Button
                            variant="outline"
                            type="button"
-                           onClick={handleTestConnection}
-                           disabled={isTesting || isLoading || form.formState.isSubmitting}
+                           onClick={handleSyncMessages}
+                           disabled={isSyncing || isLoading || form.formState.isSubmitting}
                         >
-                            {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Test Notifikasi
+                            {isSyncing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Periksa Pesan Baru
                         </Button>
                         <Button type="submit" disabled={form.formState.isSubmitting || isLoading}>
                           {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
