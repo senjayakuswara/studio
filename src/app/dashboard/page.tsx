@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Users, UserCheck, UserX, Clock, UserCog } from "lucide-react"
+import { Users, UserCheck, UserX, Clock, UserCog, HeartPulse, FileText } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
@@ -43,18 +43,22 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
 type DashboardStats = {
   totalStudents: number
   presentToday: number
-  permissionOrSick: number
   lateToday: number
   alfaToday: number
+  sickToday: number
+  permissionToday: number
+  dispensationToday: number
 }
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     totalStudents: 0,
     presentToday: 0,
-    permissionOrSick: 0,
     lateToday: 0,
     alfaToday: 0,
+    sickToday: 0,
+    permissionToday: 0,
+    dispensationToday: 0,
   })
   const [recentActivities, setRecentActivities] = useState<AttendanceRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -83,26 +87,45 @@ export default function DashboardPage() {
         const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
 
         let presentToday = 0
-        let permissionOrSick = 0
         let lateToday = 0
         let alfaToday = 0
+        let sickToday = 0
+        let permissionToday = 0
+        let dispensationToday = 0
 
         records.forEach(record => {
-          if (record.status === "Hadir" || record.status === "Terlambat") {
-            presentToday++
-          }
-          if (record.status === "Sakit" || record.status === "Izin" || record.status === "Dispen") {
-            permissionOrSick++
-          }
-          if (record.status === "Terlambat") {
-            lateToday++
-          }
-          if (record.status === "Alfa") {
-              alfaToday++
-          }
+            switch(record.status) {
+                case "Hadir":
+                    presentToday++;
+                    break;
+                case "Terlambat":
+                    presentToday++;
+                    lateToday++;
+                    break;
+                case "Sakit":
+                    sickToday++;
+                    break;
+                case "Izin":
+                    permissionToday++;
+                    break;
+                case "Dispen":
+                    dispensationToday++;
+                    break;
+                case "Alfa":
+                    alfaToday++;
+                    break;
+            }
         })
         
-        setStats({ totalStudents, presentToday, permissionOrSick, lateToday, alfaToday })
+        setStats({ 
+            totalStudents, 
+            presentToday, 
+            lateToday, 
+            alfaToday, 
+            sickToday, 
+            permissionToday,
+            dispensationToday
+        })
 
         // Fetch recent activities
         const recentActivityQuery = query(
@@ -142,9 +165,9 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {isLoading ? (
-          [...Array(5)].map((_, i) => (
+          [...Array(7)].map((_, i) => (
              <Card key={i}>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <Skeleton className="h-5 w-2/3" />
@@ -184,18 +207,6 @@ export default function DashboardPage() {
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Izin / Sakit / Dispen</CardTitle>
-                <UserCog className="h-4 w-4 text-yellow-500" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.permissionOrSick}</div>
-                <p className="text-xs text-muted-foreground">
-                  Total absensi dengan keterangan
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Terlambat</CardTitle>
                 <Clock className="h-4 w-4 text-orange-500" />
               </CardHeader>
@@ -215,6 +226,42 @@ export default function DashboardPage() {
                 <div className="text-2xl font-bold">{stats.alfaToday}</div>
                 <p className="text-xs text-muted-foreground">
                   Siswa tidak hadir tanpa keterangan
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Sakit</CardTitle>
+                <HeartPulse className="h-4 w-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.sickToday}</div>
+                <p className="text-xs text-muted-foreground">
+                  Siswa dengan keterangan sakit
+                </p>
+              </CardContent>
+            </Card>
+             <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Izin</CardTitle>
+                <FileText className="h-4 w-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.permissionToday}</div>
+                <p className="text-xs text-muted-foreground">
+                  Siswa dengan keterangan izin
+                </p>
+              </CardContent>
+            </Card>
+             <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Dispen</CardTitle>
+                <UserCog className="h-4 w-4 text-yellow-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.dispensationToday}</div>
+                <p className="text-xs text-muted-foreground">
+                  Siswa dengan dispensasi
                 </p>
               </CardContent>
             </Card>
