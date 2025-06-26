@@ -167,21 +167,28 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
 
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     const classInfo = classSnap.data() as Class;
-
+    
+    const now = new Date();
     let timestamp: Date;
     let title: string;
     const finalStatus = isClockOut ? 'Pulang' : record.status;
 
-    if (isClockOut && record.timestampPulang) {
+    // Special handling for manual statuses (Sakit, Izin, etc.)
+    if (['Sakit', 'Izin', 'Alfa', 'Dispen'].includes(record.status)) {
+        timestamp = now; // Use current time for manual status changes
+        title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
+    } else if (isClockOut && record.timestampPulang) {
         timestamp = new Date(record.timestampPulang);
         title = `Absensi Pulang: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else if (record.timestampMasuk) {
         timestamp = new Date(record.timestampMasuk);
         title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else {
+        // Fallback for unexpected cases
         timestamp = new Date(record.recordDate);
         title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     }
+
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
