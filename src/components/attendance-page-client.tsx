@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, writeBatch } from "firebase/firestore"
+import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -263,21 +263,22 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
 
         try {
-            const existingRecord = attendanceData[student.id];
+            const existingRecord = attendanceData[studentId];
+            let docId = existingRecord?.id;
             
-            if (existingRecord?.id) {
+            if (docId) {
                 // Update the existing document
-                const docRef = doc(db, "attendance", existingRecord.id);
-                await writeBatch(db).update(docRef, newRecordPayload).commit();
+                const docRef = doc(db, "attendance", docId);
+                await updateDoc(docRef, newRecordPayload);
             } else {
                 // Add a new document
                 const docRef = await addDoc(collection(db, "attendance"), newRecordPayload);
-                existingRecord.id = docRef.id;
+                docId = docRef.id;
             }
 
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { ...prev[student.id], status, timestamp: newTimestamp }
+                [student.id]: { id: docId, status, timestamp: newTimestamp }
             }));
 
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
