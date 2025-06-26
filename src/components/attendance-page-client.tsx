@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, startOfDay, endOfDay } from "firebase/firestore"
+import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -37,7 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MoreHorizontal, Activity, ShieldAlert, CheckCircle2, Clock, Info, BookUser } from "lucide-react"
-import { format } from "date-fns"
+import { format, startOfDay, endOfDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 
 // Types
@@ -243,12 +243,47 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         // For now, this only updates the UI state.
         // TODO: Save to Firestore and send notifications.
         const now = new Date();
-        setAttendanceData(prev => ({
-            ...prev,
-            [student.id]: { status, timestamp: Timestamp.fromDate(now) }
-        }));
-        addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
-        toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
+        const newRecord = {
+            studentId: student.id,
+            nisn: student.nisn,
+            studentName: student.nama,
+            classId: student.classId,
+            status: status,
+            timestamp: Timestamp.fromDate(now),
+        }
+
+        try {
+             // Check if a record for today already exists
+            const todayStart = startOfDay(new Date());
+            const todayEnd = endOfDay(new Date());
+            const attendanceQuery = query(
+                collection(db, "attendance"),
+                where("studentId", "==", studentId),
+                where("timestamp", ">=", todayStart),
+                where("timestamp", "<=", todayEnd)
+            );
+            const querySnapshot = await getDocs(attendanceQuery);
+
+            if (!querySnapshot.empty) {
+                // Update the existing document
+                const docId = querySnapshot.docs[0].id;
+                await doc(db, "attendance", docId).set(newRecord, { merge: true });
+            } else {
+                // Add a new document
+                await addDoc(collection(db, "attendance"), newRecord);
+            }
+
+            setAttendanceData(prev => ({
+                ...prev,
+                [student.id]: { status, timestamp: newRecord.timestamp }
+            }));
+            addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
+            toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
+        } catch (error) {
+            console.error("Error updating manual attendance: ", error);
+            addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
+            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan pada database." });
+        }
     }
 
     const filteredStudents = useMemo(() => {
@@ -363,7 +398,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         {isLoading ? (
                         [...Array(5)].map((_, i) => (
                             <TableRow key={i}>
-                                <TableCell colSpan={5}><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                             </TableRow>
                         ))
                         ) : selectedClassId ? (
