@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react"
 import { doc, getDoc, setDoc } from "firebase/firestore"
-import { Loader2 } from "lucide-react"
+import { Loader2, Clock } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -117,21 +117,29 @@ export default function JamPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="jamMasuk">Jam Masuk</Label>
-                  <Input
-                    id="jamMasuk"
-                    type="time"
-                    value={settings.jamMasuk}
-                    onChange={handleChange}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="jamMasuk"
+                      type="time"
+                      className="pr-10"
+                      value={settings.jamMasuk}
+                      onChange={handleChange}
+                    />
+                     <Clock className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="jamPulang">Jam Pulang</Label>
-                  <Input
-                    id="jamPulang"
-                    type="time"
-                    value={settings.jamPulang}
-                    onChange={handleChange}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="jamPulang"
+                      type="time"
+                      className="pr-10"
+                      value={settings.jamPulang}
+                      onChange={handleChange}
+                    />
+                    <Clock className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  </div>
                 </div>
               </div>
               <div className="space-y-2">
