@@ -301,6 +301,77 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
     
+    const handleScanRef = useRef(handleScan);
+    useEffect(() => {
+        handleScanRef.current = handleScan;
+    }, [handleScan]);
+
+    useEffect(() => {
+        if (scanMode !== 'camera') {
+            if (html5QrCodeRef.current?.isScanning) {
+                html5QrCodeRef.current.stop().catch(err => console.warn("Gagal menghentikan pemindai.", err));
+            }
+            return;
+        }
+
+        setIsCameraInitializing(true);
+        setCameraError(null);
+
+        const qrCodeScanner = new Html5Qrcode(scannerContainerId);
+        html5QrCodeRef.current = qrCodeScanner;
+
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            rememberLastUsedCamera: true
+        };
+
+        const successCallback = (decodedText: string) => {
+            handleScanRef.current(decodedText);
+            if (qrCodeScanner.getState() === Html5QrcodeScannerState.SCANNING) {
+                qrCodeScanner.pause(true).catch(err => console.warn("Gagal menjeda pemindai", err));
+                setTimeout(() => {
+                    if (qrCodeScanner.getState() === Html5QrcodeScannerState.PAUSED) {
+                        qrCodeScanner.resume().catch(err => console.warn("Gagal melanjutkan pemindai", err));
+                    }
+                }, 2000);
+            }
+        };
+
+        qrCodeScanner.start(
+            { facingMode: "user" },
+            config,
+            successCallback,
+            (errorMessage) => { /* Optional error callback */ }
+        )
+        .then(() => {
+            setIsCameraInitializing(false);
+        })
+        .catch((err) => {
+            const errorMessage = err?.message || String(err);
+            setCameraError(errorMessage);
+            addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
+            toast({
+                variant: 'destructive',
+                title: 'Gagal Mengakses Kamera',
+                description: 'Harap berikan izin kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.'
+            });
+            setIsCameraInitializing(false);
+        });
+
+        return () => {
+            if (html5QrCodeRef.current?.isScanning) {
+                html5QrCodeRef.current.stop().catch(err => {
+                    console.warn("Gagal menghentikan pemindai saat cleanup.", err);
+                });
+            }
+        };
+    }, [scanMode, scannerContainerId, addLog, toast]);
+
+    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
+        return attendanceData[studentId] || {};
+    }, [attendanceData]);
+
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
         if (!student) return;
@@ -340,77 +411,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             toast({ variant: "destructive", title: "Gagal Menyimpan" });
         }
     }
-    
-    const handleScanRef = useRef(handleScan);
-    useEffect(() => {
-        handleScanRef.current = handleScan;
-    }, [handleScan]);
-
-    useEffect(() => {
-        if (scanMode !== 'camera') {
-            if (html5QrCodeRef.current?.isScanning) {
-                html5QrCodeRef.current.stop().catch(err => console.error("Gagal menghentikan pemindai.", err));
-            }
-            return;
-        }
-
-        setIsCameraInitializing(true);
-        setCameraError(null);
-
-        const qrCodeScanner = new Html5Qrcode(scannerContainerId);
-        html5QrCodeRef.current = qrCodeScanner;
-
-        const config = {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            rememberLastUsedCamera: true
-        };
-
-        const successCallback = (decodedText: string) => {
-            handleScanRef.current(decodedText);
-            if (qrCodeScanner.getState() === Html5QrcodeScannerState.SCANNING) {
-                qrCodeScanner.pause(true);
-                setTimeout(() => {
-                    if (qrCodeScanner.getState() === Html5QrcodeScannerState.PAUSED) {
-                        qrCodeScanner.resume();
-                    }
-                }, 2000);
-            }
-        };
-
-        qrCodeScanner.start(
-            { facingMode: "user" },
-            config,
-            successCallback,
-            (errorMessage) => { /* Optional error callback */ }
-        )
-        .then(() => {
-            setIsCameraInitializing(false);
-        })
-        .catch((err) => {
-            const errorMessage = err?.message || String(err);
-            setCameraError(errorMessage);
-            addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
-            toast({
-                variant: 'destructive',
-                title: 'Gagal Memulai Kamera',
-                description: 'Harap berikan izin kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.'
-            });
-            setIsCameraInitializing(false);
-        });
-
-        return () => {
-            if (html5QrCodeRef.current?.isScanning) {
-                html5QrCodeRef.current.stop().catch(err => {
-                    console.error("Gagal menghentikan pemindai saat cleanup.", err);
-                });
-            }
-        };
-    }, [scanMode, scannerContainerId, addLog, toast]);
-
-    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
-        return attendanceData[studentId] || {};
-    }, [attendanceData]);
 
     return (
     <div className="flex flex-col gap-6">
