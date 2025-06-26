@@ -1,7 +1,6 @@
-
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { doc, getDoc, setDoc } from "firebase/firestore"
 import { Loader2, Clock } from "lucide-react"
 
@@ -34,9 +33,6 @@ export default function JamPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const { toast } = useToast()
-
-  const jamMasukRef = useRef<HTMLInputElement>(null)
-  const jamPulangRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     async function fetchSettings() {
@@ -120,12 +116,8 @@ export default function JamPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="jamMasuk">Jam Masuk</Label>
-                  <div
-                    className="relative cursor-pointer"
-                    onClick={() => jamMasukRef.current?.showPicker()}
-                  >
+                  <div className="relative">
                     <Input
-                      ref={jamMasukRef}
                       id="jamMasuk"
                       type="time"
                       className="pr-10"
@@ -137,12 +129,8 @@ export default function JamPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="jamPulang">Jam Pulang</Label>
-                   <div
-                    className="relative cursor-pointer"
-                    onClick={() => jamPulangRef.current?.showPicker()}
-                  >
+                   <div className="relative">
                     <Input
-                      ref={jamPulangRef}
                       id="jamPulang"
                       type="time"
                       className="pr-10"
