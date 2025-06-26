@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp } from "firebase/firestore"
+import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, writeBatch } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -19,13 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
@@ -36,9 +29,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, Activity, ShieldAlert, CheckCircle2, Clock, Info, BookUser } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
-import { id as localeID } from "date-fns/locale"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -46,6 +38,7 @@ type Student = { id: string; nisn: string; nama: string; classId: string, grade:
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
+  id?: string
   status: AttendanceStatus
   timestamp: Timestamp
   notes?: string
@@ -74,12 +67,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [classes, setClasses] = useState<Class[]>([])
     const [allStudents, setAllStudents] = useState<Student[]>([])
     const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null)
-    const [selectedClassId, setSelectedClassId] = useState<string | null>(null)
     const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord>>({})
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const { toast } = useToast()
+
+    const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
 
     useEffect(() => {
         async function fetchData() {
@@ -92,7 +86,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 classList.sort((a, b) => a.name.localeCompare(b.name));
                 setClasses(classList)
 
-                const classMap = new Map(classList.map(c => [c.id, c]));
+                const localClassMap = new Map(classList.map(c => [c.id, c]));
 
                 // Fetch school hours settings
                 const hoursDocRef = doc(db, "settings", "schoolHours");
@@ -100,6 +94,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 if (hoursDocSnap.exists()) {
                     setSchoolHours(hoursDocSnap.data() as SchoolHoursSettings);
                 } else {
+                    addLog("Pengaturan jam sekolah belum diatur.", "error")
                     toast({ variant: "destructive", title: "Pengaturan Jam Tidak Ditemukan", description: "Harap atur jam sekolah terlebih dahulu di menu pengaturan." });
                 }
                 
@@ -112,7 +107,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         return { 
                             id: doc.id,
                             ...data,
-                            grade: classMap.get(data.classId)?.grade || 'N/A'
+                            grade: localClassMap.get(data.classId)?.grade || 'N/A'
                         } as Student;
                     });
                     setAllStudents(studentList);
@@ -122,28 +117,38 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     if (studentIds.length > 0) {
                         const todayStart = startOfDay(new Date());
                         const todayEnd = endOfDay(new Date());
-                        const attendanceQuery = query(
-                            collection(db, "attendance"),
-                            where("studentId", "in", studentIds),
-                            where("timestamp", ">=", todayStart),
-                            where("timestamp", "<=", todayEnd)
-                        );
-                        const attendanceSnapshot = await getDocs(attendanceQuery);
+                        const chunks = [];
+                        for (let i = 0; i < studentIds.length; i += 30) {
+                            chunks.push(studentIds.slice(i, i + 30));
+                        }
+
                         const initialAttendanceData: Record<string, AttendanceRecord> = {};
-                        attendanceSnapshot.forEach(doc => {
-                            const data = doc.data();
-                            initialAttendanceData[data.studentId] = {
-                                status: data.status,
-                                timestamp: data.timestamp,
-                                notes: data.notes
-                            };
-                        });
+
+                        for (const chunk of chunks) {
+                             const attendanceQuery = query(
+                                collection(db, "attendance"),
+                                where("studentId", "in", chunk),
+                                where("timestamp", ">=", todayStart),
+                                where("timestamp", "<=", todayEnd)
+                            );
+                            const attendanceSnapshot = await getDocs(attendanceQuery);
+                            attendanceSnapshot.forEach(doc => {
+                                const data = doc.data();
+                                initialAttendanceData[data.studentId] = {
+                                    id: doc.id,
+                                    status: data.status,
+                                    timestamp: data.timestamp,
+                                    notes: data.notes
+                                };
+                            });
+                        }
                         setAttendanceData(initialAttendanceData);
                     }
                 }
 
             } catch (error) {
                 console.error("Error fetching data:", error)
+                addLog("Gagal memuat data dari server.", "error")
                 toast({
                     variant: "destructive",
                     title: "Gagal Memuat Data",
@@ -157,11 +162,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [grade, toast])
     
     useEffect(() => {
-        // Auto-focus on the scanner input when a class is selected
-        if (selectedClassId) {
+        // Auto-focus on the scanner input when data is ready
+        if (!isLoading) {
             setTimeout(() => scannerInputRef.current?.focus(), 100);
         }
-    }, [selectedClassId]);
+    }, [isLoading]);
 
     const addLog = (message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
@@ -169,24 +174,29 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             message,
             type
         };
-        setLogMessages(prev => [newLog, ...prev]);
+        setLogMessages(prev => [newLog, ...prev].slice(0, 50)); // Keep last 50 logs
     }
 
     const handleScan = async (nisn: string) => {
-        if (!nisn.trim() || !schoolHours) {
+        if (!nisn.trim()) return;
+
+        if (!schoolHours) {
+            addLog("Error: Pengaturan jam belum dimuat.", "error");
+            toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap", description: "Tunggu sebentar hingga pengaturan jam berhasil dimuat." });
             return;
         }
 
         const student = allStudents.find(s => s.nisn === nisn.trim());
 
         if (!student) {
-            addLog(`NISN ${nisn} tidak ditemukan.`, 'error');
+            addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
             toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
             return;
         }
         
         if (student.grade !== grade) {
-            addLog(`Siswa ${student.nama} (${student.grade}) salah ruang absen.`, 'error');
+            const studentClass = classMap.get(student.classId)
+            addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
             toast({
                 variant: "destructive",
                 title: "Salah Ruang Absen!",
@@ -196,7 +206,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
 
         if (attendanceData[student.id]) {
-            addLog(`Siswa ${student.nama} sudah melakukan absensi hari ini.`, 'info');
+            addLog(`Siswa ${student.nama} sudah absen hari ini.`, 'info');
             toast({ title: "Sudah Absen", description: `${student.nama} sudah tercatat absen hari ini.`});
             return;
         }
@@ -207,6 +217,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         deadline.setHours(hours, minutes + parseInt(schoolHours.toleransi, 10), 0, 0);
 
         const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
+        const newTimestamp = Timestamp.fromDate(now);
 
         try {
             const newRecord = {
@@ -215,13 +226,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 studentName: student.nama,
                 classId: student.classId,
                 status: status,
-                timestamp: Timestamp.fromDate(now),
+                timestamp: newTimestamp,
             }
-            await addDoc(collection(db, "attendance"), newRecord)
+            const docRef = await addDoc(collection(db, "attendance"), newRecord)
             
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { status, timestamp: newRecord.timestamp }
+                [student.id]: { id: docRef.id, status, timestamp: newTimestamp }
             }));
             
             addLog(`Berhasil: ${student.nama} (${student.nisn}) tercatat ${status}.`, 'success');
@@ -237,46 +248,38 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
-        const student = filteredStudents.find(s => s.id === studentId);
+        const student = allStudents.find(s => s.id === studentId);
         if (!student) return;
 
-        // For now, this only updates the UI state.
-        // TODO: Save to Firestore and send notifications.
         const now = new Date();
-        const newRecord = {
+        const newTimestamp = Timestamp.fromDate(now);
+        const newRecordPayload = {
             studentId: student.id,
             nisn: student.nisn,
             studentName: student.nama,
             classId: student.classId,
             status: status,
-            timestamp: Timestamp.fromDate(now),
+            timestamp: newTimestamp,
         }
 
         try {
-             // Check if a record for today already exists
-            const todayStart = startOfDay(new Date());
-            const todayEnd = endOfDay(new Date());
-            const attendanceQuery = query(
-                collection(db, "attendance"),
-                where("studentId", "==", studentId),
-                where("timestamp", ">=", todayStart),
-                where("timestamp", "<=", todayEnd)
-            );
-            const querySnapshot = await getDocs(attendanceQuery);
-
-            if (!querySnapshot.empty) {
+            const existingRecord = attendanceData[student.id];
+            
+            if (existingRecord?.id) {
                 // Update the existing document
-                const docId = querySnapshot.docs[0].id;
-                await doc(db, "attendance", docId).set(newRecord, { merge: true });
+                const docRef = doc(db, "attendance", existingRecord.id);
+                await writeBatch(db).update(docRef, newRecordPayload).commit();
             } else {
                 // Add a new document
-                await addDoc(collection(db, "attendance"), newRecord);
+                const docRef = await addDoc(collection(db, "attendance"), newRecordPayload);
+                existingRecord.id = docRef.id;
             }
 
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { status, timestamp: newRecord.timestamp }
+                [student.id]: { ...prev[student.id], status, timestamp: newTimestamp }
             }));
+
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
         } catch (error) {
@@ -286,17 +289,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }
 
-    const filteredStudents = useMemo(() => {
-        if (!selectedClassId) return []
-        return allStudents
-          .filter(student => student.classId === selectedClassId)
-          .sort((a, b) => a.nama.localeCompare(b.nama))
-    }, [allStudents, selectedClassId])
-
-    const selectedClassName = useMemo(() => {
-        if (!selectedClassId) return ""
-        return classes.find(c => c.id === selectedClassId)?.name || ""
-    }, [classes, selectedClassId])
+    const sortedStudents = useMemo(() => {
+       return [...allStudents].sort((a, b) => {
+            const classA = classMap.get(a.classId)?.name || '';
+            const classB = classMap.get(b.classId)?.name || '';
+            if (classA < classB) return -1;
+            if (classA > classB) return 1;
+            return a.nama.localeCompare(b.nama);
+        })
+    }, [allStudents, classMap]);
 
     const getStudentStatus = (studentId: string): AttendanceRecord => {
         return attendanceData[studentId] || { status: 'Belum Absen', timestamp: Timestamp.now() };
@@ -307,22 +308,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Pilih kelas untuk memulai sesi absensi.</p>
+            <p className="text-muted-foreground">Pindai barcode siswa untuk mencatat kehadiran.</p>
             </div>
-            {classes.length > 0 && (
-            <Select onValueChange={setSelectedClassId} disabled={isLoading}>
-                <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Pilih Kelas" />
-                </SelectTrigger>
-                <SelectContent>
-                {classes.map(cls => (
-                    <SelectItem key={cls.id} value={cls.id}>
-                    {cls.name}
-                    </SelectItem>
-                ))}
-                </SelectContent>
-            </Select>
-            )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -336,12 +323,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardContent>
                     <Input
                         ref={scannerInputRef}
-                        placeholder={selectedClassId ? "Arahkan pemindai barcode..." : "Pilih kelas terlebih dahulu"}
-                        disabled={!selectedClassId || isLoading}
+                        placeholder={isLoading ? "Memuat data siswa..." : "Arahkan pemindai barcode..."}
+                        disabled={isLoading}
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
                                 handleScan(e.currentTarget.value);
-                                e.currentTarget.value = "";
                             }
                         }}
                     />
@@ -358,15 +344,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         {logMessages.length > 0 ? (
                             logMessages.map((log, i) => (
                                 <div key={i} className="flex items-center gap-2 text-sm">
-                                    <span className="font-mono text-muted-foreground">{log.timestamp}</span>
-                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
-                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 text-red-500" />}
-                                    {log.type === 'info' && <Info className="h-4 w-4 text-blue-500" />}
+                                    <span className="font-mono text-xs text-muted-foreground">{log.timestamp}</span>
+                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />}
+                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500" />}
+                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500" />}
                                     <span className="flex-1 truncate">{log.message}</span>
                                 </div>
                             ))
                         ) : (
-                             <div className="flex items-center justify-center h-full text-muted-foreground">
+                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                                 Belum ada aktivitas.
                             </div>
                         )}
@@ -377,7 +363,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
       
         <Card>
             <CardHeader>
-            <CardTitle>Daftar Siswa {selectedClassName && `- ${selectedClassName}`}</CardTitle>
+            <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
             <CardDescription>
                 Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
             </CardDescription>
@@ -389,6 +375,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         <TableRow>
                         <TableHead className="w-[150px]">NISN</TableHead>
                         <TableHead>Nama Siswa</TableHead>
+                        <TableHead>Kelas</TableHead>
                         <TableHead className="w-[150px] text-center">Status</TableHead>
                         <TableHead className="w-[150px] text-center">Jam Absen</TableHead>
                         <TableHead className="w-[50px] text-right">Aksi</TableHead>
@@ -403,16 +390,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                                 <TableCell><Skeleton className="h-5 w-full" /></TableCell>
+                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
                             </TableRow>
                         ))
-                        ) : selectedClassId ? (
-                        filteredStudents.length > 0 ? (
-                            filteredStudents.map((student) => {
+                        ) : sortedStudents.length > 0 ? (
+                            sortedStudents.map((student) => {
                                 const { status, timestamp } = getStudentStatus(student.id);
+                                const studentClass = classMap.get(student.classId);
                                 return (
                                     <TableRow key={student.id} data-status={status}>
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell className="font-medium">{student.nama}</TableCell>
+                                        <TableCell>{studentClass?.name || 'N/A'}</TableCell>
                                         <TableCell className="text-center">
                                             <Badge variant={statusBadgeVariant[status]}>{status}</Badge>
                                         </TableCell>
@@ -423,6 +412,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                        <span className="sr-only">Aksi Manual</span>
                                                         <MoreHorizontal className="h-4 w-4" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
@@ -430,7 +420,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                                     <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Sakit')}>Tandai Sakit</DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Izin')}>Tandai Izin</DropdownMenuItem>
                                                     <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Dispen')}>Tandai Dispen</DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive">Tandai Alfa</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive focus:text-destructive">Tandai Alfa</DropdownMenuItem>
                                                 </DropdownMenuContent>
                                             </DropdownMenu>
                                         </TableCell>
@@ -439,16 +429,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             })
                         ) : (
                             <TableRow>
-                            <TableCell colSpan={5} className="h-24 text-center">
-                                Tidak ada siswa di kelas ini.
-                            </TableCell>
-                            </TableRow>
-                        )
-                        ) : (
-                        <TableRow>
-                            <TableCell colSpan={5} className="h-24 text-center">
-                                Silakan pilih kelas terlebih dahulu untuk memulai.
-                            </TableCell>
+                                <TableCell colSpan={6} className="h-24 text-center">
+                                    Tidak ada siswa terdaftar untuk Kelas {grade}.
+                                </TableCell>
                             </TableRow>
                         )}
                     </TableBody>
