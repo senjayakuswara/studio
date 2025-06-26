@@ -115,7 +115,6 @@ export async function processTelegramWebhook(payload: any) {
 
     const message = payload.message || payload.edited_message;
     if (!message) {
-        // This is not a message we can process (e.g., a channel post update). Skip.
         return;
     }
 
@@ -123,13 +122,12 @@ export async function processTelegramWebhook(payload: any) {
     const text = message.text?.trim();
 
     if (!chatId || !text) {
-        // Not a text message we can process. Skip.
         return;
     }
 
     // Handle /start command
     if (text === '/start') {
-        const welcomeMessage = "👋 Selamat datang di layanan Notifikasi AbsensiKu Cerdas untuk SMAS PGRI Naringgul.\n\nUntuk memulai, silakan balas pesan ini dengan Nomor Induk Siswa Nasional (NISN) putra/putri Anda.";
+        const welcomeMessage = "👋 Selamat datang di layanan Notifikasi AbsensiKu Cerdas untuk SMAS PGRI Naringgul.\n\nSistem ini akan menghubungkan satu akun Telegram dengan satu siswa. Untuk memulai, silakan balas pesan ini dengan Nomor Induk Siswa Nasional (NISN) putra/putri Anda.";
         await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
         return;
     }
@@ -137,25 +135,56 @@ export async function processTelegramWebhook(payload: any) {
     // Handle NISN (numeric input)
     if (/^\d+$/.test(text)) {
         const nisn = text;
-        try {
-            const q = query(collection(db, "students"), where("nisn", "==", nisn));
-            const querySnapshot = await getDocs(q);
+        const stringChatId = String(chatId);
 
-            if (querySnapshot.empty) {
-                const notFoundMessage = `⚠️ NISN Tidak Ditemukan\n\nNISN ${nisn} tidak terdaftar dalam sistem kami. Mohon periksa kembali nomor tersebut dan coba lagi. Pastikan nomor yang Anda masukkan sudah benar.`;
-                await sendTelegramMessage(botToken, String(chatId), notFoundMessage);
-            } else {
-                const studentDoc = querySnapshot.docs[0];
-                await updateDoc(doc(db, "students", studentDoc.id), {
-                    parentChatId: String(chatId)
-                });
-                const successMessage = `✅ Pendaftaran Berhasil!\n\nAkun Telegram Anda telah berhasil terhubung dengan data absensi atas nama ${studentDoc.data().nama}.\n\nAnda akan mulai menerima notifikasi absensi harian dan laporan bulanan secara otomatis.`;
-                await sendTelegramMessage(botToken, String(chatId), successMessage);
+        try {
+            // 1. Check if this Telegram account (chatId) is already linked to ANY student.
+            const chatQuery = query(collection(db, "students"), where("parentChatId", "==", stringChatId));
+            const chatSnapshot = await getDocs(chatQuery);
+
+            if (!chatSnapshot.empty) {
+                const linkedStudent = chatSnapshot.docs[0].data();
+                if (linkedStudent.nisn === nisn) {
+                    const alreadyRegisteredMessage = `✅ Akun Anda Sudah Terdaftar\n\nAkun Telegram ini sudah terhubung dengan siswa atas nama ${linkedStudent.nama}. Anda tidak perlu mendaftar lagi.`;
+                    await sendTelegramMessage(botToken, stringChatId, alreadyRegisteredMessage);
+                } else {
+                    const chatInUseMessage = `⚠️ Pendaftaran Gagal\n\nAkun Telegram Anda sudah terdaftar untuk siswa lain (${linkedStudent.nama}). Satu akun hanya bisa terhubung ke satu siswa.`;
+                    await sendTelegramMessage(botToken, stringChatId, chatInUseMessage);
+                }
+                return;
             }
+
+            // 2. If the chat ID is free, check the status of the NISN.
+            const nisnQuery = query(collection(db, "students"), where("nisn", "==", nisn));
+            const nisnSnapshot = await getDocs(nisnQuery);
+
+            if (nisnSnapshot.empty) {
+                const notFoundMessage = `⚠️ NISN Tidak Ditemukan\n\nNISN ${nisn} tidak terdaftar dalam sistem kami. Mohon periksa kembali nomor tersebut dan coba lagi.`;
+                await sendTelegramMessage(botToken, stringChatId, notFoundMessage);
+                return;
+            }
+            
+            // 3. Check if the student found by NISN is already claimed by another parent.
+            const studentDoc = nisnSnapshot.docs[0];
+            const studentData = studentDoc.data();
+
+            if (studentData.parentChatId && studentData.parentChatId !== "") {
+                const nisnClaimedMessage = `⚠️ Pendaftaran Gagal\n\nSiswa atas nama ${studentData.nama} (NISN: ${nisn}) sudah terhubung dengan akun Telegram lain. Hubungi administrator jika Anda yakin ini adalah sebuah kesalahan.`;
+                await sendTelegramMessage(botToken, stringChatId, nisnClaimedMessage);
+                return;
+            }
+
+            // 4. All checks passed. Link the account.
+            await updateDoc(doc(db, "students", studentDoc.id), {
+                parentChatId: stringChatId
+            });
+            const successMessage = `✅ Pendaftaran Berhasil!\n\nAkun Telegram Anda telah berhasil terhubung dengan data absensi atas nama ${studentData.nama}.\n\nAnda akan mulai menerima notifikasi absensi.`;
+            await sendTelegramMessage(botToken, stringChatId, successMessage);
+
         } catch (error) {
             console.error("Error during NISN registration:", error);
-            const errorMessage = "Terjadi kesalahan pada sistem. Mohon coba lagi nanti.";
-            await sendTelegramMessage(botToken, String(chatId), errorMessage);
+            const errorMessage = "Terjadi kesalahan pada sistem saat pendaftaran. Mohon coba lagi nanti.";
+            await sendTelegramMessage(botToken, stringChatId, errorMessage);
         }
         return;
     }
@@ -252,6 +281,7 @@ export async function sendMonthlyRecapToParent(
     const classInfo = classSnap.data() as Class;
 
     const totalSchoolDays = Object.values(summary).reduce((a, b) => a + b, 0);
+    const totalHadir = summary.H + summary.T; // Hadir + Terlambat
 
     const messageLines = [
         "🏫 SMAS PGRI Naringgul",
@@ -263,7 +293,7 @@ export async function sendMonthlyRecapToParent(
         `📚 Kelas     : ${classInfo.name}`,
         "",
         "Berikut adalah rekapitulasi kehadiran putra/putri Anda:",
-        `✅ Total Hadir      : ${summary.H} hari`,
+        `✅ Total Hadir      : ${totalHadir} hari`,
         `⏰ Terlambat      : ${summary.T} kali`,
         `🤒 Sakit         : ${summary.S} hari`,
         `✉️ Izin          : ${summary.I} hari`,
