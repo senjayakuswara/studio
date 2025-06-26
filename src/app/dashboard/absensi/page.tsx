@@ -61,15 +61,8 @@ type AttendanceRecord = {
 type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
 
 type ReportConfig = {
-    headerLine1: string
-    headerLine2: string
-    headerLine3: string
-    schoolName: string
-    address: string
-    logoUrlLeft: string | null
-    logoUrlRight: string | null
+    headerImageUrl: string | null
     reportTitle: string
-    
     reportLocation: string
     signatoryName: string
     signatoryNpa: string
@@ -178,42 +171,27 @@ export default function AbsensiPage() {
       let lastY = 10;
 
       // === KOP SURAT / HEADER ===
-      const addImageToDoc = (url: string, x: number, y: number, width: number, height: number) => {
-        try {
-            doc.addImage(url, 'PNG', x, y, width, height);
-        } catch (e) {
-            console.error(`Could not add image from ${url}`, e);
-            toast({ variant: "destructive", title: "Gagal Memuat Logo", description: "Pastikan URL atau format logo valid." });
-        }
-      };
-      
-      if (reportConfig.logoUrlLeft) {
-          addImageToDoc(reportConfig.logoUrlLeft, pageMargin, 10, 25, 25);
+      if (reportConfig.headerImageUrl) {
+          try {
+              // Assuming the header image has an aspect ratio of roughly 950x150
+              const imgWidth = pageWidth - pageMargin * 2;
+              const imgHeight = imgWidth * (150 / 950);
+              doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, 10, imgWidth, imgHeight);
+              lastY = 10 + imgHeight + 5; // Position cursor below the image
+          } catch (e) {
+              console.error("Could not add header image", e);
+              toast({ variant: "destructive", title: "Gagal Memuat Kop Surat", description: "Pastikan gambar kop surat valid." });
+              lastY = 40; // Fallback position
+          }
+      } else {
+        // Fallback if no header image is set
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text("Laporan Absensi", pageWidth / 2, 20, { align: 'center' });
+        doc.setLineWidth(0.5);
+        doc.line(pageMargin, 25, pageWidth - pageMargin, 25);
+        lastY = 35;
       }
-      if (reportConfig.logoUrlRight) {
-          addImageToDoc(reportConfig.logoUrlRight, pageWidth - pageMargin - 25, 10, 25, 25);
-      }
-
-      doc.setFont('times', 'normal');
-      doc.setFontSize(11);
-      doc.text(reportConfig.headerLine1, pageWidth / 2, 12, { align: 'center' });
-      doc.text(reportConfig.headerLine2, pageWidth / 2, 17, { align: 'center' });
-      
-      doc.setFont('times', 'bold');
-      doc.setFontSize(14);
-      doc.text(reportConfig.headerLine3, pageWidth / 2, 24, { align: 'center' });
-      doc.text(reportConfig.schoolName, pageWidth / 2, 30, { align: 'center' });
-
-      doc.setFont('times', 'normal');
-      doc.setFontSize(9);
-      doc.text(reportConfig.address, pageWidth / 2, 35, { align: 'center' });
-
-      doc.setLineWidth(1);
-      doc.line(pageMargin, 38, pageWidth - pageMargin, 38);
-      doc.setLineWidth(0.5);
-      doc.line(pageMargin, 39.5, pageWidth - pageMargin, 39.5);
-
-      lastY = 48;
       
       // === JUDUL LAPORAN ===
       doc.setFont('helvetica', 'bold');
@@ -266,17 +244,22 @@ export default function AbsensiPage() {
       const rightX = (pageWidth / 4) * 3;
 
       doc.setFontSize(10);
+      doc.setFont('times', 'normal');
 
       // Left side: Principal
       doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
       doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+      doc.setFont('times', 'bold');
       doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
+      doc.setFont('times', 'normal');
       doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
 
       // Right side: Officer
       doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
       doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+      doc.setFont('times', 'bold');
       doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
+      doc.setFont('times', 'normal');
       doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
       
       // Save PDF
@@ -287,7 +270,7 @@ export default function AbsensiPage() {
       toast({
         variant: "destructive",
         title: "Gagal Membuat PDF",
-        description: "Terjadi kesalahan saat membuat laporan. Pastikan format logo valid.",
+        description: "Terjadi kesalahan saat membuat laporan. Pastikan format kop surat valid.",
       });
     } finally {
       setIsPrinting(false);

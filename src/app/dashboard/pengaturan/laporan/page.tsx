@@ -18,19 +18,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 
 type ReportSettings = {
-  headerLine1: string
-  headerLine2: string
-  headerLine3: string
-  schoolName: string
-  address: string
-  logoUrlLeft: string | null
-  logoUrlRight: string | null
+  headerImageUrl: string | null
   reportTitle: string
-  
   reportLocation: string
   signatoryName: string
   signatoryNpa: string
@@ -40,19 +32,13 @@ type ReportSettings = {
 
 export default function LaporanPage() {
   const [settings, setSettings] = useState<ReportSettings>({
-    headerLine1: "",
-    headerLine2: "",
-    headerLine3: "",
-    schoolName: "",
-    address: "",
-    logoUrlLeft: null,
-    logoUrlRight: null,
-    reportTitle: "",
-    reportLocation: "",
-    signatoryName: "",
-    signatoryNpa: "",
-    principalName: "",
-    principalNpa: "",
+    headerImageUrl: null,
+    reportTitle: "Laporan Absensi Harian",
+    reportLocation: "Naringgul",
+    signatoryName: "(.........................)",
+    signatoryNpa: "NPA: .....................",
+    principalName: "(.........................)",
+    principalNpa: "NIP: ......................",
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -65,23 +51,9 @@ export default function LaporanPage() {
         const docRef = doc(db, "settings", "reportConfig")
         const docSnap = await getDoc(docRef)
         if (docSnap.exists()) {
-          setSettings(docSnap.data() as ReportSettings)
-        } else {
-            setSettings({
-                headerLine1: "PERWAKILAN YAYASAN PEMBINA LEMBAGA PENDIDIKAN",
-                headerLine2: "PERSATUAN GURU REPUBLIK INDONESIA (YPLP – PGRI)",
-                headerLine3: "KABUPATEN CIANJUR",
-                schoolName: "SMA PGRI NARINGGUL",
-                address: "Jalan Raya Naringgul No.1. Desa Naringgul Kec. Naringgul. Kode Pos 43274",
-                reportTitle: "Laporan Absensi Harian",
-                logoUrlLeft: null,
-                logoUrlRight: null,
-                reportLocation: "Naringgul",
-                signatoryName: "(.........................)",
-                signatoryNpa: "NPA: .....................",
-                principalName: "(.........................)",
-                principalNpa: "NIP: ......................",
-            })
+          // Merge fetched data with defaults to avoid missing fields if DB is old
+          const fetchedData = docSnap.data() as Partial<ReportSettings>;
+          setSettings(prev => ({...prev, ...fetchedData}));
         }
       } catch (error) {
         console.error("Error fetching report settings:", error)
@@ -118,38 +90,46 @@ export default function LaporanPage() {
     }
   }
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>, side: 'left' | 'right') => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit
+        toast({
+          variant: "destructive",
+          title: "Ukuran File Terlalu Besar",
+          description: "Ukuran gambar kop surat tidak boleh melebihi 2MB.",
+        });
+        return;
+      }
       const reader = new FileReader()
       reader.onloadend = () => {
-        const logoUrlKey = side === 'left' ? 'logoUrlLeft' : 'logoUrlRight';
-        setSettings((prev) => ({ ...prev, [logoUrlKey]: reader.result as string }))
+        setSettings((prev) => ({ ...prev, headerImageUrl: reader.result as string }))
       }
       reader.readAsDataURL(file)
     }
   }
   
-  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { id, value } = e.target;
     setSettings(prev => ({...prev, [id]: value}));
   }
 
-  const renderLogoUploader = (side: 'left' | 'right', label: string) => (
+  const renderLogoUploader = () => (
       <div className="space-y-2">
-          <Label htmlFor={`logo-upload-${side}`}>{label}</Label>
+          <Label htmlFor="header-image-upload">Gambar Kop Surat</Label>
+          <p className="text-sm text-muted-foreground">Unggah gambar kop surat dalam format PNG atau JPG. Ukuran rekomendasi 2100x350 piksel (lebar A4).</p>
           <div className="flex items-center justify-center w-full">
-              <label htmlFor={`dropzone-file-${side}`} className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative">
-                  {side === 'left' ? settings.logoUrlLeft : settings.logoUrlRight ? (
-                      <Image src={side === 'left' ? settings.logoUrlLeft! : settings.logoUrlRight!} alt="Logo Preview" layout="fill" objectFit="contain" className="rounded-lg p-2" />
+              <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative">
+                  {settings.headerImageUrl ? (
+                      <Image src={settings.headerImageUrl} alt="Header Preview" layout="fill" objectFit="contain" className="rounded-lg p-2" />
                   ) : (
                       <div className="flex flex-col items-center justify-center pt-5 pb-6">
                           <UploadCloud className="w-8 h-8 mb-4 text-muted-foreground" />
-                          <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Klik untuk unggah</span></p>
-                          <p className="text-xs text-muted-foreground">PNG atau JPG</p>
+                          <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Klik untuk unggah</span> atau seret dan lepas</p>
+                          <p className="text-xs text-muted-foreground">PNG atau JPG (Maks. 2MB)</p>
                       </div>
                   )}
-                  <Input id={`dropzone-file-${side}`} type="file" className="hidden" onChange={(e) => handleFileChange(e, side)} accept="image/png, image/jpeg" />
+                  <Input id="dropzone-file" type="file" className="hidden" onChange={handleFileChange} accept="image/png, image/jpeg" />
               </label>
           </div>
       </div>
@@ -163,52 +143,26 @@ export default function LaporanPage() {
             Pengaturan Desain Laporan
           </h1>
           <p className="text-muted-foreground">
-            Sesuaikan kop, logo, dan titimangsa pada laporan PDF yang dicetak.
+            Sesuaikan kop surat, judul, dan titimangsa pada laporan PDF yang dicetak.
           </p>
         </div>
       </div>
       <Card>
         <CardHeader>
-          <CardTitle>Header / Kop Surat Laporan</CardTitle>
+          <CardTitle>Desain Laporan Global</CardTitle>
           <CardDescription>
-            Informasi ini akan digunakan untuk membuat kop surat di bagian atas setiap laporan.
+            Pengaturan ini akan digunakan untuk semua laporan yang dicetak dari sistem.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? <Skeleton className="h-64 w-full" /> : (
             <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {renderLogoUploader('left', 'Logo Kiri (Contoh: Logo Yayasan/PGRI)')}
-                    {renderLogoUploader('right', 'Logo Kanan (Contoh: Logo Sekolah)')}
-                </div>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="headerLine1">Baris Header 1</Label>
-                        <Input id="headerLine1" value={settings.headerLine1} onChange={handleChange} />
-                    </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="headerLine2">Baris Header 2</Label>
-                        <Input id="headerLine2" value={settings.headerLine2} onChange={handleChange} />
-                    </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                        <Label htmlFor="headerLine3">Baris Header 3 (Besar & Tebal)</Label>
-                        <Input id="headerLine3" value={settings.headerLine3} onChange={handleChange} />
-                    </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="schoolName">Baris Header 4 / Nama Sekolah (Besar & Tebal)</Label>
-                        <Input id="schoolName" value={settings.schoolName} onChange={handleChange} />
-                    </div>
-                </div>
-                 <div className="space-y-2">
-                    <Label htmlFor="address">Baris Header 5 / Alamat</Label>
-                    <Input id="address" value={settings.address} onChange={handleChange} />
-                </div>
+                {renderLogoUploader()}
                 <Separator />
-                 <div className="space-y-2">
+                <div className="space-y-2">
                     <Label htmlFor="reportTitle">Judul Utama Laporan</Label>
-                    <Input id="reportTitle" value={settings.reportTitle} onChange={handleChange} />
+                    <Input id="reportTitle" value={settings.reportTitle} onChange={handleChange} placeholder="Contoh: Laporan Absensi Harian"/>
+                     <p className="text-xs text-muted-foreground">Judul ini akan tampil di bawah kop surat.</p>
                 </div>
             </div>
           )}
