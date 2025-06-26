@@ -19,9 +19,20 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 
+type ThemeSettings = {
+    primary: string;
+    background: string;
+    accent: string;
+}
+
 export default function AppSettingsPage() {
     const [appName, setAppName] = useState("")
     const [logoUrl, setLogoUrl] = useState<string | null>(null)
+    const [theme, setTheme] = useState<ThemeSettings>({
+        primary: "222.2 47.4% 11.2%",
+        background: "0 0% 98%",
+        accent: "351 100% 89%",
+    })
     const [isSaving, setIsSaving] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const { toast } = useToast()
@@ -36,6 +47,9 @@ export default function AppSettingsPage() {
                     const data = docSnap.data()
                     setAppName(data.appName || "AbTrack")
                     setLogoUrl(data.logoUrl || null)
+                    if (data.theme) {
+                        setTheme(data.theme)
+                    }
                 } else {
                     setAppName("AbTrack")
                 }
@@ -64,14 +78,25 @@ export default function AppSettingsPage() {
         }
     }
 
+    const handleThemeChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const { id, value } = e.target
+        setTheme(prev => ({ ...prev, [id]: value }))
+    }
+
     const handleSave = async () => {
         setIsSaving(true)
         try {
             const docRef = doc(db, "settings", "appConfig")
-            await setDoc(docRef, { appName, logoUrl }, { merge: true })
+            await setDoc(docRef, { appName, logoUrl, theme }, { merge: true })
+
+            // Apply theme immediately
+            document.documentElement.style.setProperty('--primary', theme.primary);
+            document.documentElement.style.setProperty('--background', theme.background);
+            document.documentElement.style.setProperty('--accent', theme.accent);
+
             toast({
                 title: "Pengaturan Disimpan",
-                description: "Informasi aplikasi telah berhasil diperbarui.",
+                description: "Informasi aplikasi dan tema telah berhasil diperbarui.",
             })
         } catch (error) {
             console.error("Error saving settings:", error)
@@ -146,14 +171,39 @@ export default function AppSettingsPage() {
             Ubah skema warna aplikasi. Anda dapat menggunakan HSL color picker online untuk mendapatkan nilai warna.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-            <div className="space-y-2">
-                <Label htmlFor="primary-color">Warna Primer (HSL)</Label>
-                <Input id="primary-color" defaultValue="222.2 47.4% 11.2%" placeholder="Contoh: 222.2 47.4% 11.2%" />
-                <p className="text-xs text-muted-foreground">
-                    Ini akan mengubah warna utama komponen seperti tombol.
-                </p>
-            </div>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {isLoading ? (
+                [...Array(3)].map((_, i) => (
+                    <div key={i} className="space-y-2">
+                        <Skeleton className="h-4 w-20" />
+                        <Skeleton className="h-10 w-full" />
+                    </div>
+                ))
+            ) : (
+                <>
+                <div className="space-y-2">
+                    <Label htmlFor="primary">Warna Primer (HSL)</Label>
+                    <Input id="primary" value={theme.primary} onChange={handleThemeChange} placeholder="Contoh: 222.2 47.4% 11.2%" />
+                    <p className="text-xs text-muted-foreground">
+                        Warna utama untuk tombol dan elemen penting lainnya.
+                    </p>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="background">Warna Background (HSL)</Label>
+                    <Input id="background" value={theme.background} onChange={handleThemeChange} placeholder="Contoh: 0 0% 98%" />
+                    <p className="text-xs text-muted-foreground">
+                        Warna latar belakang utama aplikasi.
+                    </p>
+                </div>
+                <div className="space-y-2">
+                    <Label htmlFor="accent">Warna Aksen (HSL)</Label>
+                    <Input id="accent" value={theme.accent} onChange={handleThemeChange} placeholder="Contoh: 351 100% 89%" />
+                    <p className="text-xs text-muted-foreground">
+                        Warna untuk sorotan, seperti saat hover.
+                    </p>
+                </div>
+                </>
+            )}
         </CardContent>
       </Card>
 

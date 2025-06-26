@@ -68,7 +68,14 @@ export default function DashboardLayout({
           const data = docSnap.data();
           setAppName(data.appName || "AbTrack");
           setLogoUrl(data.logoUrl || null);
-           document.title = `${data.appName || "AbTrack"} - Dashboard`;
+          document.title = `${data.appName || "AbTrack"} - Dashboard`;
+          
+          // Apply theme colors
+          const theme = data.theme || {};
+          if (theme.primary) document.documentElement.style.setProperty('--primary', theme.primary);
+          if (theme.background) document.documentElement.style.setProperty('--background', theme.background);
+          if (theme.accent) document.documentElement.style.setProperty('--accent', theme.accent);
+
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
@@ -82,7 +89,7 @@ export default function DashboardLayout({
       }
     }
     fetchSettings();
-  }, [toast]);
+  }, [toast, pathname]); // Re-fetch on pathname change to apply theme when navigating
 
   return (
     <SidebarProvider>
