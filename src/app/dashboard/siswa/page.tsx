@@ -667,7 +667,7 @@ export default function SiswaPage() {
                         <TableRow key={student.id}>
                         <TableCell>{student.nisn}</TableCell>
                         <TableCell className="font-medium">{student.nama}</TableCell>
-                        <TableCell>{classMap.get(student.classId)?.split(' (')[0] || "Kelas Dihapus"}</TableCell>
+                        <TableCell>{classMap.get(student.classId) || "Kelas Dihapus"}</TableCell>
                         <TableCell>{student.jenisKelamin}</TableCell>
                         <TableCell>
                             <DropdownMenu>
