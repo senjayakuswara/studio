@@ -108,6 +108,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
 
+    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
+        return attendanceData[studentId] || {};
+    }, [attendanceData]);
+
     useEffect(() => {
         async function fetchData() {
             setIsLoading(true)
@@ -290,7 +294,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setTimeout(() => {
               processingLock.current = false;
               setIsProcessing(false);
-            }, 1500); // Cooldown to prevent double scans
+            }, 2000); // Cooldown to prevent double scans
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
     
@@ -304,10 +308,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 })
                 .catch(err => {
                     console.warn("Gagal menghentikan pemindai dengan bersih.", err);
-                    setIsCameraActive(false);
+                    setIsCameraActive(false); // Force state update
                 });
-        } else {
-             setIsCameraActive(false);
         }
     }, [addLog]);
 
@@ -317,19 +319,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setIsCameraInitializing(true);
         setCameraError(null);
         
-        const newScanner = new Html5Qrcode(scannerContainerId, { verbose: false });
-        html5QrCodeRef.current = newScanner;
+        html5QrCodeRef.current = new Html5Qrcode(scannerContainerId, { verbose: false });
 
-        const onScanSuccess = (decodedText: string) => {
-            handleScan(decodedText);
-        };
-        const onScanFailure = (error: any) => { /* ignore */ };
-
-        newScanner.start(
+        html5QrCodeRef.current.start(
             { facingMode: "user" },
             { fps: 5, qrbox: { width: 250, height: 250 } },
-            onScanSuccess,
-            onScanFailure
+            (decodedText) => handleScan(decodedText),
+            (errorMessage) => { /* ignore scan failure */ }
         )
         .then(() => {
             setIsCameraInitializing(false);
@@ -400,9 +396,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }
 
-    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
-        return attendanceData[studentId] || {};
-    }, [attendanceData]);
 
     return (
     <div className="flex flex-col gap-6">
@@ -417,7 +410,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><ScanLine /> Mode Input</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><ScanLine /> Input Manual</CardTitle>
                     <CardDescription>
                         Gunakan barcode scanner atau ketik NISN manual lalu tekan Enter.
                     </CardDescription>
@@ -438,9 +431,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             </Card>
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Camera /> Mode Kamera</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><Camera /> Kontrol Kamera</CardTitle>
                         <CardDescription>
-                        Gunakan kamera perangkat untuk memindai QR code atau barcode.
+                        Aktifkan kamera untuk memindai QR code atau barcode dari siswa.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
@@ -474,7 +467,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
                             <Video className="mr-2"/> Aktifkan Kamera
                         </Button>
-                        <Button size="sm" onClick={stopScanner} variant="destructive" disabled={!isCameraActive}>
+                        <Button size="sm" onClick={stopScanner} variant="destructive" disabled={!isCameraActive || isCameraInitializing}>
                             <VideoOff className="mr-2"/> Matikan Kamera
                         </Button>
                     </div>
