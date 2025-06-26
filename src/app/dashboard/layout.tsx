@@ -50,7 +50,7 @@ export default function DashboardLayout({
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <Link href="/dashboard" legacyBehavior passHref>
+              <Link href="/dashboard">
                 <SidebarMenuButton
                   tooltip="Dashboard"
                   isActive={isActive("/dashboard")}
@@ -61,7 +61,7 @@ export default function DashboardLayout({
               </Link>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <Link href="/dashboard/siswa" legacyBehavior passHref>
+              <Link href="/dashboard/siswa">
                 <SidebarMenuButton
                   tooltip="Manajemen Siswa"
                   isActive={isActive("/dashboard/siswa")}
@@ -72,7 +72,7 @@ export default function DashboardLayout({
               </Link>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <Link href="/dashboard/absensi" legacyBehavior passHref>
+              <Link href="/dashboard/absensi">
                 <SidebarMenuButton
                   tooltip="Manajemen Absensi"
                   isActive={isActive("/dashboard/absensi")}
@@ -87,7 +87,7 @@ export default function DashboardLayout({
             <SidebarGroupLabel>Pengaturan Umum</SidebarGroupLabel>
             <SidebarMenu>
               <SidebarMenuItem>
-                <Link href="/dashboard/pengaturan/notifikasi" legacyBehavior passHref>
+                <Link href="/dashboard/pengaturan/notifikasi">
                   <SidebarMenuButton
                     tooltip="Notifikasi Telegram"
                     isActive={isActive("/dashboard/pengaturan/notifikasi")}
@@ -98,7 +98,7 @@ export default function DashboardLayout({
                 </Link>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <Link href="/dashboard/pengaturan/laporan" legacyBehavior passHref>
+                <Link href="/dashboard/pengaturan/laporan">
                   <SidebarMenuButton
                     tooltip="Desain Laporan"
                     isActive={isActive("/dashboard/pengaturan/laporan")}
@@ -109,7 +109,7 @@ export default function DashboardLayout({
                 </Link>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <Link href="/dashboard/pengaturan/jam" legacyBehavior passHref>
+                <Link href="/dashboard/pengaturan/jam">
                   <SidebarMenuButton
                     tooltip="Pengaturan Jam"
                     isActive={isActive("/dashboard/pengaturan/jam")}
