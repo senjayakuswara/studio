@@ -62,7 +62,7 @@ import {
     SelectLabel,
 } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 
@@ -73,6 +73,7 @@ const studentSchema = z.object({
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
     required_error: "Jenis kelamin harus dipilih.",
   }),
+  parentChatId: z.string().optional(),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
@@ -112,6 +113,7 @@ export default function SiswaPage() {
       nama: "",
       classId: undefined,
       jenisKelamin: undefined,
+      parentChatId: "",
     },
   })
 
@@ -214,7 +216,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "" })
     setIsFormDialogOpen(true)
   }
 
@@ -230,8 +232,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin"];
-    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki"];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Parent Chat ID"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", ""];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -257,6 +259,7 @@ export default function SiswaPage() {
             "Tingkat": classInfo?.grade || "N/A",
             "Nama Kelas": classInfo?.name || "Kelas Dihapus",
             "Jenis Kelamin": student.jenisKelamin,
+            "Parent Chat ID": student.parentChatId || "",
         }
     });
     
@@ -270,6 +273,7 @@ export default function SiswaPage() {
         { wch: 10 }, // Tingkat
         { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
+        { wch: 15 }, // Parent Chat ID
     ];
     worksheet['!cols'] = columnWidths;
 
@@ -305,6 +309,7 @@ export default function SiswaPage() {
                     nama: String(row[1] || ""),
                     classId: classId,
                     jenisKelamin: String(row[4] || ""),
+                    parentChatId: String(row[5] || "").trim() || undefined,
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -315,7 +320,8 @@ export default function SiswaPage() {
                     if (existingStudent) {
                         const isIdentical = existingStudent.nama === validStudent.nama &&
                                             existingStudent.classId === validStudent.classId &&
-                                            existingStudent.jenisKelamin === validStudent.jenisKelamin;
+                                            existingStudent.jenisKelamin === validStudent.jenisKelamin &&
+                                            (existingStudent.parentChatId || "") === (validStudent.parentChatId || "");
                         
                         processedStudents.push({ 
                             ...validStudent, 
@@ -377,12 +383,13 @@ export default function SiswaPage() {
         
         studentsToProcess.forEach(student => {
             const { id, status, ...studentData } = student;
+            const dataToSave = { ...studentData, parentChatId: studentData.parentChatId || "" };
             if (status === 'Baru') {
                 const docRef = doc(collection(db, "students"));
-                batch.set(docRef, studentData);
+                batch.set(docRef, dataToSave);
             } else if (status === 'Diperbarui' && id) {
                 const docRef = doc(db, "students", id);
-                batch.update(docRef, studentData);
+                batch.update(docRef, dataToSave);
             }
         });
 
@@ -523,6 +530,22 @@ export default function SiswaPage() {
                   </FormItem>
                 )}
               />
+              <FormField
+                  control={form.control}
+                  name="parentChatId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Chat ID Orang Tua (Opsional)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Akan terisi otomatis via bot" {...field} value={field.value ?? ''} />
+                      </FormControl>
+                      <FormDescription>
+                        ID ini digunakan untuk mengirim notifikasi. Biarkan kosong jika orang tua akan mendaftar via bot.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                <DialogFooter>
                     <Button type="submit" disabled={form.formState.isSubmitting}>
                       {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
