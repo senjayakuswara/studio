@@ -59,6 +59,7 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    SelectLabel,
 } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
@@ -375,7 +376,7 @@ export default function SiswaPage() {
                             <SelectContent>
                               {["X", "XI", "XII"].map(grade => (
                                 <SelectGroup key={grade}>
-                                  <Label className="px-2 py-1.5 text-sm font-semibold">Kelas {grade}</Label>
+                                  <SelectLabel className="px-2 py-1.5 text-sm font-semibold">Kelas {grade}</SelectLabel>
                                   {classes.filter(c => c.grade === grade).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                   ))}
