@@ -313,51 +313,67 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         handleScanRef.current = handleScan;
     }, [handleScan]);
 
-    // Effect for camera management
-    useEffect(() => {
-        if (scanMode !== 'camera') {
-            return;
+    const stopScanner = useCallback(() => {
+        if (html5QrCodeRef.current?.isScanning) {
+            html5QrCodeRef.current.stop()
+                .catch(err => {
+                    console.warn("Failed to stop scanner cleanly.", err);
+                })
+                .finally(() => {
+                    html5QrCodeRef.current = null;
+                });
+        }
+    }, []);
+
+    const startScanner = useCallback(() => {
+        if (html5QrCodeRef.current) {
+            return; // Already started or starting
         }
 
         setIsCameraInitializing(true);
         setCameraError(null);
-        
-        const qrCodeScanner = new Html5Qrcode(scannerContainerId, {
-             // verbose: true // Uncomment for debug logs
-        });
-        html5QrCodeRef.current = qrCodeScanner;
 
-        qrCodeScanner.start(
+        const newScanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+        html5QrCodeRef.current = newScanner;
+
+        newScanner.start(
             { facingMode: "user" },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
+            { fps: 5, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
                 handleScanRef.current(decodedText);
             },
-            (errorMessage) => { /* Optional error callback */ }
+            (errorMessage) => { /* ignore */ }
         )
-        .then(() => {
-            setIsCameraInitializing(false);
-        })
+        .then(() => setIsCameraInitializing(false))
         .catch((err) => {
-            const errorMessage = err?.message || String(err);
+            const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
             setIsCameraInitializing(false);
+            html5QrCodeRef.current = null; // Clean up on failure
             toast({
                 variant: 'destructive',
                 title: 'Gagal Mengakses Kamera',
-                description: 'Harap izinkan akses kamera di pengaturan browser Anda dan pastikan tidak ada aplikasi lain yang menggunakannya.'
+                description: 'Harap izinkan akses kamera di pengaturan browser Anda.'
             });
         });
-
-        // Cleanup function to stop the scanner
+    }, [scannerContainerId, toast]);
+    
+    useEffect(() => {
         return () => {
-            if (html5QrCodeRef.current?.isScanning) {
-                html5QrCodeRef.current.stop().catch(err => {
-                    console.warn("Gagal menghentikan pemindai saat cleanup.", err);
-                });
-            }
+            // Ensure scanner is stopped on component unmount
+            stopScanner();
         };
-    }, [scanMode, scannerContainerId, toast]);
+    }, [stopScanner]);
+
+    const handleTabChange = (value: 'input' | 'camera') => {
+        setScanMode(value);
+        if (value === 'camera') {
+            startScanner();
+        } else {
+            stopScanner();
+        }
+    };
+
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -421,7 +437,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Tabs value={scanMode} onValueChange={(value) => setScanMode(value as 'input' | 'camera')} className="w-full">
+                    <Tabs value={scanMode} onValueChange={(value) => handleTabChange(value as 'input' | 'camera')} className="w-full">
                         <TabsList className="grid w-full grid-cols-2">
                             <TabsTrigger value="input">
                                 <ScanLine className="mr-2 h-4 w-4" />
@@ -435,6 +451,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         <TabsContent value="input" className="mt-4">
                             <Input
                                 ref={scannerInputRef}
+                                id={`nisn-input-${grade}`}
                                 placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
                                 disabled={isLoading || isProcessing}
                                 onKeyDown={(e) => {
