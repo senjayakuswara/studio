@@ -95,8 +95,9 @@ export default function SiswaPage() {
   const [filterClass, setFilterClass] = useState("all")
   const { toast } = useToast()
 
-  const classMap = useMemo(() => new Map(classes.map(c => [c.id, `${c.name} (${c.grade})`])), [classes]);
-  const classNameAndGradeMap = useMemo(() => new Map(classes.map(c => [`${c.name} (${c.grade})`, c.id])), [classes]);
+  const classObjectMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
+  const classLookupMap = useMemo(() => new Map(classes.map(c => [`${c.grade.toUpperCase()}|${c.name.toUpperCase()}`, c.id])), [classes]);
+  const classMapForPreview = useMemo(() => new Map(classes.map(c => [c.id, `${c.name} (${c.grade})`])), [classes]);
   
   const filteredStudents = useMemo(() => {
     return students
@@ -229,8 +230,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Nama Kelas (Tingkat)", "Jenis Kelamin"];
-    const example = ["1234567890", "Budi Santoso", "MIPA 1 (X)", "Laki-laki"];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -248,12 +249,16 @@ export default function SiswaPage() {
       return;
     }
 
-    const dataToExport = filteredStudents.map(student => ({
-      "NISN": student.nisn,
-      "Nama": student.nama,
-      "Nama Kelas (Tingkat)": classMap.get(student.classId) || "Kelas Tidak Ditemukan",
-      "Jenis Kelamin": student.jenisKelamin,
-    }));
+    const dataToExport = filteredStudents.map(student => {
+        const classInfo = classObjectMap.get(student.classId);
+        return {
+            "NISN": student.nisn,
+            "Nama": student.nama,
+            "Tingkat": classInfo?.grade || "N/A",
+            "Nama Kelas": classInfo?.name || "Kelas Dihapus",
+            "Jenis Kelamin": student.jenisKelamin,
+        }
+    });
     
     const worksheet = xlsx.utils.json_to_sheet(dataToExport);
     const workbook = xlsx.utils.book_new();
@@ -262,7 +267,8 @@ export default function SiswaPage() {
     const columnWidths = [
         { wch: 15 }, // NISN
         { wch: 30 }, // Nama
-        { wch: 20 }, // Nama Kelas (Tingkat)
+        { wch: 10 }, // Tingkat
+        { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
     ];
     worksheet['!cols'] = columnWidths;
@@ -290,12 +296,15 @@ export default function SiswaPage() {
             let invalidCount = 0;
 
             json.forEach((row: any[]) => {
-                const classId = classNameAndGradeMap.get(String(row[2] || ""));
+                const grade = String(row[2] || "").toUpperCase();
+                const className = String(row[3] || "").toUpperCase();
+                const classId = classLookupMap.get(`${grade}|${className}`);
+
                 const studentData = {
                     nisn: String(row[0] || ""),
                     nama: String(row[1] || ""),
                     classId: classId,
-                    jenisKelamin: String(row[3] || ""),
+                    jenisKelamin: String(row[4] || ""),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -338,7 +347,7 @@ export default function SiswaPage() {
                  toast({
                     variant: "destructive",
                     title: "Gagal Memproses File",
-                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Nama Kelas (Tingkat)' di file Excel sudah terdaftar di Manajemen Kelas.",
+                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Tingkat' dan 'Nama Kelas' di file Excel sudah terdaftar di Manajemen Kelas.",
                 });
             }
 
@@ -536,7 +545,7 @@ export default function SiswaPage() {
           <div className="space-y-6 py-2">
             <div className="p-4 border rounded-md space-y-3">
                 <h3 className="font-medium">Langkah 1: Unduh Template</h3>
-                <p className="text-sm text-muted-foreground">Unduh template dan isi dengan data siswa. Pastikan format 'Nama Kelas (Tingkat)' sesuai.</p>
+                <p className="text-sm text-muted-foreground">Unduh template dan isi dengan data siswa. Pastikan kolom 'Tingkat' dan 'Nama Kelas' sesuai dengan yang ada di Manajemen Kelas.</p>
                 <Button variant="secondary" onClick={handleDownloadTemplate}>
                     <Download className="mr-2 h-4 w-4" />
                     Unduh Template Excel
@@ -575,7 +584,7 @@ export default function SiswaPage() {
                                         </TableCell>
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell>{student.nama}</TableCell>
-                                        <TableCell>{classMap.get(student.classId) || "Error"}</TableCell>
+                                        <TableCell>{classMapForPreview.get(student.classId) || "Error"}</TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
@@ -654,6 +663,7 @@ export default function SiswaPage() {
                     <TableRow>
                     <TableHead>NISN</TableHead>
                     <TableHead>Nama</TableHead>
+                    <TableHead>Tingkat</TableHead>
                     <TableHead>Kelas</TableHead>
                     <TableHead>Jenis Kelamin</TableHead>
                     <TableHead>
@@ -663,36 +673,40 @@ export default function SiswaPage() {
                 </TableHeader>
                 <TableBody>
                     {filteredStudents.length > 0 ? (
-                    filteredStudents.map((student) => (
-                        <TableRow key={student.id}>
-                        <TableCell>{student.nisn}</TableCell>
-                        <TableCell className="font-medium">{student.nama}</TableCell>
-                        <TableCell>{classMap.get(student.classId) || "Kelas Dihapus"}</TableCell>
-                        <TableCell>{student.jenisKelamin}</TableCell>
-                        <TableCell>
-                            <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                <span className="sr-only">Buka menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Aksi</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => openEditDialog(student)}>
-                                Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
-                                Hapus
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                            </DropdownMenu>
-                        </TableCell>
-                        </TableRow>
-                    ))
+                    filteredStudents.map((student) => {
+                        const classInfo = classObjectMap.get(student.classId);
+                        return (
+                            <TableRow key={student.id}>
+                            <TableCell>{student.nisn}</TableCell>
+                            <TableCell className="font-medium">{student.nama}</TableCell>
+                            <TableCell>{classInfo?.grade || 'N/A'}</TableCell>
+                            <TableCell>{classInfo?.name || 'Kelas Dihapus'}</TableCell>
+                            <TableCell>{student.jenisKelamin}</TableCell>
+                            <TableCell>
+                                <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <span className="sr-only">Buka menu</span>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Aksi</DropdownMenuLabel>
+                                    <DropdownMenuItem onClick={() => openEditDialog(student)}>
+                                    Edit
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
+                                    Hapus
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                                </DropdownMenu>
+                            </TableCell>
+                            </TableRow>
+                        )
+                    })
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={5} className="h-24 text-center">
+                        <TableCell colSpan={6} className="h-24 text-center">
                           {students.length > 0 ? "Tidak ada siswa yang cocok dengan filter." : "Belum ada data siswa."}
                         </TableCell>
                     </TableRow>
