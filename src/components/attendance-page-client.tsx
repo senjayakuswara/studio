@@ -36,8 +36,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2 } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
+import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -84,6 +90,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
+    const [isCameraInitializing, setIsCameraInitializing] = useState(false);
+    const [cameraError, setCameraError] = useState<string | null>(null);
     
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
@@ -338,54 +346,66 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [handleScan]);
 
     useEffect(() => {
-        if (scanMode !== 'camera') {
-            return;
-        }
+        let scanner: Html5Qrcode | null = null;
+        
+        const setupScanner = async () => {
+            if (scanMode !== 'camera' || !document.getElementById(scannerContainerId)) {
+                return;
+            }
 
-        if (!document.getElementById(scannerContainerId)) {
-            return;
-        }
+            setIsCameraInitializing(true);
+            setCameraError(null);
 
-        const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+            try {
+                // This explicit call is crucial for prompting permissions reliably.
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
 
-        const qrCodeSuccessCallback = (decodedText: string) => {
-            handleScanRef.current(decodedText);
-            if (scanner.getState() === Html5QrcodeScannerState.SCANNING) {
-                try {
-                    scanner.pause(true);
-                    setTimeout(() => {
-                        if (scanner.getState() === Html5QrcodeScannerState.PAUSED) {
-                            scanner.resume();
+                const qrCodeSuccessCallback = (decodedText: string) => {
+                    handleScanRef.current(decodedText);
+                    if (scanner?.getState() === Html5QrcodeScannerState.SCANNING) {
+                        try {
+                            scanner.pause(true);
+                            setTimeout(() => {
+                                if (scanner?.getState() === Html5QrcodeScannerState.PAUSED) {
+                                    scanner.resume();
+                                }
+                            }, 2000);
+                        } catch(e) {
+                            console.warn("Error pausing/resuming scanner", e);
                         }
-                    }, 2000);
-                } catch(e) {
-                    console.warn("Error pausing/resuming scanner", e);
-                }
+                    }
+                };
+
+                const config = { 
+                    fps: 10, 
+                    qrbox: { width: 250, height: 250 },
+                    rememberLastUsedCamera: true,
+                };
+
+                await scanner.start(
+                    { facingMode: "environment" },
+                    config,
+                    qrCodeSuccessCallback,
+                    () => {}
+                );
+
+            } catch (err: any) {
+                const errorMessage = err?.message || 'Unknown error';
+                setCameraError(errorMessage);
+                addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
+                toast({
+                    variant: 'destructive',
+                    title: 'Kamera Gagal Dimulai',
+                    description: 'Pastikan izin kamera sudah diberikan dan tidak ada aplikasi lain yang menggunakannya.',
+                });
+            } finally {
+                setIsCameraInitializing(false);
             }
         };
 
-        const qrCodeErrorCallback = () => {};
-
-        const config = { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            rememberLastUsedCamera: true,
-        };
-            
-        scanner.start(
-            { facingMode: "environment" },
-            config,
-            qrCodeSuccessCallback,
-            qrCodeErrorCallback
-        ).catch(err => {
-            addLog(`Gagal memulai kamera: ${err}`, 'error');
-            toast({
-                variant: 'destructive',
-                title: 'Kamera Gagal Dimulai',
-                description: 'Pastikan izin kamera sudah diberikan di pengaturan browser Anda.',
-            });
-            setScanMode('input');
-        });
+        setupScanner();
 
         return () => {
             if (scanner && scanner.isScanning) {
@@ -394,7 +414,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 });
             }
         };
-    }, [scanMode, scannerContainerId, addLog, toast]);
+    }, [scanMode, scannerContainerId, addLog, toast, handleScanRef]);
 
     const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || { status: 'Belum Absen' };
@@ -442,7 +462,28 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             />
                         </TabsContent>
                         <TabsContent value="camera" className="mt-4">
-                            <div id={scannerContainerId} className="w-full aspect-square rounded-md bg-muted border overflow-hidden" />
+                            <div className="w-full aspect-square rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                                <div id={scannerContainerId} className={cn("w-full h-full", { 'hidden': isCameraInitializing || !!cameraError })} />
+                                
+                                {isCameraInitializing && (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                        <p className="mt-2 text-muted-foreground">Meminta izin kamera...</p>
+                                    </div>
+                                )}
+
+                                {cameraError && (
+                                    <div className="absolute inset-0 flex items-center justify-center p-4">
+                                        <Alert variant="destructive">
+                                          <ShieldAlert className="h-4 w-4" />
+                                          <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
+                                          <AlertDescription>
+                                            Harap izinkan akses kamera di pengaturan browser Anda untuk melanjutkan.
+                                          </AlertDescription>
+                                        </Alert>
+                                    </div>
+                                )}
+                            </div>
                             <p className="text-xs text-muted-foreground text-center mt-2">
                                 Arahkan kamera ke QR Code atau Barcode NISN siswa.
                             </p>
