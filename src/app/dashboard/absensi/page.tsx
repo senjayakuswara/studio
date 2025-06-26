@@ -166,19 +166,35 @@ export default function AbsensiPage() {
     try {
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageMargin = 15;
 
       // Header
       if (reportConfig.logoUrl) {
-        doc.addImage(reportConfig.logoUrl, 'PNG', 15, 10, 20, 20);
+          try {
+              doc.addImage(reportConfig.logoUrl, 'PNG', pageMargin, 12, 25, 25);
+          } catch(e) {
+              console.error("Could not add logo to PDF.", e);
+          }
       }
-      doc.setFontSize(14);
-      doc.text(reportConfig.title.split('\n'), pageWidth / 2, 15, { align: 'center' });
       
+      const textStartX = pageMargin + 25 + 7; // logo x + logo width + gap
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      const titleLines = doc.splitTextToSize(reportConfig.title, pageWidth - textStartX - pageMargin);
+      doc.text(titleLines, textStartX, 18);
+      
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(11);
+      const titleHeight = doc.getTextDimensions(titleLines).h;
       const reportDate = `Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`;
-      doc.text(reportDate, pageWidth / 2, 30, { align: 'center' });
+      doc.text(reportDate, textStartX, 18 + titleHeight + 2);
+      
+      const headerBottomY = 12 + 25 + 5; // Y-pos of logo + logo height + gap
+      doc.setLineWidth(0.5);
+      doc.line(pageMargin, headerBottomY, pageWidth - pageMargin, headerBottomY);
 
-      let finalY = 38;
+      let finalY = headerBottomY + 10;
 
       // Table (or no data message)
       if (filteredRecords.length > 0) {
@@ -193,7 +209,7 @@ export default function AbsensiPage() {
         ]);
         
         autoTable(doc, {
-          startY: 38,
+          startY: finalY,
           head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
           body: tableData,
           theme: 'grid',
@@ -204,8 +220,8 @@ export default function AbsensiPage() {
         finalY = (doc as any).lastAutoTable.finalY || 60;
       } else {
         doc.setFontSize(10);
-        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, 50, { align: 'center' });
-        finalY = 60;
+        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, finalY + 10, { align: 'center' });
+        finalY = finalY + 20;
       }
 
       // Footer (Titimangsa)
