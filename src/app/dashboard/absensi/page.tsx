@@ -153,15 +153,6 @@ export default function AbsensiPage() {
   }, [attendanceRecords, filterClass])
 
   const handlePrintReport = () => {
-    if (filteredRecords.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Tidak Ada Data",
-        description: "Tidak ada data untuk dicetak pada tanggal dan kelas yang dipilih.",
-      });
-      return;
-    }
-
     if (!reportConfig) {
       toast({
         variant: "destructive",
@@ -174,16 +165,6 @@ export default function AbsensiPage() {
     setIsPrinting(true);
     try {
       const doc = new jsPDF();
-      const tableData = filteredRecords.map((record, index) => [
-        index + 1,
-        record.nisn,
-        record.studentName,
-        `${record.classInfo?.name || 'N/A'} (${record.classInfo?.grade || 'N/A'})`,
-        record.status,
-        record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
-        record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
-      ]);
-      
       const pageWidth = doc.internal.pageSize.getWidth();
 
       // Header
@@ -197,18 +178,37 @@ export default function AbsensiPage() {
       const reportDate = `Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`;
       doc.text(reportDate, pageWidth / 2, 30, { align: 'center' });
 
-      // Table
-      autoTable(doc, {
-        startY: 38,
-        head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
-        body: tableData,
-        theme: 'grid',
-        headStyles: { fillColor: [41, 128, 185], textColor: 255 },
-        styles: { cellPadding: 2, fontSize: 8 },
-      });
+      let finalY = 38;
+
+      // Table (or no data message)
+      if (filteredRecords.length > 0) {
+        const tableData = filteredRecords.map((record, index) => [
+          index + 1,
+          record.nisn,
+          record.studentName,
+          `${record.classInfo?.name || 'N/A'} (${record.classInfo?.grade || 'N/A'})`,
+          record.status,
+          record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
+          record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
+        ]);
+        
+        autoTable(doc, {
+          startY: 38,
+          head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
+          body: tableData,
+          theme: 'grid',
+          headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+          styles: { cellPadding: 2, fontSize: 8 },
+        });
+
+        finalY = (doc as any).lastAutoTable.finalY || 60;
+      } else {
+        doc.setFontSize(10);
+        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, 50, { align: 'center' });
+        finalY = 60;
+      }
 
       // Footer (Titimangsa)
-      const finalY = (doc as any).lastAutoTable.finalY || 60;
       let signatureY = finalY + 15;
       
       if (signatureY > doc.internal.pageSize.getHeight() - 60) {
