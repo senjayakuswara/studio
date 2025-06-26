@@ -301,10 +301,10 @@ export default function DashboardPage() {
                             </Avatar>
                             <div className="flex-1">
                                 <p className="font-medium">{activity.studentName}</p>
-                                <p className="text-sm text-muted-foreground">
+                                <div className="text-sm text-muted-foreground">
                                     Status: <Badge variant={statusBadgeVariant[activity.status] || 'outline'} className="ml-1">{activity.status}</Badge> 
                                     {activity.timestampMasuk && ` pada ${format(activity.timestampMasuk.toDate(), "dd/MM/yy HH:mm")}`}
-                                </p>
+                                </div>
                             </div>
                         </div>
                     ))}
