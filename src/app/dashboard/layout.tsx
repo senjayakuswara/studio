@@ -251,7 +251,10 @@ export default function DashboardLayout({
             <div></div>
             <UserNav />
         </header>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <div className="flex-1 p-4 md:p-6">{children}</div>
+        <footer className="bg-muted p-4 text-center text-sm text-muted-foreground">
+            <p>2025 @ E-Absensi created by KS</p>
+        </footer>
       </SidebarInset>
     </SidebarProvider>
   )
