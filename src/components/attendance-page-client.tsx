@@ -315,74 +315,47 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     // Effect for camera management
     useEffect(() => {
-        if (scanMode !== 'camera' || !document.getElementById(scannerContainerId)) {
-            return;
-        }
+        if (scanMode === 'camera') {
+            setIsCameraInitializing(true);
+            setCameraError(null);
+            
+            const qrCodeScanner = new Html5Qrcode(scannerContainerId);
+            html5QrCodeRef.current = qrCodeScanner;
 
-        setIsCameraInitializing(true);
-        setCameraError(null);
-
-        // Ensure the previous instance is stopped before creating a new one.
-        if (html5QrCodeRef.current?.isScanning) {
-            html5QrCodeRef.current.stop().catch(() => {});
-        }
-        
-        const qrCodeScanner = new Html5Qrcode(scannerContainerId);
-        html5QrCodeRef.current = qrCodeScanner;
-
-        const config = {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            rememberLastUsedCamera: true
-        };
-
-        const successCallback = (decodedText: string) => {
-            handleScanRef.current(decodedText);
-        };
-        
-        Html5Qrcode.getCameras().then(cameras => {
-            if (cameras && cameras.length) {
-                qrCodeScanner.start(
-                    { facingMode: "user" },
-                    config,
-                    successCallback,
-                    (errorMessage) => { /* Optional error callback */ }
-                )
-                .then(() => {
-                    setIsCameraInitializing(false);
-                })
-                .catch((err) => {
-                    const errorMessage = err?.message || String(err);
-                    setCameraError(errorMessage);
-                    addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
-                    setIsCameraInitializing(false);
+            qrCodeScanner.start(
+                { facingMode: "user" },
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                (decodedText) => {
+                    if (!isProcessingScan) {
+                        handleScanRef.current(decodedText);
+                    }
+                },
+                (errorMessage) => { /* Optional error callback */ }
+            )
+            .then(() => {
+                setIsCameraInitializing(false);
+            })
+            .catch((err) => {
+                const errorMessage = err?.message || String(err);
+                setCameraError(errorMessage);
+                setIsCameraInitializing(false);
+                toast({
+                    variant: 'destructive',
+                    title: 'Gagal Mengakses Kamera',
+                    description: 'Harap izinkan akses kamera di pengaturan browser Anda dan pastikan tidak ada aplikasi lain yang menggunakannya.'
                 });
-            } else {
-                 setCameraError("Tidak ada kamera ditemukan.");
-                 addLog(`Tidak ada kamera yang terdeteksi.`, 'error');
-                 setIsCameraInitializing(false);
-            }
-        }).catch(err => {
-             const errorMessage = err?.message || String(err);
-             setCameraError(errorMessage);
-             addLog(`Gagal mendapatkan izin kamera: ${errorMessage}`, 'error');
-             toast({
-                variant: 'destructive',
-                title: 'Gagal Mengakses Kamera',
-                description: 'Harap izinkan akses kamera di pengaturan browser Anda.'
             });
-             setIsCameraInitializing(false);
-        });
+        }
 
-        // Cleanup function
+        // Cleanup function to stop the scanner
         return () => {
-            if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+            if (html5QrCodeRef.current?.isScanning) {
                 html5QrCodeRef.current.stop().catch(err => {
                     console.warn("Gagal menghentikan pemindai saat cleanup.", err);
                 });
             }
         };
-    }, [scanMode, scannerContainerId, addLog, toast]);
+    }, [scanMode, scannerContainerId, isProcessingScan, toast]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -467,22 +440,22 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         </TabsContent>
                         <TabsContent value="camera" className="mt-4">
                             <div className="w-full aspect-square rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                                <div id={scannerContainerId} className={cn("w-full h-full", { 'hidden': isCameraInitializing || !!cameraError })} />
+                                <div id={scannerContainerId} className="w-full h-full" />
                                 
                                 {isCameraInitializing && (
                                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80">
                                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                        <p className="mt-2 text-muted-foreground">Meminta izin kamera...</p>
+                                        <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
                                     </div>
                                 )}
 
-                                {cameraError && (
-                                    <div className="absolute inset-0 flex items-center justify-center p-4">
+                                {cameraError && !isCameraInitializing && (
+                                    <div className="absolute inset-0 flex items-center justify-center p-4 bg-background/80">
                                         <Alert variant="destructive">
                                           <ShieldAlert className="h-4 w-4" />
                                           <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
                                           <AlertDescription>
-                                            {cameraError} Harap izinkan akses kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.
+                                            {cameraError}
                                           </AlertDescription>
                                         </Alert>
                                     </div>
