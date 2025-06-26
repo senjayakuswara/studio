@@ -90,6 +90,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
+    const [isProcessingScan, setIsProcessingScan] = useState(false);
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     
@@ -112,6 +113,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
+
+    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
+        return attendanceData[studentId] || {};
+    }, [attendanceData]);
 
     useEffect(() => {
         async function fetchData() {
@@ -204,65 +209,67 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [isLoading, scanMode]);
 
     const handleScan = useCallback(async (nisn: string) => {
-        if (!nisn.trim()) return;
+        if (!nisn.trim() || isProcessingScan) return;
+        
+        setIsProcessingScan(true);
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
-        if (!schoolHours) {
-            addLog("Error: Pengaturan jam belum dimuat.", "error");
-            toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
-            return;
-        }
-
-        const student = allStudents.find(s => s.nisn === nisn.trim());
-
-        if (!student) {
-            addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
-            toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
-            return;
-        }
-        
-        if (student.grade !== grade) {
-            const studentClass = classMap.get(student.classId)
-            addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
-            toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
-            return;
-        }
-
-        const existingRecord = attendanceData[student.id];
-        const now = new Date();
-
-        if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
-            addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
-            toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
-            return;
-        }
-
-        const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
-        const jamPulangTime = new Date();
-        jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
-
-        // --- Logic for Clock-in ---
-        if (!existingRecord || !existingRecord.timestampMasuk) {
-             if (now > jamPulangTime) {
-                addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
-                toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
+        try {
+            if (!schoolHours) {
+                addLog("Error: Pengaturan jam belum dimuat.", "error");
+                toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
                 return;
             }
-
-            const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
-            const deadline = new Date();
-            deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
-            const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
+    
+            const student = allStudents.find(s => s.nisn === nisn.trim());
+    
+            if (!student) {
+                addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
+                toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
+                return;
+            }
             
-            const payload = {
-                studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
-                status,
-                timestampMasuk: Timestamp.fromDate(now),
-                timestampPulang: null,
-                recordDate: Timestamp.fromDate(startOfDay(now)),
-            };
-
-            try {
+            if (student.grade !== grade) {
+                const studentClass = classMap.get(student.classId)
+                addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
+                toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
+                return;
+            }
+    
+            const existingRecord = attendanceData[student.id];
+            const now = new Date();
+    
+            if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
+                addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
+                toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
+                return;
+            }
+    
+            const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
+            const jamPulangTime = new Date();
+            jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
+    
+            // --- Logic for Clock-in ---
+            if (!existingRecord || !existingRecord.timestampMasuk) {
+                 if (now > jamPulangTime) {
+                    addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
+                    toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
+                    return;
+                }
+    
+                const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+                const deadline = new Date();
+                deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
+                const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
+                
+                const payload = {
+                    studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
+                    status,
+                    timestampMasuk: Timestamp.fromDate(now),
+                    timestampPulang: null,
+                    recordDate: Timestamp.fromDate(startOfDay(now)),
+                };
+    
                 if (existingRecord?.id) {
                     const docRef = doc(db, "attendance", existingRecord.id)
                     await updateDoc(docRef, payload);
@@ -273,50 +280,53 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 }
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
-            } catch (error) {
-                 addLog(`Gagal menyimpan absensi untuk ${student.nama}.`, 'error');
-                 toast({ variant: "destructive", title: "Gagal Menyimpan" });
+            } 
+            // --- Logic for Clock-out ---
+            else if (!existingRecord.timestampPulang) {
+                if (now < jamPulangTime) {
+                    addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
+                    toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
+                    return;
+                }
+                 const payload = { timestampPulang: Timestamp.fromDate(now) };
+                 await updateDoc(doc(db, "attendance", existingRecord.id!), payload);
+                 setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
+                 addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
+                 toast({ title: "Absen Pulang Berhasil" });
+            } else {
+                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
+                toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
             }
-        } 
-        // --- Logic for Clock-out ---
-        else if (!existingRecord.timestampPulang) {
-            if (now < jamPulangTime) {
-                addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
-                toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
-                return;
-            }
-             const payload = { timestampPulang: Timestamp.fromDate(now) };
-             try {
-                await updateDoc(doc(db, "attendance", existingRecord.id!), payload);
-                setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
-                addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
-                toast({ title: "Absen Pulang Berhasil" });
-             } catch (error) {
-                addLog(`Gagal menyimpan absen pulang untuk ${student.nama}.`, 'error');
-                toast({ variant: "destructive", title: "Gagal Menyimpan" });
-             }
-        } else {
-            addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
-            toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
+        } catch (error) {
+            console.error("Error handling scan:", error);
+            addLog(`Gagal memproses NISN ${nisn}.`, 'error');
+            toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
+        } finally {
+            // Add a short delay before allowing another scan
+            setTimeout(() => setIsProcessingScan(false), 2000);
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, isProcessingScan]);
     
+    // Using a ref to hold the latest version of handleScan for the camera callback
     const handleScanRef = useRef(handleScan);
     useEffect(() => {
         handleScanRef.current = handleScan;
     }, [handleScan]);
 
+    // Effect for camera management
     useEffect(() => {
-        if (scanMode !== 'camera') {
-            if (html5QrCodeRef.current?.isScanning) {
-                html5QrCodeRef.current.stop().catch(err => console.warn("Gagal menghentikan pemindai.", err));
-            }
+        if (scanMode !== 'camera' || !document.getElementById(scannerContainerId)) {
             return;
         }
 
         setIsCameraInitializing(true);
         setCameraError(null);
 
+        // Ensure the previous instance is stopped before creating a new one.
+        if (html5QrCodeRef.current?.isScanning) {
+            html5QrCodeRef.current.stop().catch(() => {});
+        }
+        
         const qrCodeScanner = new Html5Qrcode(scannerContainerId);
         html5QrCodeRef.current = qrCodeScanner;
 
@@ -328,49 +338,51 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         const successCallback = (decodedText: string) => {
             handleScanRef.current(decodedText);
-            if (qrCodeScanner.getState() === Html5QrcodeScannerState.SCANNING) {
-                qrCodeScanner.pause(true).catch(err => console.warn("Gagal menjeda pemindai", err));
-                setTimeout(() => {
-                    if (qrCodeScanner.getState() === Html5QrcodeScannerState.PAUSED) {
-                        qrCodeScanner.resume().catch(err => console.warn("Gagal melanjutkan pemindai", err));
-                    }
-                }, 2000);
-            }
         };
-
-        qrCodeScanner.start(
-            { facingMode: "user" },
-            config,
-            successCallback,
-            (errorMessage) => { /* Optional error callback */ }
-        )
-        .then(() => {
-            setIsCameraInitializing(false);
-        })
-        .catch((err) => {
-            const errorMessage = err?.message || String(err);
-            setCameraError(errorMessage);
-            addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
-            toast({
+        
+        Html5Qrcode.getCameras().then(cameras => {
+            if (cameras && cameras.length) {
+                qrCodeScanner.start(
+                    { facingMode: "user" },
+                    config,
+                    successCallback,
+                    (errorMessage) => { /* Optional error callback */ }
+                )
+                .then(() => {
+                    setIsCameraInitializing(false);
+                })
+                .catch((err) => {
+                    const errorMessage = err?.message || String(err);
+                    setCameraError(errorMessage);
+                    addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
+                    setIsCameraInitializing(false);
+                });
+            } else {
+                 setCameraError("Tidak ada kamera ditemukan.");
+                 addLog(`Tidak ada kamera yang terdeteksi.`, 'error');
+                 setIsCameraInitializing(false);
+            }
+        }).catch(err => {
+             const errorMessage = err?.message || String(err);
+             setCameraError(errorMessage);
+             addLog(`Gagal mendapatkan izin kamera: ${errorMessage}`, 'error');
+             toast({
                 variant: 'destructive',
                 title: 'Gagal Mengakses Kamera',
-                description: 'Harap berikan izin kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.'
+                description: 'Harap izinkan akses kamera di pengaturan browser Anda.'
             });
-            setIsCameraInitializing(false);
+             setIsCameraInitializing(false);
         });
 
+        // Cleanup function
         return () => {
-            if (html5QrCodeRef.current?.isScanning) {
+            if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
                 html5QrCodeRef.current.stop().catch(err => {
                     console.warn("Gagal menghentikan pemindai saat cleanup.", err);
                 });
             }
         };
     }, [scanMode, scannerContainerId, addLog, toast]);
-
-    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
-        return attendanceData[studentId] || {};
-    }, [attendanceData]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -445,7 +457,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             <Input
                                 ref={scannerInputRef}
                                 placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                                disabled={isLoading}
+                                disabled={isLoading || isProcessingScan}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         handleScan(e.currentTarget.value);
@@ -470,7 +482,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                           <ShieldAlert className="h-4 w-4" />
                                           <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
                                           <AlertDescription>
-                                            Harap izinkan akses kamera di pengaturan browser Anda untuk melanjutkan.
+                                            {cameraError} Harap izinkan akses kamera dan pastikan tidak ada aplikasi lain yang menggunakannya.
                                           </AlertDescription>
                                         </Alert>
                                     </div>
