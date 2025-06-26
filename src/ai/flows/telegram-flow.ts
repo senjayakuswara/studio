@@ -113,7 +113,6 @@ export async function processTelegramWebhook(payload: any) {
         return;
     }
 
-    // Handle different types of messages from Telegram
     const message = payload.message || payload.edited_message;
     if (!message) {
         console.log("Received a non-message update, skipping:", payload);
@@ -128,14 +127,10 @@ export async function processTelegramWebhook(payload: any) {
         return;
     }
 
-
     if (text === '/start') {
         const welcomeMessage = "Selamat datang di Notifikasi AbsensiKu Cerdas SMAS PGRI Naringgul. Untuk menghubungkan akun Anda dengan data absensi putra/i Anda, silakan masukkan Nomor Induk Siswa Nasional (NISN) anak Anda.";
         await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
-        return;
-    }
-    
-    if (/^\d+$/.test(text)) {
+    } else if (/^\d+$/.test(text)) {
         const nisn = text;
         try {
             const q = query(collection(db, "students"), where("nisn", "==", nisn));
@@ -158,7 +153,7 @@ export async function processTelegramWebhook(payload: any) {
             await sendTelegramMessage(botToken, String(chatId), errorMessage);
         }
     } else {
-        const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi.";
+        const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi, atau gunakan perintah /start untuk memulai.";
         await sendTelegramMessage(botToken, String(chatId), defaultReply);
     }
 }
@@ -177,6 +172,7 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     const status = record.status;
     const isClockOut = !!record.timestampPulang;
 
+    // Check if notification for this status is enabled
     if (status === 'Hadir' && !isClockOut && !config.notifHadir) return;
     if (status === 'Terlambat' && !isClockOut && !config.notifTerlambat) return;
     if (isClockOut && !config.notifHadir) return; // Assume clock-out notif follows "hadir" setting
@@ -190,27 +186,21 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     const classInfo = classSnap.data() as Class;
     
-    const now = new Date();
     let timestamp: Date;
     let title: string;
     const finalStatus = isClockOut ? 'Pulang' : record.status;
 
-    // Special handling for manual statuses (Sakit, Izin, etc.)
-    if (['Sakit', 'Izin', 'Alfa', 'Dispen'].includes(record.status)) {
-        timestamp = now; // Use current time for manual status changes
-        title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
-    } else if (isClockOut && record.timestampPulang) {
+    if (isClockOut && record.timestampPulang) {
         timestamp = new Date(record.timestampPulang);
         title = `Absensi Pulang: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
-    } else if (record.timestampMasuk) {
+    } else if (!isClockOut && record.timestampMasuk) {
         timestamp = new Date(record.timestampMasuk);
         title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     } else {
-        // Fallback for unexpected cases
-        timestamp = new Date(record.recordDate);
+        // This now correctly handles manual statuses (Sakit, Izin, Alfa, Dispen)
+        timestamp = new Date(); // Use current time for manual status changes
         title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
     }
-
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",

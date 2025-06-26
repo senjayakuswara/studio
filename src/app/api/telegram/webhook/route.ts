@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
     try {
         const payload = await request.json();
-        // Don't wait for the function to complete. Respond to Telegram immediately.
-        processTelegramWebhook(payload);
+        // Await the function to ensure it completes before the server responds.
+        await processTelegramWebhook(payload);
         return NextResponse.json({ status: "ok" });
     } catch (error) {
         console.error("Error in Telegram webhook:", error);
