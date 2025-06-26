@@ -39,6 +39,10 @@ type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: str
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
   id?: string
+  studentId: string
+  nisn: string
+  studentName: string
+  classId: string
   status: AttendanceStatus
   timestampMasuk: Timestamp | null
   timestampPulang: Timestamp | null
@@ -76,6 +80,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
+    
+    const sortedStudents = useMemo(() => {
+        return [...allStudents].sort((a, b) => a.nama.localeCompare(b.nama));
+    }, [allStudents]);
 
     useEffect(() => {
         async function fetchData() {
@@ -138,12 +146,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 const data = doc.data();
                                 initialAttendanceData[data.studentId] = {
                                     id: doc.id,
-                                    status: data.status,
-                                    timestampMasuk: data.timestampMasuk || null,
-                                    timestampPulang: data.timestampPulang || null,
-                                    recordDate: data.recordDate,
-                                    notes: data.notes
-                                };
+                                    ...data,
+                                } as AttendanceRecord;
                             });
                         }
                         setAttendanceData(initialAttendanceData);
@@ -241,11 +245,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             try {
                 if (existingRecord?.id) {
-                    await updateDoc(doc(db, "attendance", existingRecord.id), payload);
-                    setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
+                    const docRef = doc(db, "attendance", existingRecord.id)
+                    await updateDoc(docRef, payload);
+                    setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload, id: docRef.id }}));
                 } else {
                     const docRef = await addDoc(collection(db, "attendance"), payload);
-                    setAttendanceData(prev => ({...prev, [student.id]: { id: docRef.id, ...payload }}));
+                    setAttendanceData(prev => ({...prev, [student.id]: { ...payload, id: docRef.id }}));
                 }
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
@@ -263,7 +268,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
              const payload = { timestampPulang: Timestamp.fromDate(now) };
              try {
-                await updateDoc(doc(db, "attendance", existingRecord.id), payload);
+                await updateDoc(doc(db, "attendance", existingRecord.id!), payload);
                 setAttendanceData(prev => ({...prev, [student.id]: { ...existingRecord, ...payload }}));
                 addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
                 toast({ title: "Absen Pulang Berhasil" });
@@ -289,21 +294,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             status,
             timestampMasuk: null,
             timestampPulang: null,
-            recordDate: existingRecord?.recordDate || Timestamp.fromDate(now),
+            recordDate: existingRecord?.recordDate || Timestamp.fromDate(startOfDay(now)),
+            notes: `Manual input: ${status}`
         };
 
         try {
             let docId = existingRecord?.id;
             if (docId) {
-                await updateDoc(doc(db, "attendance", docId), payload);
+                await updateDoc(doc(db, "attendance", docId), payload as any);
             } else {
-                const docRef = await addDoc(collection(db, "attendance"), payload);
+                const newRecord = { ...payload };
+                const docRef = await addDoc(collection(db, "attendance"), newRecord);
                 docId = docRef.id;
             }
 
             setAttendanceData(prev => ({
                 ...prev,
-                [student.id]: { id: docId, ...payload }
+                [student.id]: { id: docId, ...payload } as AttendanceRecord
             }));
 
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
@@ -413,8 +420,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         ))
                         ) : sortedStudents.length > 0 ? (
                             sortedStudents.map((student) => {
-                                const { status, timestampMasuk, timestampPulang } = getAttendanceRecord(student.id);
+                                const record = getAttendanceRecord(student.id);
                                 const studentClass = classMap.get(student.classId);
+                                const status = record.status || 'Belum Absen';
                                 return (
                                     <TableRow key={student.id} data-status={status}>
                                         <TableCell>{student.nisn}</TableCell>
@@ -424,10 +432,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                             <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
                                         </TableCell>
                                         <TableCell className="text-center font-mono">
-                                            {timestampMasuk ? format(timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
+                                            {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
                                         </TableCell>
                                         <TableCell className="text-center font-mono">
-                                            {timestampPulang ? format(timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
+                                            {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <DropdownMenu>
