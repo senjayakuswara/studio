@@ -231,7 +231,10 @@ export default function KelasPage() {
                 )}
               />
               <DialogFooter>
-                <Button type="submit">Simpan</Button>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Simpan
+                </Button>
               </DialogFooter>
             </form>
           </Form>
