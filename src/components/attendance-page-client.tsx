@@ -92,6 +92,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -112,6 +113,44 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || {};
     }, [attendanceData]);
+
+    useEffect(() => {
+        // Initialize AudioContext on the client side
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }, []);
+
+    const playSound = useCallback((type: 'success' | 'error') => {
+        const audioCtx = audioContextRef.current;
+        if (!audioCtx) return;
+
+        // Browsers require user interaction to start AudioContext.
+        // We resume it here to be safe.
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        if (type === 'success') {
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // High-pitched beep
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime); // Gain < 1 to prevent clipping
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.2);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        } else { // error
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Low-pitched buzz
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.3);
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + 0.3);
+        }
+    }, []);
 
     useEffect(() => {
         async function fetchData() {
@@ -208,6 +247,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!schoolHours) {
                 addLog("Error: Pengaturan jam belum dimuat.", "error");
                 toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
+                playSound('error');
                 return;
             }
     
@@ -216,6 +256,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!student) {
                 addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
                 toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
+                playSound('error');
                 return;
             }
             
@@ -223,6 +264,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 const studentClass = classMap.get(student.classId)
                 addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
                 toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
+                playSound('error');
                 return;
             }
     
@@ -232,6 +274,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
                 toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
+                playSound('error');
                 return;
             }
     
@@ -244,6 +287,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
                     toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
+                    playSound('error');
                     return;
                 }
     
@@ -274,6 +318,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setAttendanceData(prev => ({...prev, [student.id]: newRecord }));
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
+                playSound('success');
                 
                 const serializableRecord = {
                     ...newRecord,
@@ -288,6 +333,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 if (now < jamPulangTime) {
                     addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
                     toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
+                    playSound('error');
                     return;
                 }
                  const payload = { timestampPulang: Timestamp.fromDate(now) };
@@ -297,6 +343,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  setAttendanceData(prev => ({...prev, [student.id]: updatedRecord}));
                  addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
                  toast({ title: "Absen Pulang Berhasil" });
+                 playSound('success');
                 
                 const serializableRecord = {
                     ...updatedRecord,
@@ -309,18 +356,20 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
+                playSound('error');
             }
         } catch (error) {
             console.error("Error handling scan:", error);
             addLog(`Gagal memproses NISN ${nisn}.`, 'error');
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
+            playSound('error');
         } finally {
             setTimeout(() => {
               processingLock.current = false;
               setIsProcessing(false);
             }, 2000); // Cooldown to prevent double scans
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
     const stopScanner = useCallback(() => {
         if (html5QrCodeRef.current?.isScanning) {
@@ -341,6 +390,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         setIsCameraInitializing(true);
         setCameraError(null);
+        
+        // Ensure AudioContext is resumed by a user gesture
+        if (audioContextRef.current?.state === 'suspended') {
+            audioContextRef.current.resume();
+        }
         
         const qrCode = new Html5Qrcode(scannerContainerId, { verbose: false });
         html5QrCodeRef.current = qrCode;
