@@ -86,7 +86,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
     
     const scannerInputRef = useRef<HTMLInputElement>(null)
-    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const { toast } = useToast()
 
@@ -343,15 +342,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             return;
         }
         
-        if (html5QrCodeRef.current) {
-            return;
-        }
-
-        const qrCodeScanner = new Html5Qrcode(scannerContainerId, {
+        const html5QrCode = new Html5Qrcode(scannerContainerId, {
             verbose: false,
         });
-        html5QrCodeRef.current = qrCodeScanner;
-        
+
         const config = { 
             fps: 10, 
             qrbox: { width: 250, height: 250 },
@@ -360,11 +354,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         const qrCodeSuccessCallback = (decodedText: string, decodedResult: any) => {
             handleScanRef.current(decodedText);
-            if (qrCodeScanner?.getState() === Html5QrcodeScannerState.SCANNING) {
-                qrCodeScanner.pause(true);
+            if (html5QrCode.getState() === Html5QrcodeScannerState.SCANNING) {
+                html5QrCode.pause(true);
                 setTimeout(() => {
-                    if (qrCodeScanner?.getState() === Html5QrcodeScannerState.PAUSED) {
-                        qrCodeScanner.resume();
+                    if (html5QrCode.getState() === Html5QrcodeScannerState.PAUSED) {
+                        html5QrCode.resume();
                     }
                 }, 2000);
             }
@@ -373,7 +367,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
            // ignore errors
         };
         
-        qrCodeScanner.start(
+        html5QrCode.start(
             { facingMode: "environment" },
             config,
             qrCodeSuccessCallback,
@@ -389,18 +383,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         });
         
         return () => {
-            if (html5QrCodeRef.current?.isScanning) {
-                html5QrCodeRef.current.stop()
-                    .then(() => {
-                        html5QrCodeRef.current = null;
-                    })
-                    .catch(err => {
-                        console.error('Failed to stop camera.', err);
-                    });
+            if (html5QrCode.isScanning) {
+                html5QrCode.stop().catch(err => {
+                    console.warn('Failed to stop camera on cleanup.', err);
+                });
             }
         };
 
-    }, [scanMode, addLog, toast, scannerContainerId]);
+    }, [scanMode, addLog, toast, scannerContainerId, handleScanRef]);
 
     const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || { status: 'Belum Absen' };
