@@ -129,7 +129,7 @@ export async function processTelegramWebhook(payload: any) {
 
     // Handle /start command
     if (text === '/start') {
-        const welcomeMessage = "Selamat datang di Notifikasi AbsensiKu Cerdas SMAS PGRI Naringgul. Untuk menghubungkan akun Anda dengan data absensi putra/i Anda, silakan masukkan Nomor Induk Siswa Nasional (NISN) anak Anda.";
+        const welcomeMessage = "👋 Selamat datang di layanan Notifikasi AbsensiKu Cerdas untuk SMAS PGRI Naringgul.\n\nUntuk memulai, silakan balas pesan ini dengan Nomor Induk Siswa Nasional (NISN) putra/putri Anda.";
         await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
         return;
     }
@@ -142,14 +142,14 @@ export async function processTelegramWebhook(payload: any) {
             const querySnapshot = await getDocs(q);
 
             if (querySnapshot.empty) {
-                const notFoundMessage = `NISN ${nisn} tidak ditemukan. Mohon periksa kembali NISN putra/i Anda dan coba lagi.`;
+                const notFoundMessage = `⚠️ NISN Tidak Ditemukan\n\nNISN ${nisn} tidak terdaftar dalam sistem kami. Mohon periksa kembali nomor tersebut dan coba lagi. Pastikan nomor yang Anda masukkan sudah benar.`;
                 await sendTelegramMessage(botToken, String(chatId), notFoundMessage);
             } else {
                 const studentDoc = querySnapshot.docs[0];
                 await updateDoc(doc(db, "students", studentDoc.id), {
                     parentChatId: String(chatId)
                 });
-                const successMessage = `✅ Berhasil! Akun Telegram Anda telah terhubung dengan data absensi ananda ${studentDoc.data().nama}. Anda akan menerima notifikasi absensi mulai sekarang.`;
+                const successMessage = `✅ Pendaftaran Berhasil!\n\nAkun Telegram Anda telah berhasil terhubung dengan data absensi atas nama ${studentDoc.data().nama}.\n\nAnda akan mulai menerima notifikasi absensi harian dan laporan bulanan secara otomatis.`;
                 await sendTelegramMessage(botToken, String(chatId), successMessage);
             }
         } catch (error) {
@@ -161,7 +161,7 @@ export async function processTelegramWebhook(payload: any) {
     }
 
     // Handle any other message
-    const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi, atau gunakan perintah /start untuk memulai.";
+    const defaultReply = "ℹ️ Perintah tidak dikenali.\n\nJika Anda ingin mendaftar, silakan kirimkan NISN putra/putri Anda. Jika Anda ingin memulai dari awal, gunakan perintah /start.";
     await sendTelegramMessage(botToken, String(chatId), defaultReply);
 }
 
@@ -251,7 +251,6 @@ export async function sendMonthlyRecapToParent(
     const classSnap = await getDoc(doc(db, "classes", student.classId));
     const classInfo = classSnap.data() as Class;
 
-    const totalHadir = summary.H + summary.T;
     const totalSchoolDays = Object.values(summary).reduce((a, b) => a + b, 0);
 
     const messageLines = [
@@ -264,7 +263,7 @@ export async function sendMonthlyRecapToParent(
         `📚 Kelas     : ${classInfo.name}`,
         "",
         "Berikut adalah rekapitulasi kehadiran putra/putri Anda:",
-        `✅ Total Hadir      : ${totalHadir} hari`,
+        `✅ Total Hadir      : ${summary.H} hari`,
         `⏰ Terlambat      : ${summary.T} kali`,
         `🤒 Sakit         : ${summary.S} hari`,
         `✉️ Izin          : ${summary.I} hari`,
@@ -322,17 +321,19 @@ export async function sendClassMonthlyRecap(
     const totalKehadiran = totalPresent + totalLate;
 
     const messageLines = [
-        "🏫 SMAS PGRI Naringgul",
-        `Laporan Bulanan Untuk Wali Kelas`,
-        `${className} (${grade}) - ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
+        "🏫 Laporan Bulanan untuk Wali Kelas",
+        `Kelas: ${className} (${grade})`,
+        `Periode: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
         "",
-        `Berikut adalah rekapitulasi absensi untuk kelas Anda dengan total ${totalStudents} siswa:`,
-        `✅ Total Hadir      : ${totalKehadiran} Kehadiran`,
-        `⏰ Total Terlambat  : ${totalLate} Pelanggaran`,
-        `🤒 Total Sakit      : ${totalSick} Hari`,
-        `✉️ Total Izin       : ${totalPermission} Hari`,
-        `✈️ Total Dispen     : ${totalDispen} Hari`,
-        `❌ Total Alfa       : ${totalAlfa} Hari`,
+        `Berikut adalah rekapitulasi absensi kolektif untuk ${totalStudents} siswa di kelas Anda:`,
+        "",
+        "📈 STATISTIK KELAS:",
+        `Total Kehadiran (Hadir+Terlambat): ${totalKehadiran}`,
+        `Total Terlambat: ${totalLate}`,
+        `Total Sakit: ${totalSick}`,
+        `Total Izin: ${totalPermission}`,
+        `Total Dispensasi: ${totalDispen}`,
+        `Total Tanpa Keterangan (Alfa): ${totalAlfa}`,
         "",
         "--",
         "Pesan ini dikirim otomatis oleh sistem."
