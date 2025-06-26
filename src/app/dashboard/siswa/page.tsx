@@ -5,7 +5,7 @@ import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from "firebase
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
-import { MoreHorizontal, PlusCircle } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -65,7 +65,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Skeleton } from "@/components/ui/skeleton"
 
 const studentSchema = z.object({
-  nis: z.string().min(1, "NIS tidak boleh kosong."),
+  nisn: z.string().min(1, "NISN tidak boleh kosong."),
   nama: z.string().min(1, "Nama tidak boleh kosong."),
   kelas: z.string().min(1, "Kelas harus dipilih."),
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
@@ -87,7 +87,7 @@ export default function SiswaPage() {
   const form = useForm<z.infer<typeof studentSchema>>({
     resolver: zodResolver(studentSchema),
     defaultValues: {
-      nis: "",
+      nisn: "",
       nama: "",
       kelas: "",
       jenisKelamin: undefined,
@@ -163,7 +163,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nis: "", nama: "", kelas: "", jenisKelamin: undefined })
+    form.reset({ nisn: "", nama: "", kelas: "", jenisKelamin: undefined })
     setIsDialogOpen(true)
   }
 
@@ -178,6 +178,22 @@ export default function SiswaPage() {
     setIsAlertOpen(true)
   }
 
+  const handleDownloadTemplate = () => {
+    const csvHeader = "NISN,Nama,Kelas,Jenis Kelamin\n";
+    const csvExample = "1234567890,Budi Santoso,X,Laki-laki\n";
+    const csvContent = "data:text/csv;charset=utf-8," + encodeURI(csvHeader + csvExample);
+    const link = document.createElement("a");
+    link.setAttribute("href", csvContent);
+    link.setAttribute("download", "template_import_siswa.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast({
+        title: "Template Diunduh",
+        description: "Fungsi unggah file akan diimplementasikan selanjutnya.",
+    });
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -185,10 +201,16 @@ export default function SiswaPage() {
           <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Siswa</h1>
           <p className="text-muted-foreground">Kelola data siswa di sini.</p>
         </div>
-        <Button onClick={openAddDialog}>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Tambah Siswa
-        </Button>
+        <div className="flex gap-2">
+            <Button variant="outline" onClick={handleDownloadTemplate}>
+                <FileUp className="mr-2 h-4 w-4" />
+                Impor Siswa
+            </Button>
+            <Button onClick={openAddDialog}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Tambah Siswa
+            </Button>
+        </div>
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -203,12 +225,12 @@ export default function SiswaPage() {
             <form onSubmit={form.handleSubmit(handleSaveStudent)} className="space-y-4 py-4">
               <FormField
                 control={form.control}
-                name="nis"
+                name="nisn"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>NIS</FormLabel>
+                    <FormLabel>NISN</FormLabel>
                     <FormControl>
-                      <Input placeholder="Nomor Induk Siswa" {...field} />
+                      <Input placeholder="Nomor Induk Siswa Nasional" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -320,7 +342,7 @@ export default function SiswaPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>NIS</TableHead>
+                  <TableHead>NISN</TableHead>
                   <TableHead>Nama</TableHead>
                   <TableHead>Kelas</TableHead>
                   <TableHead>Jenis Kelamin</TableHead>
@@ -333,7 +355,7 @@ export default function SiswaPage() {
                 {students.length > 0 ? (
                   students.map((student) => (
                     <TableRow key={student.id}>
-                      <TableCell>{student.nis}</TableCell>
+                      <TableCell>{student.nisn}</TableCell>
                       <TableCell className="font-medium">{student.nama}</TableCell>
                       <TableCell>{student.kelas}</TableCell>
                       <TableCell>{student.jenisKelamin}</TableCell>
