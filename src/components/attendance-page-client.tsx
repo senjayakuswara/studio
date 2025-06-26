@@ -295,20 +295,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
     
     const stopScanner = useCallback(() => {
-        if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+        if (html5QrCodeRef.current?.isScanning) {
             html5QrCodeRef.current.stop()
                 .then(() => {
                     addLog("Kamera dinonaktifkan.", "info");
+                    setIsCameraActive(false);
+                    html5QrCodeRef.current = null;
                 })
                 .catch(err => {
                     console.warn("Gagal menghentikan pemindai dengan bersih.", err);
-                })
-                .finally(() => {
-                    html5QrCodeRef.current = null;
                     setIsCameraActive(false);
-                    setIsCameraInitializing(false);
-                    setCameraError(null);
                 });
+        } else {
+             setIsCameraActive(false);
         }
     }, [addLog]);
 
@@ -355,7 +354,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     useEffect(() => {
         // Cleanup function to stop scanner on component unmount
         return () => {
-            stopScanner();
+            if (html5QrCodeRef.current?.isScanning) {
+                stopScanner();
+            }
         };
     }, [stopScanner]);
 
@@ -413,74 +414,73 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><ScanLine /> Mode Input</CardTitle>
+            
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><ScanLine /> Mode Input</CardTitle>
+                    <CardDescription>
+                        Gunakan barcode scanner atau ketik NISN manual lalu tekan Enter.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Input
+                        ref={scannerInputRef}
+                        id={`nisn-input-${grade}`}
+                        placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
+                        disabled={isLoading || isProcessing}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                handleScan(e.currentTarget.value);
+                            }
+                        }}
+                    />
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Camera /> Mode Kamera</CardTitle>
                         <CardDescription>
-                            Gunakan barcode scanner atau ketik NISN manual lalu tekan Enter.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <Input
-                            ref={scannerInputRef}
-                            id={`nisn-input-${grade}`}
-                            placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                            disabled={isLoading || isProcessing}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    handleScan(e.currentTarget.value);
-                                }
-                            }}
-                        />
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><Camera /> Mode Kamera</CardTitle>
-                         <CardDescription>
-                           Gunakan kamera perangkat untuk memindai QR code atau barcode.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="flex flex-col gap-4">
-                        <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                             <div id={scannerContainerId} className={isCameraActive ? "w-full h-full" : "hidden"} />
-                             
-                             {!isCameraActive && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-                                    {isCameraInitializing ? (
-                                        <>
-                                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                            <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
-                                        </>
-                                    ) : cameraError ? (
-                                        <Alert variant="destructive">
-                                          <ShieldAlert className="h-4 w-4" />
-                                          <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
-                                          <AlertDescription>{cameraError}</AlertDescription>
-                                        </Alert>
-                                    ) : (
-                                        <>
-                                            <Video className="h-10 w-10 text-muted-foreground" />
-                                            <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
-                                            <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
-                                        </>
-                                    )}
-                                </div>
-                             )}
-                        </div>
-                        <div className="flex gap-2 justify-center">
-                            <Button onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
-                                <Video className="mr-2"/> Aktifkan Kamera
-                            </Button>
-                            <Button onClick={stopScanner} variant="destructive" disabled={!isCameraActive}>
-                                <VideoOff className="mr-2"/> Matikan Kamera
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-             <Card className="lg:col-span-1">
+                        Gunakan kamera perangkat untuk memindai QR code atau barcode.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4">
+                    <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                            <div id={scannerContainerId} className="w-full h-full" />
+                            
+                            {!isCameraActive && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
+                                {isCameraInitializing ? (
+                                    <>
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                        <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
+                                    </>
+                                ) : cameraError ? (
+                                    <Alert variant="destructive">
+                                        <ShieldAlert className="h-4 w-4" />
+                                        <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
+                                        <AlertDescription>{cameraError}</AlertDescription>
+                                    </Alert>
+                                ) : (
+                                    <>
+                                        <Video className="h-10 w-10 text-muted-foreground" />
+                                        <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
+                                        <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
+                                    </>
+                                )}
+                            </div>
+                            )}
+                    </div>
+                    <div className="flex flex-wrap gap-2 justify-center">
+                        <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
+                            <Video className="mr-2"/> Aktifkan Kamera
+                        </Button>
+                        <Button size="sm" onClick={stopScanner} variant="destructive" disabled={!isCameraActive}>
+                            <VideoOff className="mr-2"/> Matikan Kamera
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+             <Card>
                 <CardHeader>
                     <CardTitle>Log Aktivitas</CardTitle>
                     <CardDescription>Catatan pemindaian absensi hari ini.</CardDescription>
