@@ -287,7 +287,7 @@ export default function RekapitulasiPage() {
         // --- Table ---
         const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
         const head = [
-            [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Kelas', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
+            [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Kelas', rowSpan: 2 }, { content: 'Tingkat', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
             [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
         ];
         
@@ -300,7 +300,8 @@ export default function RekapitulasiPage() {
                 index + 1,
                 student.nama,
                 student.nisn,
-                studentClass ? `${studentClass.name} (${studentClass.grade})` : 'N/A',
+                studentClass ? studentClass.name : 'N/A',
+                studentClass ? studentClass.grade : 'N/A',
                 ...attendanceRow,
                 studentSummary.summary.H,
                 studentSummary.summary.T,
@@ -329,9 +330,10 @@ export default function RekapitulasiPage() {
             },
             columnStyles: {
                 0: { halign: 'center', cellWidth: 8 },  // No
-                1: { halign: 'left', cellWidth: 40 }, // Nama
+                1: { halign: 'left', cellWidth: 35 }, // Nama
                 2: { halign: 'center', cellWidth: 18 }, // NISN
-                3: { halign: 'left', cellWidth: 20 }, // Kelas
+                3: { halign: 'left', cellWidth: 15 }, // Kelas
+                4: { halign: 'center', cellWidth: 10 }, // Tingkat
             }
         });
 

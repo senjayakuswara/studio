@@ -209,7 +209,8 @@ export default function AbsensiPage() {
           format(date, "dd/MM/yyyy"),
           record.studentName,
           record.nisn,
-          `${record.classInfo?.name || 'N/A'} (${record.classInfo?.grade || 'N/A'})`,
+          record.classInfo?.name || 'N/A',
+          record.classInfo?.grade || 'N/A',
           record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
           record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
           record.status,
@@ -217,7 +218,7 @@ export default function AbsensiPage() {
         
         autoTable(doc, {
           startY: lastY,
-          head: [['Tanggal', 'Nama Siswa', 'NISN', 'Kelas', 'Masuk', 'Pulang', 'Status']],
+          head: [['Tanggal', 'Nama Siswa', 'NISN', 'Kelas', 'Tingkat', 'Masuk', 'Pulang', 'Status']],
           body: tableData,
           theme: 'grid',
           headStyles: { fillColor: [22, 163, 74], textColor: 255 }, // Green-600
@@ -345,6 +346,7 @@ export default function AbsensiPage() {
                   <TableHead>NISN</TableHead>
                   <TableHead>Nama Siswa</TableHead>
                   <TableHead>Kelas</TableHead>
+                  <TableHead>Tingkat</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Jam Masuk</TableHead>
                   <TableHead>Jam Pulang</TableHead>
@@ -354,7 +356,7 @@ export default function AbsensiPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      <TableCell colSpan={6}>
+                      <TableCell colSpan={7}>
                         <Skeleton className="h-6 w-full" />
                       </TableCell>
                     </TableRow>
@@ -364,7 +366,8 @@ export default function AbsensiPage() {
                     <TableRow key={record.id}>
                       <TableCell>{record.nisn}</TableCell>
                       <TableCell className="font-medium">{record.studentName}</TableCell>
-                      <TableCell>{record.classInfo?.name || 'N/A'} ({record.classInfo?.grade || 'N/A'})</TableCell>
+                      <TableCell>{record.classInfo?.name || 'N/A'}</TableCell>
+                      <TableCell>{record.classInfo?.grade || 'N/A'}</TableCell>
                        <TableCell>
                           <Badge variant={statusBadgeVariant[record.status] || "outline"}>
                             {record.status}
@@ -380,7 +383,7 @@ export default function AbsensiPage() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-24 text-center">
+                    <TableCell colSpan={7} className="h-24 text-center">
                       Tidak ada data absensi untuk tanggal ini.
                     </TableCell>
                   </TableRow>
