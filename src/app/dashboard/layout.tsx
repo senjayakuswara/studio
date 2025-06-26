@@ -91,31 +91,28 @@ export default function DashboardLayout({
                 <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/x" asChild>
-                        <SidebarMenuSubButton
-                          isActive={isActive("/dashboard/e-absensi/x")}
-                        >
-                          Kelas X
-                        </SidebarMenuSubButton>
-                      </Link>
+                      <SidebarMenuSubButton
+                        isActive={isActive("/dashboard/e-absensi/x")}
+                        asChild
+                      >
+                        <Link href="/dashboard/e-absensi/x">Kelas X</Link>
+                      </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xi" asChild>
-                        <SidebarMenuSubButton
-                          isActive={isActive("/dashboard/e-absensi/xi")}
-                        >
-                          Kelas XI
-                        </SidebarMenuSubButton>
-                      </Link>
+                      <SidebarMenuSubButton
+                        isActive={isActive("/dashboard/e-absensi/xi")}
+                        asChild
+                      >
+                        <Link href="/dashboard/e-absensi/xi">Kelas XI</Link>
+                      </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xii" asChild>
-                        <SidebarMenuSubButton
-                          isActive={isActive("/dashboard/e-absensi/xii")}
-                        >
-                          Kelas XII
-                        </SidebarMenuSubButton>
-                      </Link>
+                      <SidebarMenuSubButton
+                        isActive={isActive("/dashboard/e-absensi/xii")}
+                        asChild
+                      >
+                        <Link href="/dashboard/e-absensi/xii">Kelas XII</Link>
+                      </SidebarMenuSubButton>
                     </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </CollapsibleContent>
