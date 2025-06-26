@@ -6,6 +6,7 @@
  * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
  * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
  * - syncTelegramMessages: Fetches and processes new messages from Telegram upon manual request.
+ * - deleteTelegramWebhook: Removes the currently active webhook from the bot.
  */
 
 import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, setDoc } from "firebase/firestore";
@@ -397,4 +398,29 @@ export async function syncTelegramMessages(): Promise<{ success: boolean; messag
     }
 
     return { success: true, message: `Berhasil memproses ${updates.length} pesan baru.` };
+}
+
+/**
+ * Deletes the bot's webhook, allowing getUpdates to be used.
+ * @returns An object indicating success or failure.
+ */
+export async function deleteTelegramWebhook(): Promise<{ success: boolean; message: string }> {
+    const botToken = getBotToken();
+    if (!botToken) {
+        return { success: false, message: "Token bot tidak diatur di file .env server." };
+    }
+
+    const url = `https://api.telegram.org/bot${botToken}/deleteWebhook`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.ok) {
+            return { success: true, message: "Webhook berhasil dihapus. Anda sekarang dapat menggunakan sinkronisasi manual." };
+        } else {
+            return { success: false, message: `Gagal menghapus webhook: ${data.description}` };
+        }
+    } catch (error) {
+        console.error("Failed to delete webhook:", error);
+        return { success: false, message: "Gagal terhubung ke server Telegram." };
+    }
 }

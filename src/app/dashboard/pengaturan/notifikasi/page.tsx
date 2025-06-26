@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { doc, getDoc, setDoc } from "firebase/firestore"
-import { Loader2, Info } from "lucide-react"
+import { Loader2, Info, RefreshCw } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -16,7 +16,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { syncTelegramMessages } from "@/ai/flows/telegram-flow"
+import { syncTelegramMessages, deleteTelegramWebhook } from "@/ai/flows/telegram-flow"
 
 const telegramSettingsSchema = z.object({
   groupChatId: z.string().optional().describe("Untuk notifikasi rekap ke grup wali kelas"),
@@ -30,6 +30,7 @@ type TelegramSettings = z.infer<typeof telegramSettingsSchema>;
 export default function NotifikasiPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
     const { toast } = useToast();
 
     const form = useForm<TelegramSettings>({
@@ -104,6 +105,24 @@ export default function NotifikasiPage() {
         }
         setIsSyncing(false);
     }
+    
+    async function handleResetWebhook() {
+        setIsResetting(true);
+        const result = await deleteTelegramWebhook();
+        if (result.success) {
+            toast({
+                title: "Koneksi Berhasil Direset",
+                description: result.message,
+            });
+        } else {
+            toast({
+                variant: "destructive",
+                title: "Reset Gagal",
+                description: result.message,
+            });
+        }
+        setIsResetting(false);
+    }
 
     return (
         <div className="flex flex-col gap-6">
@@ -115,9 +134,9 @@ export default function NotifikasiPage() {
             </div>
              <Alert>
                 <Info className="h-4 w-4" />
-                <AlertTitle>Konfigurasi Token Bot & Pesan Masuk</AlertTitle>
+                <AlertTitle>Konfigurasi Bot & Pesan Masuk</AlertTitle>
                 <AlertDescription>
-                  Token Bot Telegram dikelola melalui `TELEGRAM_BOT_TOKEN` di server. Untuk memproses pendaftaran orang tua baru, klik tombol **Periksa Pesan Baru**.
+                  Token Bot Telegram dikelola melalui `TELEGRAM_BOT_TOKEN` di server. Untuk memproses pendaftaran, klik **Periksa Pesan Baru**. Jika terjadi error karena webhook aktif, klik **Reset Koneksi Webhook** terlebih dahulu.
                 </AlertDescription>
             </Alert>
             <Form {...form}>
@@ -221,7 +240,16 @@ export default function NotifikasiPage() {
                             )}
                         </CardContent>
                     </Card>
-                    <div className="mt-6 flex justify-end gap-2">
+                    <div className="mt-6 flex flex-wrap justify-end gap-2">
+                        <Button
+                           variant="destructive"
+                           type="button"
+                           onClick={handleResetWebhook}
+                           disabled={isResetting || isLoading || form.formState.isSubmitting}
+                        >
+                            {isResetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Reset Koneksi Webhook
+                        </Button>
                         <Button
                            variant="outline"
                            type="button"
