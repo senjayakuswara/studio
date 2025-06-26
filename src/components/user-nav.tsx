@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useRouter } from "next/navigation"
+import { User, Settings, LogOut } from "lucide-react"
 
 export function UserNav() {
   const router = useRouter()
@@ -37,14 +38,17 @@ export function UserNav() {
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuItem onClick={() => router.push('/dashboard/profil')}>
+            <User />
             Profil
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => router.push('/dashboard/pengaturan/aplikasi')}>
+            <Settings />
             Pengaturan
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push('/login')}>
+          <LogOut />
           Keluar
         </DropdownMenuItem>
       </DropdownMenuContent>
