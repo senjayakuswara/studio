@@ -4,8 +4,12 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import * as z from "zod"
 import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { doc, getDoc } from "firebase/firestore"
+import Image from "next/image"
 import { School } from "lucide-react"
 
+import { db } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
 import {
   Form,
@@ -24,6 +28,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const formSchema = z.object({
   email: z.string().email({
@@ -37,6 +42,31 @@ const formSchema = z.object({
 export default function LoginPage() {
   const router = useRouter()
   const { toast } = useToast()
+  const [appName, setAppName] = useState("AbTrack")
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchSettings() {
+      setIsLoading(true)
+      try {
+        const docRef = doc(db, "settings", "appConfig");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setAppName(data.appName || "AbTrack");
+          setLogoUrl(data.logoUrl || null);
+          document.title = data.appName || "AbTrack";
+        }
+      } catch (error) {
+        console.error("Error fetching settings:", error);
+        // Use default settings if fetch fails
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchSettings();
+  }, []);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -66,13 +96,27 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground">
-            <School className="h-8 w-8" />
-          </div>
-          <CardTitle className="font-headline text-3xl">AbTrack</CardTitle>
-          <CardDescription className="font-body">
-            Selamat datang! Silakan masuk ke akun Anda.
-          </CardDescription>
+            {isLoading ? (
+                <>
+                    <Skeleton className="mx-auto h-16 w-16 rounded-full" />
+                    <Skeleton className="mx-auto mt-4 h-8 w-32" />
+                    <Skeleton className="mx-auto mt-2 h-4 w-48" />
+                </>
+            ) : (
+                <>
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                    {logoUrl ? (
+                        <Image src={logoUrl} alt="Logo" width={40} height={40} className="rounded-full" />
+                    ) : (
+                        <School className="h-8 w-8" />
+                    )}
+                    </div>
+                    <CardTitle className="font-headline text-3xl">{appName}</CardTitle>
+                    <CardDescription className="font-body">
+                        Selamat datang! Silakan masuk ke akun Anda.
+                    </CardDescription>
+                </>
+            )}
         </CardHeader>
         <CardContent>
           <Form {...form}>

@@ -2,6 +2,9 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useState, useEffect } from "react"
+import { doc, getDoc } from "firebase/firestore"
+import Image from "next/image"
 import {
   ChevronDown,
   ClipboardCheck,
@@ -15,6 +18,7 @@ import {
   Users,
 } from "lucide-react"
 
+import { db } from "@/lib/firebase"
 import { cn } from "@/lib/utils"
 import {
   Collapsible,
@@ -38,6 +42,7 @@ import {
   SidebarMenuSubButton,
 } from "@/components/ui/sidebar"
 import { UserNav } from "@/components/user-nav"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function DashboardLayout({
   children,
@@ -46,16 +51,53 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname()
   const isActive = (path: string) => pathname.startsWith(path)
+  const [appName, setAppName] = useState("AbTrack")
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchSettings() {
+      setIsLoading(true);
+      try {
+        const docRef = doc(db, "settings", "appConfig");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setAppName(data.appName || "AbTrack");
+          setLogoUrl(data.logoUrl || null);
+           document.title = `${data.appName || "AbTrack"} - Dashboard`;
+        }
+      } catch (error) {
+        console.error("Error fetching settings:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchSettings();
+  }, []);
 
   return (
     <SidebarProvider>
       <Sidebar>
         <SidebarHeader>
           <div className="flex items-center gap-2 p-2">
-             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <School className="h-5 w-5" />
-             </div>
-            <span className="font-headline text-lg font-semibold">AbTrack</span>
+            {isLoading ? (
+                <>
+                    <Skeleton className="h-8 w-8 rounded-lg" />
+                    <Skeleton className="h-6 w-24" />
+                </>
+            ) : (
+                <>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                        {logoUrl ? (
+                            <Image src={logoUrl} alt="Logo" width={24} height={24} className="rounded-md" />
+                        ) : (
+                            <School className="h-5 w-5" />
+                        )}
+                    </div>
+                    <span className="font-headline text-lg font-semibold">{appName}</span>
+                </>
+            )}
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -92,7 +134,7 @@ export default function DashboardLayout({
                 <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/x" passHref>
+                      <Link href="/dashboard/e-absensi/x" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/x"}
                         >
@@ -101,7 +143,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xi" passHref>
+                      <Link href="/dashboard/e-absensi/xi" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/xi"}
                         >
@@ -110,7 +152,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xii" passHref>
+                      <Link href="/dashboard/e-absensi/xii" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/xii"}
                         >
