@@ -6,7 +6,9 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Calendar as CalendarIcon, Download } from "lucide-react"
+import { Calendar as CalendarIcon, Download, Loader2 } from "lucide-react"
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -72,6 +74,7 @@ export default function AbsensiPage() {
   const [classes, setClasses] = useState<Class[]>([])
   const [attendanceRecords, setAttendanceRecords] = useState<CombinedAttendanceRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
   const { toast } = useToast()
 
@@ -131,6 +134,79 @@ export default function AbsensiPage() {
     return attendanceRecords.filter(record => record.classId === filterClass)
   }, [attendanceRecords, filterClass])
 
+  const handlePrintReport = () => {
+    if (filteredRecords.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Tidak Ada Data",
+        description: "Tidak ada data untuk dicetak pada tanggal dan kelas yang dipilih.",
+      });
+      return;
+    }
+
+    setIsPrinting(true);
+    try {
+      const doc = new jsPDF();
+      const tableData = filteredRecords.map((record, index) => [
+        index + 1,
+        record.nisn,
+        record.studentName,
+        `${record.classInfo?.name || 'N/A'} (${record.classInfo?.grade || 'N/A'})`,
+        record.status,
+        record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
+        record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
+      ]);
+
+      // Title
+      doc.setFontSize(16);
+      doc.text("Laporan E-Absensi SMAS PGRI Naringgul", doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
+      
+      doc.setFontSize(12);
+      const reportDate = `Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`;
+      doc.text(reportDate, doc.internal.pageSize.getWidth() / 2, 22, { align: 'center' });
+
+      // Table
+      autoTable(doc, {
+        startY: 30,
+        head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
+        body: tableData,
+        theme: 'grid',
+        headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+        styles: { cellPadding: 2, fontSize: 8 },
+      });
+
+      // Footer (Titimangsa)
+      const finalY = (doc as any).lastAutoTable.finalY || 60;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const signatureX = pageWidth - 65;
+      let signatureY = finalY + 15;
+      
+      if (signatureY > doc.internal.pageSize.getHeight() - 40) {
+          doc.addPage();
+          signatureY = 20;
+      }
+
+      doc.setFontSize(10);
+      doc.text("Naringgul, " + format(new Date(), "dd MMMM yyyy", { locale: localeID }), signatureX, signatureY, { align: 'center' });
+      doc.text("Petugas,", signatureX, signatureY + 6, { align: 'center' });
+      doc.text("(.........................)", signatureX, signatureY + 28, { align: 'center' });
+      doc.text("NPA: .....................", signatureX, signatureY + 34, { align: 'center' });
+      
+      // Save PDF
+      doc.save(`Laporan_Absensi_${format(date, "yyyy-MM-dd")}.pdf`);
+
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast({
+        variant: "destructive",
+        title: "Gagal Membuat PDF",
+        description: "Terjadi kesalahan saat membuat laporan.",
+      });
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -178,9 +254,9 @@ export default function AbsensiPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" className="w-full md:w-auto">
-                <Download className="mr-2 h-4 w-4" />
-                Cetak Laporan
+            <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
+                {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                {isPrinting ? 'Mencetak...' : 'Cetak Laporan'}
             </Button>
         </div>
       </div>
