@@ -24,6 +24,8 @@ type ReportSettings = {
   title: string
   signatoryName: string
   signatoryNpa: string
+  principalName: string
+  principalNpa: string
   logoUrl: string | null
 }
 
@@ -32,6 +34,8 @@ export default function LaporanPage() {
     title: "",
     signatoryName: "",
     signatoryNpa: "",
+    principalName: "",
+    principalNpa: "",
     logoUrl: null,
   })
   const [isLoading, setIsLoading] = useState(true)
@@ -51,6 +55,8 @@ export default function LaporanPage() {
                 title: "Laporan E-Absensi SMAS PGRI Naringgul",
                 signatoryName: "(.........................)",
                 signatoryNpa: "NPA: .....................",
+                principalName: "(.........................)",
+                principalNpa: "NIP: ......................",
                 logoUrl: null
             })
         }
@@ -124,7 +130,7 @@ export default function LaporanPage() {
             Informasi ini akan digunakan setiap kali Anda mencetak laporan.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent>
           {isLoading ? (
             <div className="space-y-6">
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -137,7 +143,7 @@ export default function LaporanPage() {
                 </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div className="space-y-2">
                     <Label htmlFor="app-logo">Logo Sekolah/Laporan</Label>
                     <div className="flex items-center justify-center w-full">
@@ -161,13 +167,29 @@ export default function LaporanPage() {
                         <Label htmlFor="title">Judul / Kop Laporan</Label>
                         <Textarea id="title" placeholder="Contoh: Laporan Kehadiran Siswa&#10;SMK Teknologi Bangsa" value={settings.title} onChange={handleChange} />
                     </div>
+                </div>
+                
+                <div className="space-y-4">
+                    <h3 className="text-sm font-medium">Penandatangan (Kolom Kiri)</h3>
                      <div className="space-y-2">
-                        <Label htmlFor="signatoryName">Nama Petugas (Titimangsa)</Label>
-                        <Input id="signatoryName" placeholder="Contoh: (.........................)" value={settings.signatoryName} onChange={handleChange} />
+                        <Label htmlFor="principalName">Nama Kepala Sekolah</Label>
+                        <Input id="principalName" placeholder="(.........................)" value={settings.principalName} onChange={handleChange} />
                     </div>
                      <div className="space-y-2">
-                        <Label htmlFor="signatoryNpa">NPA/NIP Petugas (Titimangsa)</Label>
-                        <Input id="signatoryNpa" placeholder="Contoh: NPA: ....................." value={settings.signatoryNpa} onChange={handleChange} />
+                        <Label htmlFor="principalNpa">NIP/NPA Kepala Sekolah</Label>
+                        <Input id="principalNpa" placeholder="NIP: ........................" value={settings.principalNpa} onChange={handleChange} />
+                    </div>
+                </div>
+                
+                <div className="space-y-4">
+                     <h3 className="text-sm font-medium">Penandatangan (Kolom Kanan)</h3>
+                     <div className="space-y-2">
+                        <Label htmlFor="signatoryName">Nama Petugas</Label>
+                        <Input id="signatoryName" placeholder="(.........................)" value={settings.signatoryName} onChange={handleChange} />
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="signatoryNpa">NPA/NIP Petugas</Label>
+                        <Input id="signatoryNpa" placeholder="NPA: ....................." value={settings.signatoryNpa} onChange={handleChange} />
                     </div>
                 </div>
             </div>

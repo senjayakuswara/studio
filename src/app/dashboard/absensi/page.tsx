@@ -63,6 +63,8 @@ type ReportConfig = {
     title: string;
     signatoryName: string;
     signatoryNpa: string;
+    principalName: string;
+    principalNpa: string;
     logoUrl: string | null;
 }
 
@@ -206,19 +208,29 @@ export default function AbsensiPage() {
 
       // Footer (Titimangsa)
       const finalY = (doc as any).lastAutoTable.finalY || 60;
-      const signatureX = pageWidth - 65;
       let signatureY = finalY + 15;
       
-      if (signatureY > doc.internal.pageSize.getHeight() - 40) {
+      if (signatureY > doc.internal.pageSize.getHeight() - 60) {
           doc.addPage();
           signatureY = 20;
       }
 
+      const leftX = 50;
+      const rightX = pageWidth - 50;
+
       doc.setFontSize(10);
-      doc.text("Naringgul, " + format(new Date(), "dd MMMM yyyy", { locale: localeID }), signatureX, signatureY, { align: 'center' });
-      doc.text("Petugas,", signatureX, signatureY + 6, { align: 'center' });
-      doc.text(reportConfig.signatoryName, signatureX, signatureY + 28, { align: 'center' });
-      doc.text(reportConfig.signatoryNpa, signatureX, signatureY + 34, { align: 'center' });
+
+      // Left side: Principal
+      doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
+      doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+      doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
+      doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
+
+      // Right side: Officer
+      doc.text("Naringgul, " + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
+      doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+      doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
+      doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
       
       // Save PDF
       doc.save(`Laporan_Absensi_Harian_${format(date, "yyyy-MM-dd")}.pdf`);
