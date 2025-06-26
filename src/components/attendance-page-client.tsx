@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
-import { Html5Qrcode, Html5QrcodeScannerState } from "html5-qrcode"
+import { Html5Qrcode } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -90,10 +90,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
-    const [isProcessingScan, setIsProcessingScan] = useState(false);
+    const [isProcessing, setIsProcessing] = useState(false);
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     
+    const isProcessingRef = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
@@ -113,10 +114,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
-
-    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
-        return attendanceData[studentId] || {};
-    }, [attendanceData]);
 
     useEffect(() => {
         async function fetchData() {
@@ -209,9 +206,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [isLoading, scanMode]);
 
     const handleScan = useCallback(async (nisn: string) => {
-        if (!nisn.trim() || isProcessingScan) return;
+        if (!nisn.trim() || isProcessingRef.current) return;
         
-        setIsProcessingScan(true);
+        isProcessingRef.current = true;
+        setIsProcessing(true);
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
         try {
@@ -302,10 +300,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(`Gagal memproses NISN ${nisn}.`, 'error');
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
         } finally {
-            // Add a short delay before allowing another scan
-            setTimeout(() => setIsProcessingScan(false), 2000);
+            setTimeout(() => {
+              isProcessingRef.current = false;
+              setIsProcessing(false);
+            }, 2000);
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, isProcessingScan]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
     
     // Using a ref to hold the latest version of handleScan for the camera callback
     const handleScanRef = useRef(handleScan);
@@ -315,37 +315,39 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     // Effect for camera management
     useEffect(() => {
-        if (scanMode === 'camera') {
-            setIsCameraInitializing(true);
-            setCameraError(null);
-            
-            const qrCodeScanner = new Html5Qrcode(scannerContainerId);
-            html5QrCodeRef.current = qrCodeScanner;
-
-            qrCodeScanner.start(
-                { facingMode: "user" },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                (decodedText) => {
-                    if (!isProcessingScan) {
-                        handleScanRef.current(decodedText);
-                    }
-                },
-                (errorMessage) => { /* Optional error callback */ }
-            )
-            .then(() => {
-                setIsCameraInitializing(false);
-            })
-            .catch((err) => {
-                const errorMessage = err?.message || String(err);
-                setCameraError(errorMessage);
-                setIsCameraInitializing(false);
-                toast({
-                    variant: 'destructive',
-                    title: 'Gagal Mengakses Kamera',
-                    description: 'Harap izinkan akses kamera di pengaturan browser Anda dan pastikan tidak ada aplikasi lain yang menggunakannya.'
-                });
-            });
+        if (scanMode !== 'camera') {
+            return;
         }
+
+        setIsCameraInitializing(true);
+        setCameraError(null);
+        
+        const qrCodeScanner = new Html5Qrcode(scannerContainerId, {
+             // verbose: true // Uncomment for debug logs
+        });
+        html5QrCodeRef.current = qrCodeScanner;
+
+        qrCodeScanner.start(
+            { facingMode: "user" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+                handleScanRef.current(decodedText);
+            },
+            (errorMessage) => { /* Optional error callback */ }
+        )
+        .then(() => {
+            setIsCameraInitializing(false);
+        })
+        .catch((err) => {
+            const errorMessage = err?.message || String(err);
+            setCameraError(errorMessage);
+            setIsCameraInitializing(false);
+            toast({
+                variant: 'destructive',
+                title: 'Gagal Mengakses Kamera',
+                description: 'Harap izinkan akses kamera di pengaturan browser Anda dan pastikan tidak ada aplikasi lain yang menggunakannya.'
+            });
+        });
 
         // Cleanup function to stop the scanner
         return () => {
@@ -355,7 +357,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 });
             }
         };
-    }, [scanMode, scannerContainerId, isProcessingScan, toast]);
+    }, [scanMode, scannerContainerId, toast]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -397,6 +399,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }
 
+    const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
+        return attendanceData[studentId] || {};
+    }, [attendanceData]);
+
     return (
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
@@ -430,7 +436,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             <Input
                                 ref={scannerInputRef}
                                 placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                                disabled={isLoading || isProcessingScan}
+                                disabled={isLoading || isProcessing}
                                 onKeyDown={(e) => {
                                     if (e.key === "Enter") {
                                         handleScan(e.currentTarget.value);
