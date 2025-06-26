@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, type ChangeEvent } from "react"
+import { useState, useEffect, type ChangeEvent, useMemo } from "react"
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -52,10 +52,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
     Select,
     SelectContent,
+    SelectGroup,
     SelectItem,
     SelectTrigger,
     SelectValue,
@@ -63,12 +63,11 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
   nama: z.string().min(1, "Nama tidak boleh kosong."),
-  kelas: z.enum(["X", "XI", "XII"], { required_error: "Kelas harus dipilih."}),
+  classId: z.string({ required_error: "Kelas harus dipilih."}).min(1, "Kelas harus dipilih."),
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
     required_error: "Jenis kelamin harus dipilih.",
   }),
@@ -76,9 +75,12 @@ const studentSchema = z.object({
 
 type Student = z.infer<typeof studentSchema> & { id: string }
 type NewStudent = z.infer<typeof studentSchema>;
+type Class = { id: string; name: string; grade: string };
+type ParsedStudent = Omit<NewStudent, 'classId'> & { className: string };
 
 export default function SiswaPage() {
   const [students, setStudents] = useState<Student[]>([])
+  const [classes, setClasses] = useState<Class[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
@@ -89,31 +91,45 @@ export default function SiswaPage() {
   const [isImporting, setIsImporting] = useState(false);
   const { toast } = useToast()
 
+  const classMap = useMemo(() => new Map(classes.map(c => [c.id, c.name])), [classes]);
+  const classNameMap = useMemo(() => new Map(classes.map(c => [c.name, c.id])), [classes]);
+
   const form = useForm<NewStudent>({
     resolver: zodResolver(studentSchema),
     defaultValues: {
       nisn: "",
       nama: "",
-      kelas: undefined,
+      classId: undefined,
       jenisKelamin: undefined,
     },
   })
 
-  async function fetchStudents() {
+  async function fetchData() {
     setIsLoading(true)
     try {
-      const querySnapshot = await getDocs(collection(db, "students"))
-      const studentsList = querySnapshot.docs.map(doc => ({
+      const [studentsSnapshot, classesSnapshot] = await Promise.all([
+        getDocs(collection(db, "students")),
+        getDocs(collection(db, "classes"))
+      ]);
+      
+      const studentsList = studentsSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
       })) as Student[]
       setStudents(studentsList.sort((a, b) => a.nama.localeCompare(b.nama)))
+
+      const classList = classesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Class[]
+      setClasses(classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`)));
+
     } catch (error) {
-      console.error("Error fetching students: ", error)
+      console.error("Error fetching data: ", error)
       toast({
         variant: "destructive",
         title: "Gagal Memuat Data",
-        description: "Tidak dapat mengambil data siswa dari server.",
+        description: "Tidak dapat mengambil data siswa atau kelas dari server.",
       })
     } finally {
       setIsLoading(false)
@@ -121,7 +137,7 @@ export default function SiswaPage() {
   }
 
   useEffect(() => {
-    fetchStudents()
+    fetchData()
   }, [])
 
   async function handleSaveStudent(values: NewStudent) {
@@ -134,7 +150,7 @@ export default function SiswaPage() {
         await addDoc(collection(db, "students"), values)
         toast({ title: "Sukses", description: "Siswa baru berhasil ditambahkan." })
       }
-      await fetchStudents()
+      await fetchData()
       setIsFormDialogOpen(false)
       setEditingStudent(null)
       form.reset()
@@ -153,7 +169,7 @@ export default function SiswaPage() {
     try {
       await deleteDoc(doc(db, "students", deletingStudentId))
       toast({ title: "Sukses", description: "Data siswa berhasil dihapus." })
-      await fetchStudents()
+      await fetchData()
       setIsAlertOpen(false)
       setDeletingStudentId(null)
     } catch (error) {
@@ -168,7 +184,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", kelas: undefined, jenisKelamin: undefined })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined })
     setIsFormDialogOpen(true)
   }
 
@@ -184,8 +200,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Kelas", "Jenis Kelamin"];
-    const example = ["1234567890", "Budi Santoso", "X", "Laki-laki"];
+    const header = ["NISN", "Nama", "Nama Kelas", "Jenis Kelamin"];
+    const example = ["1234567890", "Budi Santoso", "X-1", "Laki-laki"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -206,7 +222,6 @@ export default function SiswaPage() {
             const worksheet = workbook.Sheets[sheetName];
             const json: any[] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
             
-            // Remove header row
             json.shift();
 
             let validStudents: NewStudent[] = [];
@@ -216,13 +231,13 @@ export default function SiswaPage() {
                 const studentData = {
                     nisn: String(row[0] || ""),
                     nama: String(row[1] || ""),
-                    kelas: String(row[2] || ""),
+                    classId: classNameMap.get(String(row[2] || "")),
                     jenisKelamin: String(row[3] || ""),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
                 if (validation.success) {
-                    validStudents.push(validation.data);
+                    validStudents.push(validation.data as NewStudent);
                 } else {
                     invalidCount++;
                 }
@@ -239,7 +254,7 @@ export default function SiswaPage() {
                  toast({
                     variant: "destructive",
                     title: "Gagal Memproses File",
-                    description: "Tidak ada data siswa yang valid ditemukan dalam file. Pastikan formatnya sesuai template.",
+                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Nama Kelas' di file Excel sudah terdaftar di Manajemen Kelas.",
                 });
             }
 
@@ -254,7 +269,7 @@ export default function SiswaPage() {
         }
     };
     reader.readAsBinaryString(file);
-    e.target.value = ''; // Reset file input
+    e.target.value = '';
   }
   
   const handleSaveImportedStudents = async () => {
@@ -274,7 +289,7 @@ export default function SiswaPage() {
             title: "Impor Berhasil",
             description: `${parsedStudents.length} siswa berhasil ditambahkan ke database.`,
         });
-        await fetchStudents();
+        await fetchData();
         setIsImportDialogOpen(false);
         setParsedStudents([]);
     } catch (error) {
@@ -347,7 +362,7 @@ export default function SiswaPage() {
               />
               <FormField
                 control={form.control}
-                name="kelas"
+                name="classId"
                 render={({ field }) => (
                     <FormItem>
                         <FormLabel>Kelas</FormLabel>
@@ -358,9 +373,14 @@ export default function SiswaPage() {
                                 </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                                <SelectItem value="X">Kelas X</SelectItem>
-                                <SelectItem value="XI">Kelas XI</SelectItem>
-                                <SelectItem value="XII">Kelas XII</SelectItem>
+                              {["X", "XI", "XII"].map(grade => (
+                                <SelectGroup key={grade}>
+                                  <Label className="px-2 py-1.5 text-sm font-semibold">Kelas {grade}</Label>
+                                  {classes.filter(c => c.grade === grade).map(c => (
+                                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              ))}
                             </SelectContent>
                         </Select>
                         <FormMessage />
@@ -416,7 +436,7 @@ export default function SiswaPage() {
           <div className="space-y-6 py-2">
             <div className="p-4 border rounded-md space-y-3">
                 <h3 className="font-medium">Langkah 1: Unduh Template</h3>
-                <p className="text-sm text-muted-foreground">Unduh dan isi file template dengan data siswa Anda. Pastikan format kolom sesuai dengan template.</p>
+                <p className="text-sm text-muted-foreground">Unduh dan isi file template dengan data siswa Anda. Pastikan nama kelas sesuai dengan yang ada di Manajemen Kelas.</p>
                 <Button variant="secondary" onClick={handleDownloadTemplate}>
                     <Download className="mr-2 h-4 w-4" />
                     Unduh Template Excel
@@ -449,7 +469,7 @@ export default function SiswaPage() {
                                     <TableRow key={index}>
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell>{student.nama}</TableCell>
-                                        <TableCell>{student.kelas}</TableCell>
+                                        <TableCell>{classMap.get(student.classId) || "Error"}</TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
@@ -517,7 +537,7 @@ export default function SiswaPage() {
                         <TableRow key={student.id}>
                         <TableCell>{student.nisn}</TableCell>
                         <TableCell className="font-medium">{student.nama}</TableCell>
-                        <TableCell>{student.kelas}</TableCell>
+                        <TableCell>{classMap.get(student.classId) || "Kelas Dihapus"}</TableCell>
                         <TableCell>{student.jenisKelamin}</TableCell>
                         <TableCell>
                             <DropdownMenu>

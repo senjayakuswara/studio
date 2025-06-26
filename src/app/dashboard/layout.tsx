@@ -6,6 +6,7 @@ import { useState, useEffect } from "react"
 import { doc, getDoc } from "firebase/firestore"
 import Image from "next/image"
 import {
+  BookCopy,
   ChevronDown,
   ClipboardCheck,
   Clock,
@@ -141,7 +142,7 @@ export default function DashboardLayout({
                 <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/x">
+                      <Link href="/dashboard/e-absensi/x" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/x"}
                         >
@@ -150,7 +151,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xi">
+                      <Link href="/dashboard/e-absensi/xi" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/xi"}
                         >
@@ -159,7 +160,7 @@ export default function DashboardLayout({
                       </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <Link href="/dashboard/e-absensi/xii">
+                      <Link href="/dashboard/e-absensi/xii" asChild>
                         <SidebarMenuSubButton
                           isActive={pathname === "/dashboard/e-absensi/xii"}
                         >
@@ -205,6 +206,17 @@ export default function DashboardLayout({
                   >
                     <Settings />
                     <span>Aplikasi</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <Link href="/dashboard/pengaturan/kelas">
+                  <SidebarMenuButton
+                    tooltip="Manajemen Kelas"
+                    isActive={isActive("/dashboard/pengaturan/kelas")}
+                  >
+                    <BookCopy />
+                    <span>Kelas</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
