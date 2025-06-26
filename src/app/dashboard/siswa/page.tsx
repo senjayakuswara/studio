@@ -238,6 +238,38 @@ export default function SiswaPage() {
     xlsx.writeFile(workbook, "template_import_siswa.xlsx");
   };
 
+  const handleDownloadData = () => {
+    if (filteredStudents.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Tidak Ada Data",
+        description: "Tidak ada data siswa untuk diunduh.",
+      });
+      return;
+    }
+
+    const dataToExport = filteredStudents.map(student => ({
+      "NISN": student.nisn,
+      "Nama": student.nama,
+      "Nama Kelas (Tingkat)": classMap.get(student.classId) || "Kelas Tidak Ditemukan",
+      "Jenis Kelamin": student.jenisKelamin,
+    }));
+    
+    const worksheet = xlsx.utils.json_to_sheet(dataToExport);
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "Data Siswa");
+    
+    const columnWidths = [
+        { wch: 15 }, // NISN
+        { wch: 30 }, // Nama
+        { wch: 20 }, // Nama Kelas (Tingkat)
+        { wch: 15 }, // Jenis Kelamin
+    ];
+    worksheet['!cols'] = columnWidths;
+
+    xlsx.writeFile(workbook, "data_siswa.xlsx");
+  };
+
   const handleFileImport = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -374,6 +406,10 @@ export default function SiswaPage() {
           <p className="text-muted-foreground">Kelola data siswa di sini.</p>
         </div>
         <div className="flex gap-2">
+            <Button variant="outline" onClick={handleDownloadData}>
+                <Download className="mr-2 h-4 w-4" />
+                Unduh Data
+            </Button>
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
                 <FileUp className="mr-2 h-4 w-4" />
                 Impor Siswa
@@ -670,5 +706,3 @@ export default function SiswaPage() {
     </div>
   )
 }
-
-    
