@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
+import { Html5Qrcode, Html5QrcodeScannerState } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -19,6 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
@@ -29,7 +36,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 
 // Types
@@ -76,7 +83,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord>>({})
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
+    
     const scannerInputRef = useRef<HTMLInputElement>(null)
+    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+    const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -170,19 +181,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [grade, toast])
     
     useEffect(() => {
-        if (!isLoading) {
+        if (!isLoading && scanMode === 'input') {
             setTimeout(() => scannerInputRef.current?.focus(), 100);
         }
-    }, [isLoading]);
+    }, [isLoading, scanMode]);
 
-    const addLog = (message: string, type: LogMessage['type']) => {
+    const addLog = useCallback((message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
             timestamp: format(new Date(), "HH:mm:ss"),
             message,
             type
         };
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
-    }
+    }, [])
 
     const handleScan = async (nisn: string) => {
         if (!nisn.trim()) return;
@@ -281,6 +292,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
         }
     }
+    
+    const handleScanRef = useRef(handleScan);
+    useEffect(() => {
+        handleScanRef.current = handleScan;
+    });
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -322,6 +338,70 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }
 
+    useEffect(() => {
+        if (scanMode !== 'camera') {
+            return;
+        }
+        
+        if (html5QrCodeRef.current) {
+            return;
+        }
+
+        const qrCodeScanner = new Html5Qrcode(scannerContainerId, {
+            verbose: false,
+        });
+        html5QrCodeRef.current = qrCodeScanner;
+        
+        const config = { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            rememberLastUsedCamera: true,
+        };
+
+        const qrCodeSuccessCallback = (decodedText: string, decodedResult: any) => {
+            handleScanRef.current(decodedText);
+            if (qrCodeScanner?.getState() === Html5QrcodeScannerState.SCANNING) {
+                qrCodeScanner.pause(true);
+                setTimeout(() => {
+                    if (qrCodeScanner?.getState() === Html5QrcodeScannerState.PAUSED) {
+                        qrCodeScanner.resume();
+                    }
+                }, 2000);
+            }
+        };
+        const qrCodeErrorCallback = (errorMessage: string) => {
+           // ignore errors
+        };
+        
+        qrCodeScanner.start(
+            { facingMode: "environment" },
+            config,
+            qrCodeSuccessCallback,
+            qrCodeErrorCallback
+        ).catch(err => {
+            addLog(`Gagal memulai kamera: ${err}`, 'error');
+            toast({
+                variant: 'destructive',
+                title: 'Kamera Gagal Dimulai',
+                description: 'Pastikan izin kamera sudah diberikan di pengaturan browser Anda.',
+            });
+            setScanMode('input');
+        });
+        
+        return () => {
+            if (html5QrCodeRef.current?.isScanning) {
+                html5QrCodeRef.current.stop()
+                    .then(() => {
+                        html5QrCodeRef.current = null;
+                    })
+                    .catch(err => {
+                        console.error('Failed to stop camera.', err);
+                    });
+            }
+        };
+
+    }, [scanMode, addLog, toast, scannerContainerId]);
+
     const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || { status: 'Belum Absen' };
     }
@@ -338,22 +418,42 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
                 <CardHeader>
-                    <CardTitle>Pemindai Barcode / QR Code</CardTitle>
+                    <CardTitle>Mode Pemindai</CardTitle>
                     <CardDescription>
-                        Arahkan pemindai ke barcode siswa untuk mencatat absensi.
+                        Pilih antara input manual atau menggunakan pemindaian kamera.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <Input
-                        ref={scannerInputRef}
-                        placeholder={isLoading ? "Memuat data..." : "Tunggu pemindaian NISN..."}
-                        disabled={isLoading}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                                handleScan(e.currentTarget.value);
-                            }
-                        }}
-                    />
+                    <Tabs value={scanMode} onValueChange={(value) => setScanMode(value as 'input' | 'camera')} className="w-full">
+                        <TabsList className="grid w-full grid-cols-2">
+                            <TabsTrigger value="input">
+                                <ScanLine className="mr-2 h-4 w-4" />
+                                Input Manual
+                            </TabsTrigger>
+                            <TabsTrigger value="camera">
+                                <Camera className="mr-2 h-4 w-4" />
+                                Pindai Kamera
+                            </TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="input" className="mt-4">
+                            <Input
+                                ref={scannerInputRef}
+                                placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
+                                disabled={isLoading}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                        handleScan(e.currentTarget.value);
+                                    }
+                                }}
+                            />
+                        </TabsContent>
+                        <TabsContent value="camera" className="mt-4">
+                            <div id={scannerContainerId} className="w-full aspect-square rounded-md bg-muted border overflow-hidden" />
+                            <p className="text-xs text-muted-foreground text-center mt-2">
+                                Arahkan kamera ke QR Code atau Barcode NISN siswa.
+                            </p>
+                        </TabsContent>
+                    </Tabs>
                 </CardContent>
             </Card>
 
