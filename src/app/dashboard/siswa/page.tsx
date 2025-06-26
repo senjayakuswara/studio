@@ -90,10 +90,18 @@ export default function SiswaPage() {
   const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
   const [parsedStudents, setParsedStudents] = useState<NewStudent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [filterName, setFilterName] = useState("")
+  const [filterClass, setFilterClass] = useState("all")
   const { toast } = useToast()
 
   const classMap = useMemo(() => new Map(classes.map(c => [c.id, c.name])), [classes]);
   const classNameMap = useMemo(() => new Map(classes.map(c => [c.name, c.id])), [classes]);
+  
+  const filteredStudents = useMemo(() => {
+    return students
+      .filter(student => student.nama.toLowerCase().includes(filterName.toLowerCase()))
+      .filter(student => filterClass === "all" || student.classId === filterClass)
+  }, [students, filterName, filterClass]);
 
   const form = useForm<NewStudent>({
     resolver: zodResolver(studentSchema),
@@ -376,7 +384,7 @@ export default function SiswaPage() {
                             <SelectContent>
                               {["X", "XI", "XII"].map(grade => (
                                 <SelectGroup key={grade}>
-                                  <SelectLabel className="px-2 py-1.5 text-sm font-semibold">Kelas {grade}</SelectLabel>
+                                  <SelectLabel>Kelas {grade}</SelectLabel>
                                   {classes.filter(c => c.grade === grade).map(c => (
                                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                   ))}
@@ -508,8 +516,32 @@ export default function SiswaPage() {
         <CardHeader>
           <CardTitle>Daftar Siswa</CardTitle>
           <CardDescription>
-            Tabel berisi semua siswa yang terdaftar.
+            Tabel berisi semua siswa yang terdaftar. Gunakan filter di bawah untuk mencari data.
           </CardDescription>
+          <div className="mt-4 flex flex-col md:flex-row gap-4">
+              <Input
+                  placeholder="Cari berdasarkan nama siswa..."
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
+                  className="max-w-sm"
+              />
+              <Select value={filterClass} onValueChange={setFilterClass}>
+                  <SelectTrigger className="w-full md:w-[280px]">
+                      <SelectValue placeholder="Filter berdasarkan kelas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                      <SelectItem value="all">Semua Kelas</SelectItem>
+                       {["X", "XI", "XII"].map(grade => (
+                          <SelectGroup key={grade}>
+                            <SelectLabel>Kelas {grade}</SelectLabel>
+                            {classes.filter(c => c.grade === grade).map(c => (
+                              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ))}
+                  </SelectContent>
+              </Select>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -533,8 +565,8 @@ export default function SiswaPage() {
                     </TableRow>
                 </TableHeader>
                 <TableBody>
-                    {students.length > 0 ? (
-                    students.map((student) => (
+                    {filteredStudents.length > 0 ? (
+                    filteredStudents.map((student) => (
                         <TableRow key={student.id}>
                         <TableCell>{student.nisn}</TableCell>
                         <TableCell className="font-medium">{student.nama}</TableCell>
@@ -564,7 +596,7 @@ export default function SiswaPage() {
                     ) : (
                     <TableRow>
                         <TableCell colSpan={5} className="h-24 text-center">
-                        Belum ada data siswa.
+                          {students.length > 0 ? "Tidak ada siswa yang cocok dengan filter." : "Belum ada data siswa."}
                         </TableCell>
                     </TableRow>
                     )}
