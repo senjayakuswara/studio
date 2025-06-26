@@ -378,7 +378,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
         };
 
-        // Corrected: Use { facingMode: "user" } for front camera on laptops/desktops.
         qrCodeScanner.start(
             { facingMode: "user" },
             config,
