@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/sidebar"
 import { UserNav } from "@/components/user-nav"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/hooks/use-toast"
 
 export default function DashboardLayout({
   children,
@@ -54,6 +55,7 @@ export default function DashboardLayout({
   const [appName, setAppName] = useState("AbTrack")
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
 
   useEffect(() => {
     async function fetchSettings() {
@@ -69,12 +71,17 @@ export default function DashboardLayout({
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
+        toast({
+            variant: "destructive",
+            title: "Gagal memuat data aplikasi",
+            description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
+        })
       } finally {
         setIsLoading(false);
       }
     }
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   return (
     <SidebarProvider>

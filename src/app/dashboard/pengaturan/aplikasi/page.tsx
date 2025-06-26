@@ -44,7 +44,7 @@ export default function AppSettingsPage() {
                 toast({
                     variant: "destructive",
                     title: "Gagal memuat pengaturan",
-                    description: "Terjadi kesalahan saat mengambil data dari server.",
+                    description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
                 })
             } finally {
                 setIsLoading(false)
@@ -78,7 +78,7 @@ export default function AppSettingsPage() {
             toast({
                 variant: "destructive",
                 title: "Gagal menyimpan",
-                description: "Terjadi kesalahan saat menyimpan pengaturan.",
+                description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
             })
         } finally {
             setIsSaving(false)

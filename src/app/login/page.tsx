@@ -60,13 +60,17 @@ export default function LoginPage() {
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
-        // Use default settings if fetch fails
+        toast({
+            variant: "destructive",
+            title: "Gagal memuat data aplikasi",
+            description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
+        })
       } finally {
         setIsLoading(false);
       }
     }
     fetchSettings();
-  }, []);
+  }, [toast]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
