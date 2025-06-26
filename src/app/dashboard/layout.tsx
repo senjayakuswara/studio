@@ -75,7 +75,7 @@ export default function DashboardLayout({
                 className="w-full"
                 defaultOpen={pathname.startsWith("/dashboard/e-absensi")}
               >
-                <CollapsibleTrigger className="w-full">
+                <CollapsibleTrigger className="w-full" asChild>
                   <SidebarMenuButton
                     tooltip="E-Absensi"
                     isActive={pathname.startsWith("/dashboard/e-absensi")}
