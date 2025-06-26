@@ -11,6 +11,7 @@ import {
   Printer,
   School,
   Send,
+  Settings,
   Users,
 } from "lucide-react"
 
@@ -44,7 +45,7 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const isActive = (path: string) => pathname === path
+  const isActive = (path: string) => pathname.startsWith(path)
 
   return (
     <SidebarProvider>
@@ -63,7 +64,7 @@ export default function DashboardLayout({
               <Link href="/dashboard">
                 <SidebarMenuButton
                   tooltip="Dashboard"
-                  isActive={isActive("/dashboard")}
+                  isActive={pathname === "/dashboard"}
                 >
                   <LayoutDashboard />
                   <span>Dashboard</span>
@@ -91,28 +92,31 @@ export default function DashboardLayout({
                 <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
                   <SidebarMenuSub>
                     <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        isActive={isActive("/dashboard/e-absensi/x")}
-                        asChild
-                      >
-                        <Link href="/dashboard/e-absensi/x">Kelas X</Link>
-                      </SidebarMenuSubButton>
+                      <Link href="/dashboard/e-absensi/x" passHref>
+                        <SidebarMenuSubButton
+                          isActive={pathname === "/dashboard/e-absensi/x"}
+                        >
+                          Kelas X
+                        </SidebarMenuSubButton>
+                      </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        isActive={isActive("/dashboard/e-absensi/xi")}
-                        asChild
-                      >
-                        <Link href="/dashboard/e-absensi/xi">Kelas XI</Link>
-                      </SidebarMenuSubButton>
+                      <Link href="/dashboard/e-absensi/xi" passHref>
+                        <SidebarMenuSubButton
+                          isActive={pathname === "/dashboard/e-absensi/xi"}
+                        >
+                          Kelas XI
+                        </SidebarMenuSubButton>
+                      </Link>
                     </SidebarMenuSubItem>
                     <SidebarMenuSubItem>
-                      <SidebarMenuSubButton
-                        isActive={isActive("/dashboard/e-absensi/xii")}
-                        asChild
-                      >
-                        <Link href="/dashboard/e-absensi/xii">Kelas XII</Link>
-                      </SidebarMenuSubButton>
+                      <Link href="/dashboard/e-absensi/xii" passHref>
+                        <SidebarMenuSubButton
+                          isActive={pathname === "/dashboard/e-absensi/xii"}
+                        >
+                          Kelas XII
+                        </SidebarMenuSubButton>
+                      </Link>
                     </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </CollapsibleContent>
@@ -122,7 +126,7 @@ export default function DashboardLayout({
               <Link href="/dashboard/siswa">
                 <SidebarMenuButton
                   tooltip="Manajemen Siswa"
-                  isActive={isActive("/dashboard/siswa")}
+                  isActive={pathname === "/dashboard/siswa"}
                 >
                   <Users />
                   <span>Manajemen Siswa</span>
@@ -133,7 +137,7 @@ export default function DashboardLayout({
               <Link href="/dashboard/absensi">
                 <SidebarMenuButton
                   tooltip="Manajemen Absensi"
-                  isActive={isActive("/dashboard/absensi")}
+                  isActive={pathname === "/dashboard/absensi"}
                 >
                   <ClipboardCheck />
                   <span>Manajemen Absensi</span>
@@ -142,8 +146,19 @@ export default function DashboardLayout({
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarGroup>
-            <SidebarGroupLabel>Pengaturan Umum</SidebarGroupLabel>
+            <SidebarGroupLabel>Pengaturan</SidebarGroupLabel>
             <SidebarMenu>
+               <SidebarMenuItem>
+                <Link href="/dashboard/pengaturan/aplikasi">
+                  <SidebarMenuButton
+                    tooltip="Pengaturan Aplikasi"
+                    isActive={isActive("/dashboard/pengaturan/aplikasi")}
+                  >
+                    <Settings />
+                    <span>Aplikasi</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
               <SidebarMenuItem>
                 <Link href="/dashboard/pengaturan/notifikasi">
                   <SidebarMenuButton
@@ -151,7 +166,7 @@ export default function DashboardLayout({
                     isActive={isActive("/dashboard/pengaturan/notifikasi")}
                   >
                     <Send />
-                    <span>Notifikasi Telegram</span>
+                    <span>Notifikasi</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
@@ -162,7 +177,7 @@ export default function DashboardLayout({
                     isActive={isActive("/dashboard/pengaturan/laporan")}
                   >
                     <Printer />
-                    <span>Desain Laporan</span>
+                    <span>Laporan</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
@@ -173,7 +188,7 @@ export default function DashboardLayout({
                     isActive={isActive("/dashboard/pengaturan/jam")}
                   >
                     <Clock />
-                    <span>Pengaturan Jam</span>
+                    <span>Jam Sekolah</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

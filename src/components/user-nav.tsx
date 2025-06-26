@@ -36,8 +36,12 @@ export function UserNav() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem>Profil</DropdownMenuItem>
-          <DropdownMenuItem>Pengaturan</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => router.push('/dashboard/profil')}>
+            Profil
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => router.push('/dashboard/pengaturan/aplikasi')}>
+            Pengaturan
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push('/login')}>
