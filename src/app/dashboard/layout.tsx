@@ -7,6 +7,7 @@ import { doc, getDoc } from "firebase/firestore"
 import Image from "next/image"
 import {
   BookCopy,
+  BookText,
   ChevronDown,
   ClipboardCheck,
   Clock,
@@ -198,6 +199,17 @@ export default function DashboardLayout({
                 >
                   <ClipboardCheck />
                   <span>Manajemen Absensi</span>
+                </SidebarMenuButton>
+              </Link>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <Link href="/dashboard/rekapitulasi">
+                <SidebarMenuButton
+                  tooltip="Rekapitulasi"
+                  isActive={pathname === "/dashboard/rekapitulasi"}
+                >
+                  <BookText />
+                  <span>Rekapitulasi</span>
                 </SidebarMenuButton>
               </Link>
             </SidebarMenuItem>
