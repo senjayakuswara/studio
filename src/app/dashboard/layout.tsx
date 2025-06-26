@@ -3,8 +3,10 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
+  ChevronDown,
   ClipboardCheck,
   Clock,
+  Fingerprint,
   LayoutDashboard,
   Printer,
   School,
@@ -13,6 +15,11 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   SidebarProvider,
   Sidebar,
@@ -25,6 +32,9 @@ import {
   SidebarGroupLabel,
   SidebarInset,
   SidebarTrigger,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
 } from "@/components/ui/sidebar"
 import { UserNav } from "@/components/user-nav"
 
@@ -59,6 +69,57 @@ export default function DashboardLayout({
                   <span>Dashboard</span>
                 </SidebarMenuButton>
               </Link>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <Collapsible
+                className="w-full"
+                defaultOpen={pathname.startsWith("/dashboard/e-absensi")}
+              >
+                <CollapsibleTrigger className="w-full">
+                  <SidebarMenuButton
+                    tooltip="E-Absensi"
+                    isActive={pathname.startsWith("/dashboard/e-absensi")}
+                    className="group w-full justify-between"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Fingerprint />
+                      <span>E-Absensi</span>
+                    </div>
+                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <Link href="/dashboard/e-absensi/x">
+                        <SidebarMenuSubButton
+                          isActive={isActive("/dashboard/e-absensi/x")}
+                        >
+                          Kelas X
+                        </SidebarMenuSubButton>
+                      </Link>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <Link href="/dashboard/e-absensi/xi">
+                        <SidebarMenuSubButton
+                          isActive={isActive("/dashboard/e-absensi/xi")}
+                        >
+                          Kelas XI
+                        </SidebarMenuSubButton>
+                      </Link>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <Link href="/dashboard/e-absensi/xii">
+                        <SidebarMenuSubButton
+                          isActive={isActive("/dashboard/e-absensi/xii")}
+                        >
+                          Kelas XII
+                        </SidebarMenuSubButton>
+                      </Link>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </Collapsible>
             </SidebarMenuItem>
             <SidebarMenuItem>
               <Link href="/dashboard/siswa">
