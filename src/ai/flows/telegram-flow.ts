@@ -80,8 +80,6 @@ async function getTelegramConfig(): Promise<TelegramSettings | null> {
 }
 
 // Internal helper to send a message via Telegram API
-// I'm removing parse_mode: 'Markdown' as it can cause silent failures if the text is not perfectly formatted.
-// This is a more robust approach to ensure messages are delivered.
 async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     try {
@@ -128,10 +126,15 @@ export async function processTelegramWebhook(payload: any) {
         return;
     }
 
+    // Handle /start command
     if (text === '/start') {
         const welcomeMessage = "Selamat datang di Notifikasi AbsensiKu Cerdas SMAS PGRI Naringgul. Untuk menghubungkan akun Anda dengan data absensi putra/i Anda, silakan masukkan Nomor Induk Siswa Nasional (NISN) anak Anda.";
         await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
-    } else if (/^\d+$/.test(text)) {
+        return;
+    }
+    
+    // Handle NISN (numeric input)
+    if (/^\d+$/.test(text)) {
         const nisn = text;
         try {
             const q = query(collection(db, "students"), where("nisn", "==", nisn));
@@ -153,10 +156,12 @@ export async function processTelegramWebhook(payload: any) {
             const errorMessage = "Terjadi kesalahan pada sistem. Mohon coba lagi nanti.";
             await sendTelegramMessage(botToken, String(chatId), errorMessage);
         }
-    } else {
-        const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi, atau gunakan perintah /start untuk memulai.";
-        await sendTelegramMessage(botToken, String(chatId), defaultReply);
+        return;
     }
+
+    // Handle any other message
+    const defaultReply = "Perintah tidak dikenali. Silakan masukkan NISN putra/i Anda untuk mendaftar notifikasi, atau gunakan perintah /start untuk memulai.";
+    await sendTelegramMessage(botToken, String(chatId), defaultReply);
 }
 
 /**
