@@ -706,16 +706,14 @@ const SidebarMenuSubItem = React.forwardRef<
 SidebarMenuSubItem.displayName = "SidebarMenuSubItem"
 
 const SidebarMenuSubButton = React.forwardRef<
-  HTMLAnchorElement,
-  React.ComponentProps<"a"> & {
+  HTMLDivElement,
+  React.ComponentProps<"div"> & {
     size?: "sm" | "md"
     isActive?: boolean
-    asChild?: boolean
   }
->(({ size = "md", isActive, asChild = false, className, ...props }, ref) => {
-  const Comp = asChild ? Slot : "a"
+>(({ size = "md", isActive, className, ...props }, ref) => {
   return (
-    <Comp
+    <div
       ref={ref}
       data-sidebar="menu-sub-button"
       data-size={size}
