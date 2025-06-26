@@ -90,7 +90,7 @@ export default function DashboardLayout({
       }
     }
     fetchSettings();
-  }, [toast, pathname]); // Re-fetch on pathname change to apply theme when navigating
+  }, [toast]);
 
   return (
     <SidebarProvider>

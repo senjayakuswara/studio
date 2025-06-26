@@ -95,6 +95,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
+    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -258,7 +259,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 status,
                 timestampMasuk: Timestamp.fromDate(now),
                 timestampPulang: null,
-                recordDate: Timestamp.fromDate(now),
+                recordDate: Timestamp.fromDate(startOfDay(now)),
             };
 
             try {
@@ -346,75 +347,64 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [handleScan]);
 
     useEffect(() => {
-        let scanner: Html5Qrcode | null = null;
-        
-        const setupScanner = async () => {
-            if (scanMode !== 'camera' || !document.getElementById(scannerContainerId)) {
-                return;
-            }
+      if (scanMode === 'camera' && !html5QrCodeRef.current) {
+          setIsCameraInitializing(true);
+          setCameraError(null);
 
-            setIsCameraInitializing(true);
-            setCameraError(null);
+          const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+          html5QrCodeRef.current = scanner;
 
-            try {
-                // This explicit call is crucial for prompting permissions reliably.
-                await navigator.mediaDevices.getUserMedia({ video: true });
-                
-                scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+          const config = {
+              fps: 10,
+              qrbox: { width: 250, height: 250 },
+              rememberLastUsedCamera: true,
+          };
 
-                const qrCodeSuccessCallback = (decodedText: string) => {
-                    handleScanRef.current(decodedText);
-                    if (scanner?.getState() === Html5QrcodeScannerState.SCANNING) {
-                        try {
-                            scanner.pause(true);
-                            setTimeout(() => {
-                                if (scanner?.getState() === Html5QrcodeScannerState.PAUSED) {
-                                    scanner.resume();
-                                }
-                            }, 2000);
-                        } catch(e) {
-                            console.warn("Error pausing/resuming scanner", e);
-                        }
-                    }
-                };
+          const qrCodeSuccessCallback = (decodedText: string) => {
+              handleScanRef.current(decodedText);
+              if (scanner.getState() === Html5QrcodeScannerState.SCANNING) {
+                  try {
+                      scanner.pause(true);
+                      setTimeout(() => {
+                          if (scanner.getState() === Html5QrcodeScannerState.PAUSED) {
+                              scanner.resume();
+                          }
+                      }, 2000); // Pause for 2 seconds to prevent rapid-fire scanning
+                  } catch (e) {
+                      console.warn("Error pausing/resuming scanner", e);
+                  }
+              }
+          };
 
-                const config = { 
-                    fps: 10, 
-                    qrbox: { width: 250, height: 250 },
-                    rememberLastUsedCamera: true,
-                };
+          scanner.start(
+              { facingMode: "environment" },
+              config,
+              qrCodeSuccessCallback,
+              (errorMessage) => { /* Optional error callback */ }
+          ).then(() => {
+              setIsCameraInitializing(false);
+          }).catch((err) => {
+              const errorMessage = err?.message || 'Unknown error';
+              setCameraError(errorMessage);
+              addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
+              toast({
+                  variant: 'destructive',
+                  title: 'Kamera Gagal Dimulai',
+                  description: 'Pastikan izin kamera sudah diberikan dan tidak ada aplikasi lain yang menggunakannya.',
+              });
+              setIsCameraInitializing(false);
+          });
+      }
 
-                await scanner.start(
-                    { facingMode: "environment" },
-                    config,
-                    qrCodeSuccessCallback,
-                    () => {}
-                );
-
-            } catch (err: any) {
-                const errorMessage = err?.message || 'Unknown error';
-                setCameraError(errorMessage);
-                addLog(`Gagal memulai kamera: ${errorMessage}`, 'error');
-                toast({
-                    variant: 'destructive',
-                    title: 'Kamera Gagal Dimulai',
-                    description: 'Pastikan izin kamera sudah diberikan dan tidak ada aplikasi lain yang menggunakannya.',
-                });
-            } finally {
-                setIsCameraInitializing(false);
-            }
-        };
-
-        setupScanner();
-
-        return () => {
-            if (scanner && scanner.isScanning) {
-                scanner.stop().catch(err => {
-                    console.warn('Gagal menghentikan kamera saat cleanup.', err);
-                });
-            }
-        };
-    }, [scanMode, scannerContainerId, addLog, toast, handleScanRef]);
+      return () => {
+          if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+              html5QrCodeRef.current.stop().catch(err => {
+                  console.warn('Gagal menghentikan kamera saat cleanup.', err);
+              });
+              html5QrCodeRef.current = null;
+          }
+      };
+    }, [scanMode, scannerContainerId, addLog, toast]);
 
     const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || { status: 'Belum Absen' };
