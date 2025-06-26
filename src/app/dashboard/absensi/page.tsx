@@ -59,14 +59,22 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
 }
 type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
+
 type ReportConfig = {
-    title: string;
-    reportLocation: string;
-    signatoryName: string;
-    signatoryNpa: string;
-    principalName: string;
-    principalNpa: string;
-    logoUrl: string | null;
+    headerLine1: string
+    headerLine2: string
+    headerLine3: string
+    schoolName: string
+    address: string
+    logoUrlLeft: string | null
+    logoUrlRight: string | null
+    reportTitle: string
+    
+    reportLocation: string
+    signatoryName: string
+    signatoryNpa: string
+    principalName: string
+    principalNpa: string
 }
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary'> = {
@@ -167,73 +175,95 @@ export default function AbsensiPage() {
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageMargin = 15;
+      let lastY = 10;
 
-      // Header
-      if (reportConfig.logoUrl) {
-          try {
-              doc.addImage(reportConfig.logoUrl, 'PNG', pageMargin, 12, 25, 25);
-          } catch(e) {
-              console.error("Could not add logo to PDF.", e);
-          }
+      // === KOP SURAT / HEADER ===
+      const addImageToDoc = (url: string, x: number, y: number, width: number, height: number) => {
+        try {
+            doc.addImage(url, 'PNG', x, y, width, height);
+        } catch (e) {
+            console.error(`Could not add image from ${url}`, e);
+            toast({ variant: "destructive", title: "Gagal Memuat Logo", description: "Pastikan URL atau format logo valid." });
+        }
+      };
+      
+      if (reportConfig.logoUrlLeft) {
+          addImageToDoc(reportConfig.logoUrlLeft, pageMargin, 10, 25, 25);
       }
-      
-      const textStartX = pageMargin + 25 + 7; // logo x + logo width + gap
-      
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      const titleLines = doc.splitTextToSize(reportConfig.title, pageWidth - textStartX - pageMargin);
-      doc.text(titleLines, textStartX, 18);
-      
-      doc.setFont('helvetica', 'normal');
+      if (reportConfig.logoUrlRight) {
+          addImageToDoc(reportConfig.logoUrlRight, pageWidth - pageMargin - 25, 10, 25, 25);
+      }
+
+      doc.setFont('times', 'normal');
       doc.setFontSize(11);
-      const titleHeight = doc.getTextDimensions(titleLines).h;
-      const reportDate = `Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`;
-      doc.text(reportDate, textStartX, 18 + titleHeight + 2);
+      doc.text(reportConfig.headerLine1, pageWidth / 2, 12, { align: 'center' });
+      doc.text(reportConfig.headerLine2, pageWidth / 2, 17, { align: 'center' });
       
-      const headerBottomY = 12 + 25 + 5; // Y-pos of logo + logo height + gap
+      doc.setFont('times', 'bold');
+      doc.setFontSize(14);
+      doc.text(reportConfig.headerLine3, pageWidth / 2, 24, { align: 'center' });
+      doc.text(reportConfig.schoolName, pageWidth / 2, 30, { align: 'center' });
+
+      doc.setFont('times', 'normal');
+      doc.setFontSize(9);
+      doc.text(reportConfig.address, pageWidth / 2, 35, { align: 'center' });
+
+      doc.setLineWidth(1);
+      doc.line(pageMargin, 38, pageWidth - pageMargin, 38);
       doc.setLineWidth(0.5);
-      doc.line(pageMargin, headerBottomY, pageWidth - pageMargin, headerBottomY);
+      doc.line(pageMargin, 39.5, pageWidth - pageMargin, 39.5);
 
-      let finalY = headerBottomY + 10;
+      lastY = 48;
+      
+      // === JUDUL LAPORAN ===
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(reportConfig.reportTitle || "Laporan Absensi", pageWidth / 2, lastY, { align: 'center' });
+      lastY += 6;
 
+      doc.setFontSize(11);
+      doc.text(`Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`, pageWidth / 2, lastY, { align: 'center' });
+      lastY += 10;
+      
       // Table (or no data message)
       if (filteredRecords.length > 0) {
-        const tableData = filteredRecords.map((record, index) => [
-          index + 1,
-          record.nisn,
+        const tableData = filteredRecords.map((record) => [
+          format(date, "dd/MM/yyyy"),
           record.studentName,
+          record.nisn,
           `${record.classInfo?.name || 'N/A'} (${record.classInfo?.grade || 'N/A'})`,
-          record.status,
           record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
           record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
+          record.status,
         ]);
         
         autoTable(doc, {
-          startY: finalY,
-          head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
+          startY: lastY,
+          head: [['Tanggal', 'Nama Siswa', 'NISN', 'Kelas', 'Masuk', 'Pulang', 'Status']],
           body: tableData,
           theme: 'grid',
-          headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+          headStyles: { fillColor: [22, 163, 74], textColor: 255 }, // Green-600
           styles: { cellPadding: 2, fontSize: 8 },
+          margin: { left: pageMargin, right: pageMargin }
         });
 
-        finalY = (doc as any).lastAutoTable.finalY || 60;
+        lastY = (doc as any).lastAutoTable.finalY || lastY + 20;
       } else {
         doc.setFontSize(10);
-        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, finalY + 10, { align: 'center' });
-        finalY = finalY + 20;
+        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, lastY + 10, { align: 'center' });
+        lastY = lastY + 20;
       }
 
-      // Footer (Titimangsa)
-      let signatureY = finalY + 15;
+      // === TITIMANGSA / FOOTER ===
+      let signatureY = lastY + 15;
       
       if (signatureY > doc.internal.pageSize.getHeight() - 60) {
           doc.addPage();
-          signatureY = 20;
+          signatureY = 40; // Start higher on new page
       }
 
-      const leftX = 50;
-      const rightX = pageWidth - 50;
+      const leftX = pageWidth / 4;
+      const rightX = (pageWidth / 4) * 3;
 
       doc.setFontSize(10);
 
