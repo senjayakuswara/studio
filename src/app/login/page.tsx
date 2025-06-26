@@ -97,77 +97,84 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-            {isLoading ? (
-                <>
-                    <Skeleton className="mx-auto h-16 w-16 rounded-full" />
-                    <Skeleton className="mx-auto mt-4 h-8 w-32" />
-                    <Skeleton className="mx-auto mt-2 h-4 w-48" />
-                </>
-            ) : (
-                <>
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground">
+    <div className="flex min-h-screen flex-col">
+      <header className="flex items-center gap-4 bg-primary p-4 text-primary-foreground shadow-md">
+        {isLoading ? (
+            <>
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <Skeleton className="h-6 w-32" />
+            </>
+        ) : (
+            <>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background text-primary">
                     {logoUrl ? (
-                        <Image src={logoUrl} alt="Logo" width={40} height={40} className="rounded-full" />
+                        <Image src={logoUrl} alt="Logo" width={32} height={32} className="rounded-full" />
                     ) : (
-                        <School className="h-8 w-8" />
+                        <School className="h-6 w-6" />
                     )}
-                    </div>
-                    <CardTitle className="font-headline text-3xl">{appName}</CardTitle>
-                    <CardDescription className="font-body">
-                        Selamat datang! Silakan masuk ke akun Anda.
-                    </CardDescription>
-                </>
-            )}
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="admin@absen.com"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="********"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full font-headline">
-                Masuk
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-      <p className="mt-4 text-xs text-muted-foreground">
-          Email: admin@absen.com | Password: admin123456
-      </p>
+                </div>
+                <h1 className="font-headline text-xl font-semibold">{appName}</h1>
+            </>
+        )}
+      </header>
+      <main className="flex flex-1 flex-col items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-sm">
+            <CardHeader className="text-center">
+                <CardTitle className="font-headline text-2xl">Masuk</CardTitle>
+                <CardDescription className="font-body">
+                    Selamat datang! Silakan masuk ke akun Anda.
+                </CardDescription>
+            </CardHeader>
+            <CardContent>
+            <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                        <Input
+                            placeholder="admin@absen.com"
+                            {...field}
+                        />
+                        </FormControl>
+                        <FormMessage />
+                    </FormItem>
+                    )}
+                />
+                <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                        <Input
+                            type="password"
+                            placeholder="********"
+                            {...field}
+                        />
+                        </FormControl>
+                        <FormMessage />
+                    </FormItem>
+                    )}
+                />
+                <Button type="submit" className="w-full font-headline">
+                    Masuk
+                </Button>
+                </form>
+            </Form>
+            </CardContent>
+        </Card>
+        <p className="mt-4 text-xs text-muted-foreground">
+            Email: admin@absen.com | Password: admin123456
+        </p>
+      </main>
+      <footer className="bg-muted p-4 text-center text-sm text-muted-foreground">
+        <p>2025 @ E-Absensi created by KS</p>
+      </footer>
     </div>
   )
 }
