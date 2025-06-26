@@ -86,6 +86,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
     
     const scannerInputRef = useRef<HTMLInputElement>(null)
+    const html5QrCodeScannerRef = useRef<Html5Qrcode | null>(null);
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const { toast } = useToast()
 
@@ -194,7 +195,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
 
-    const handleScan = async (nisn: string) => {
+    const handleScan = useCallback(async (nisn: string) => {
         if (!nisn.trim()) return;
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
@@ -290,13 +291,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
             toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
         }
-    }
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast])
     
-    const handleScanRef = useRef(handleScan);
-    useEffect(() => {
-        handleScanRef.current = handleScan;
-    });
-
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
         if (!student) return;
@@ -338,59 +334,56 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }
 
     useEffect(() => {
-        if (scanMode !== 'camera') {
-            return;
+        if (scanMode === 'camera') {
+            const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+            html5QrCodeScannerRef.current = scanner;
+
+            const config = { 
+                fps: 10, 
+                qrbox: { width: 250, height: 250 },
+                rememberLastUsedCamera: true,
+            };
+
+            const qrCodeSuccessCallback = (decodedText: string, decodedResult: any) => {
+                handleScan(decodedText);
+                if (scanner.getState() === Html5QrcodeScannerState.SCANNING) {
+                    scanner.pause(true);
+                    setTimeout(() => {
+                        if (scanner.getState() === Html5QrcodeScannerState.PAUSED) {
+                            scanner.resume();
+                        }
+                    }, 2000);
+                }
+            };
+            const qrCodeErrorCallback = (errorMessage: string) => {
+               // ignore errors
+            };
+            
+            scanner.start(
+                { facingMode: "environment" },
+                config,
+                qrCodeSuccessCallback,
+                qrCodeErrorCallback
+            ).catch(err => {
+                addLog(`Gagal memulai kamera: ${err}`, 'error');
+                toast({
+                    variant: 'destructive',
+                    title: 'Kamera Gagal Dimulai',
+                    description: 'Pastikan izin kamera sudah diberikan di pengaturan browser Anda.',
+                });
+                setScanMode('input');
+            });
         }
         
-        const html5QrCode = new Html5Qrcode(scannerContainerId, {
-            verbose: false,
-        });
-
-        const config = { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            rememberLastUsedCamera: true,
-        };
-
-        const qrCodeSuccessCallback = (decodedText: string, decodedResult: any) => {
-            handleScanRef.current(decodedText);
-            if (html5QrCode.getState() === Html5QrcodeScannerState.SCANNING) {
-                html5QrCode.pause(true);
-                setTimeout(() => {
-                    if (html5QrCode.getState() === Html5QrcodeScannerState.PAUSED) {
-                        html5QrCode.resume();
-                    }
-                }, 2000);
-            }
-        };
-        const qrCodeErrorCallback = (errorMessage: string) => {
-           // ignore errors
-        };
-        
-        html5QrCode.start(
-            { facingMode: "environment" },
-            config,
-            qrCodeSuccessCallback,
-            qrCodeErrorCallback
-        ).catch(err => {
-            addLog(`Gagal memulai kamera: ${err}`, 'error');
-            toast({
-                variant: 'destructive',
-                title: 'Kamera Gagal Dimulai',
-                description: 'Pastikan izin kamera sudah diberikan di pengaturan browser Anda.',
-            });
-            setScanMode('input');
-        });
-        
         return () => {
-            if (html5QrCode.isScanning) {
-                html5QrCode.stop().catch(err => {
+            if (html5QrCodeScannerRef.current && html5QrCodeScannerRef.current.isScanning) {
+                html5QrCodeScannerRef.current.stop().catch(err => {
                     console.warn('Failed to stop camera on cleanup.', err);
                 });
+                html5QrCodeScannerRef.current = null;
             }
         };
-
-    }, [scanMode, addLog, toast, scannerContainerId, handleScanRef]);
+    }, [scanMode, scannerContainerId, addLog, toast, handleScan]);
 
     const getAttendanceRecord = (studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || { status: 'Belum Absen' };
