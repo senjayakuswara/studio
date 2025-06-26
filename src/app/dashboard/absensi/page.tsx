@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay } from "date-fns"
@@ -59,6 +59,12 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
 }
 type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
+type ReportConfig = {
+    title: string;
+    signatoryName: string;
+    signatoryNpa: string;
+    logoUrl: string | null;
+}
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary'> = {
     "Hadir": "default",
@@ -73,6 +79,7 @@ export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
   const [classes, setClasses] = useState<Class[]>([])
   const [attendanceRecords, setAttendanceRecords] = useState<CombinedAttendanceRecord[]>([])
+  const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
@@ -84,9 +91,17 @@ export default function AbsensiPage() {
       try {
         const selectedDateStart = startOfDay(date)
         const selectedDateEnd = endOfDay(date)
+        
+        const [classesSnapshot, reportConfigSnap] = await Promise.all([
+            getDocs(collection(db, "classes")),
+            getDoc(doc(db, "settings", "reportConfig"))
+        ]);
+
+        if(reportConfigSnap.exists()) {
+            setReportConfig(reportConfigSnap.data() as ReportConfig);
+        }
 
         // Fetch classes
-        const classesSnapshot = await getDocs(collection(db, "classes"))
         const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
         classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`))
         setClasses(classList)
@@ -144,6 +159,15 @@ export default function AbsensiPage() {
       return;
     }
 
+    if (!reportConfig) {
+      toast({
+        variant: "destructive",
+        title: "Pengaturan Belum Lengkap",
+        description: "Harap lengkapi pengaturan desain laporan terlebih dahulu.",
+      });
+      return;
+    }
+
     setIsPrinting(true);
     try {
       const doc = new jsPDF();
@@ -156,18 +180,23 @@ export default function AbsensiPage() {
         record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
         record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
       ]);
-
-      // Title
-      doc.setFontSize(16);
-      doc.text("Laporan E-Absensi SMAS PGRI Naringgul", doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
       
-      doc.setFontSize(12);
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      // Header
+      if (reportConfig.logoUrl) {
+        doc.addImage(reportConfig.logoUrl, 'PNG', 15, 10, 20, 20);
+      }
+      doc.setFontSize(14);
+      doc.text(reportConfig.title.split('\n'), pageWidth / 2, 15, { align: 'center' });
+      
+      doc.setFontSize(11);
       const reportDate = `Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`;
-      doc.text(reportDate, doc.internal.pageSize.getWidth() / 2, 22, { align: 'center' });
+      doc.text(reportDate, pageWidth / 2, 30, { align: 'center' });
 
       // Table
       autoTable(doc, {
-        startY: 30,
+        startY: 38,
         head: [['No', 'NISN', 'Nama Siswa', 'Kelas', 'Status', 'Jam Masuk', 'Jam Pulang']],
         body: tableData,
         theme: 'grid',
@@ -177,7 +206,6 @@ export default function AbsensiPage() {
 
       // Footer (Titimangsa)
       const finalY = (doc as any).lastAutoTable.finalY || 60;
-      const pageWidth = doc.internal.pageSize.getWidth();
       const signatureX = pageWidth - 65;
       let signatureY = finalY + 15;
       
@@ -189,18 +217,18 @@ export default function AbsensiPage() {
       doc.setFontSize(10);
       doc.text("Naringgul, " + format(new Date(), "dd MMMM yyyy", { locale: localeID }), signatureX, signatureY, { align: 'center' });
       doc.text("Petugas,", signatureX, signatureY + 6, { align: 'center' });
-      doc.text("(.........................)", signatureX, signatureY + 28, { align: 'center' });
-      doc.text("NPA: .....................", signatureX, signatureY + 34, { align: 'center' });
+      doc.text(reportConfig.signatoryName, signatureX, signatureY + 28, { align: 'center' });
+      doc.text(reportConfig.signatoryNpa, signatureX, signatureY + 34, { align: 'center' });
       
       // Save PDF
-      doc.save(`Laporan_Absensi_${format(date, "yyyy-MM-dd")}.pdf`);
+      doc.save(`Laporan_Absensi_Harian_${format(date, "yyyy-MM-dd")}.pdf`);
 
     } catch (error) {
       console.error("Error generating PDF:", error);
       toast({
         variant: "destructive",
         title: "Gagal Membuat PDF",
-        description: "Terjadi kesalahan saat membuat laporan.",
+        description: "Terjadi kesalahan saat membuat laporan. Pastikan format logo valid.",
       });
     } finally {
       setIsPrinting(false);
@@ -256,7 +284,7 @@ export default function AbsensiPage() {
             </Select>
             <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
                 {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                {isPrinting ? 'Mencetak...' : 'Cetak Laporan'}
+                {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
             </Button>
         </div>
       </div>
