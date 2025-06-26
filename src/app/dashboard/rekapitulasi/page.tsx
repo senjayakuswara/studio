@@ -6,9 +6,10 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Download, Loader2 } from "lucide-react"
+import { Download, Loader2, Send } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { sendClassMonthlyRecap, sendMonthlyRecapToParent } from "@/ai/flows/telegram-flow"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -46,12 +47,13 @@ type ReportConfig = {
     principalName: string
     principalNpa: string
 }
+type MonthlySummaryData = {
+    studentInfo: Student,
+    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D'
+    summary: { H: number, T: number, S: number, I: number, A: number, D: number }
+}
 type MonthlySummary = {
-    [studentId: string]: {
-        studentInfo: Student,
-        attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D'
-        summary: { H: number, T: number, S: number, I: number, A: number, D: number }
-    }
+    [studentId: string]: MonthlySummaryData
 }
 
 const years = [getYear(new Date()), getYear(new Date()) - 1, getYear(new Date()) - 2];
@@ -102,18 +104,12 @@ export default function RekapitulasiPage() {
         fetchInitialData();
     }, [toast]);
 
-    const handleGenerateMonthlyReport = async () => {
+    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[]} | null> => {
         if (!selectedTarget) {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat terlebih dahulu." });
-            return;
+            return null;
         }
-        if (!reportConfig) {
-            toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
-            return;
-        }
-
         setIsGenerating(true);
-
         try {
             // 1. Get all students based on selected target
             let classIdsToQuery: string[] = [];
@@ -128,8 +124,7 @@ export default function RekapitulasiPage() {
 
             if (classIdsToQuery.length === 0) {
                  toast({ title: "Tidak Ada Kelas", description: "Tidak ada kelas yang cocok dengan target yang dipilih." });
-                 setIsGenerating(false);
-                 return;
+                 return null;
             }
 
             const students: Student[] = [];
@@ -149,8 +144,7 @@ export default function RekapitulasiPage() {
 
             if (students.length === 0) {
                 toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa di target ini untuk dilaporkan." });
-                setIsGenerating(false);
-                return;
+                return null;
             }
 
             const classMap = new Map(classes.map(c => [c.id, c]));
@@ -163,43 +157,27 @@ export default function RekapitulasiPage() {
                 return a.nama.localeCompare(b.nama);
             });
 
-            // 2. Prepare date range for the selected month
+            // 2. Prepare date range and fetch attendance records
             const monthStart = startOfMonth(new Date(selectedYear, selectedMonth));
             const monthEnd = endOfMonth(new Date(selectedYear, selectedMonth));
-            
-            // 3. Fetch all attendance records for these students within the month
             const studentIds = students.map(s => s.id);
             const attendanceRecords: AttendanceRecord[] = [];
-            
             const studentIdChunks = [];
             for (let i = 0; i < studentIds.length; i += 30) {
                 studentIdChunks.push(studentIds.slice(i, i + 30));
             }
-
             for (const chunk of studentIdChunks) {
                 if (chunk.length === 0) continue;
-                const attendanceQuery = query(
-                    collection(db, "attendance"),
-                    where("studentId", "in", chunk),
-                    where("recordDate", ">=", monthStart),
-                    where("recordDate", "<=", monthEnd)
-                );
+                const attendanceQuery = query(collection(db, "attendance"), where("studentId", "in", chunk), where("recordDate", ">=", monthStart), where("recordDate", "<=", monthEnd));
                 const attendanceSnapshot = await getDocs(attendanceQuery);
-                attendanceSnapshot.forEach(doc => {
-                    attendanceRecords.push(doc.data() as AttendanceRecord);
-                });
+                attendanceSnapshot.forEach(doc => attendanceRecords.push(doc.data() as AttendanceRecord));
             }
 
-            // 4. Process data into a monthly summary
+            // 3. Process data into a monthly summary
             const summary: MonthlySummary = {};
             students.forEach(student => {
-                summary[student.id] = {
-                    studentInfo: student,
-                    attendance: {},
-                    summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0 }
-                };
+                summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0 } };
             });
-
             attendanceRecords.forEach(record => {
                 const day = getDate(record.recordDate.toDate());
                 let statusChar = '';
@@ -211,24 +189,63 @@ export default function RekapitulasiPage() {
                     case "Alfa": statusChar = 'A'; summary[record.studentId].summary.A++; break;
                     case "Dispen": statusChar = 'D'; summary[record.studentId].summary.D++; break;
                 }
-                if (statusChar) {
-                    summary[record.studentId].attendance[day] = statusChar;
-                }
+                if (statusChar) summary[record.studentId].attendance[day] = statusChar;
             });
-
-            // 5. Generate PDF
-            generatePdf(summary, students, selectedTarget);
-
-        } catch (error) {
-            console.error("Error generating monthly report:", error);
-            toast({
-                variant: "destructive",
-                title: "Gagal Membuat Laporan",
-                description: "Terjadi kesalahan saat mengambil atau memproses data absensi.",
-            });
+            return { summary, students };
+        } catch(e) {
+             console.error("Error generating summary data:", e);
+             toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat mengambil atau memproses data absensi." });
+             return null;
         } finally {
             setIsGenerating(false);
         }
+    }
+
+    const handleGenerateMonthlyReport = async () => {
+        if (!reportConfig) {
+            toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
+            return;
+        }
+        const data = await generateSummaryData();
+        if (data) {
+            generatePdf(data.summary, data.students, selectedTarget);
+        }
+    }
+
+    const handleSendTeleReport = async () => {
+        const data = await generateSummaryData();
+        if (!data || Object.keys(data.summary).length === 0) {
+            toast({ title: "Tidak Ada Data", description: "Tidak ada data untuk dikirim." });
+            return;
+        }
+        
+        toast({ title: "Memulai Pengiriman...", description: `Mengirim ${Object.keys(data.summary).length} rekap ke orang tua...` });
+
+        // Send to each parent
+        for (const studentData of Object.values(data.summary)) {
+            await sendMonthlyRecapToParent(studentData, selectedMonth, selectedYear);
+        }
+        
+        // Send to class advisor group if applicable
+        if (selectedTarget.startsWith("grade-") || classes.some(c => c.id === selectedTarget)) {
+            let className = "";
+            let grade = "";
+            if (selectedTarget.startsWith("grade-")) {
+                grade = selectedTarget.split('-')[1];
+                className = `Semua Kelas ${grade}`;
+            } else {
+                const classInfo = classes.find(c => c.id === selectedTarget);
+                if (classInfo) {
+                    className = classInfo.name;
+                    grade = classInfo.grade;
+                }
+            }
+            if (className) {
+                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary);
+            }
+        }
+        
+        toast({ title: "Pengiriman Selesai", description: "Semua notifikasi rekapitulasi telah dikirim." });
     }
 
     const generatePdf = (summary: MonthlySummary, students: Student[], target: string) => {
@@ -440,7 +457,11 @@ export default function RekapitulasiPage() {
                             </Select>
                         </div>
                      </div>
-                     <div className="flex justify-end">
+                     <div className="flex justify-end gap-2">
+                         <Button onClick={handleSendTeleReport} disabled={isGenerating || isLoading || !selectedTarget}>
+                            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                            {isGenerating ? 'Mengirim...' : 'Kirim Rekap via Telegram'}
+                        </Button>
                          <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>
                             {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             {isGenerating ? 'Membuat Laporan...' : 'Cetak Laporan Bulanan'}

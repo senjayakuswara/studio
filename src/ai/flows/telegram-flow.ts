@@ -2,7 +2,9 @@
 /**
  * @fileOverview Handles all Telegram bot interactions.
  * - processTelegramWebhook: Processes incoming messages from the Telegram webhook for user registration.
- * - notifyParentOnAttendance: Sends attendance notifications to parents.
+ * - notifyParentOnAttendance: Sends daily attendance notifications to parents.
+ * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
+ * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
  * - testTelegramConnection: Tests the validity of a bot token.
  */
 
@@ -14,13 +16,14 @@ import { id as localeID } from "date-fns/locale";
 // Types
 type TelegramSettings = {
   botToken: string;
+  groupChatId?: string;
   notifHadir: boolean;
   notifTerlambat: boolean;
   notifAbsen: boolean;
 };
 
 type Class = { id: string; name: string; grade: string };
-
+type Student = { id: string; nisn: string; nama: string; classId: string };
 type AttendanceRecord = {
   id?: string
   studentId: string
@@ -31,6 +34,11 @@ type AttendanceRecord = {
   timestampMasuk: Timestamp | null
   timestampPulang: Timestamp | null
   recordDate: Timestamp
+};
+type MonthlySummaryData = {
+    studentInfo: Student,
+    attendance: { [day: number]: string },
+    summary: { H: number, T: number, S: number, I: number, A: number, D: number }
 };
 
 // Internal helper to get Telegram config from Firestore
@@ -52,7 +60,7 @@ async function getTelegramConfig(): Promise<TelegramSettings | null> {
 async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     try {
-        await fetch(url, {
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -61,6 +69,10 @@ async function sendTelegramMessage(botToken: string, chatId: string, text: strin
                 parse_mode: 'Markdown',
             }),
         });
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("Telegram API Error:", errorData.description);
+        }
     } catch (error) {
         console.error("Failed to send Telegram message:", error);
     }
@@ -119,7 +131,7 @@ export async function processTelegramWebhook(payload: any) {
 }
 
 /**
- * Formats and sends an attendance notification to a parent.
+ * Formats and sends a daily attendance notification to a parent.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyParentOnAttendance(record: AttendanceRecord) {
@@ -159,13 +171,13 @@ export async function notifyParentOnAttendance(record: AttendanceRecord) {
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
-        title,
+        `*${title}*`,
         "",
-        `👤 *Nama*      : ${record.studentName}`,
-        `🆔 *NISN*      : ${record.nisn}`,
-        `📚 *Kelas*     : ${classInfo.name}`,
-        `⏰ *Jam*       : ${format(timestamp, "HH:mm:ss")}`,
-        `👋 *Status*    : ${finalStatus}`,
+        `👤 Nama      : ${record.studentName}`,
+        `🆔 NIS       : ${record.nisn}`,
+        `📚 Kelas     : ${classInfo.name}`,
+        `⏰ Jam       : ${format(timestamp, "HH:mm:ss")}`,
+        `👋 Status    : *${finalStatus}*`,
         "",
         "--",
         "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
@@ -174,6 +186,119 @@ export async function notifyParentOnAttendance(record: AttendanceRecord) {
     const message = messageLines.join("\n");
     await sendTelegramMessage(config.botToken, parentChatId, message);
 }
+
+/**
+ * Sends a monthly recap notification to a parent.
+ * @param studentData The student's full summary data for the month.
+ * @param month The month of the recap (0-11).
+ * @param year The year of the recap.
+ */
+export async function sendMonthlyRecapToParent(
+    studentData: MonthlySummaryData,
+    month: number,
+    year: number
+) {
+    const config = await getTelegramConfig();
+    if (!config?.botToken) return;
+
+    const student = studentData.studentInfo;
+    const summary = studentData.summary;
+
+    const studentDocRef = doc(db, "students", student.id);
+    const studentSnap = await getDoc(studentDocRef);
+    const parentChatId = studentSnap.data()?.parentChatId;
+    if (!parentChatId) return; // Skip if parent is not registered
+
+    const classSnap = await getDoc(doc(db, "classes", student.classId));
+    const classInfo = classSnap.data() as Class;
+
+    const totalHadir = summary.H + summary.T;
+    const totalSchoolDays = Object.values(summary).reduce((a, b) => a + b, 0);
+
+    const messageLines = [
+        "🏫 *SMAS PGRI Naringgul*",
+        `*Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
+        "",
+        "Yth. Orang Tua/Wali dari:",
+        `👤 Nama      : ${student.nama}`,
+        `🆔 NIS       : ${student.nisn}`,
+        `📚 Kelas     : ${classInfo.name}`,
+        "",
+        "Berikut adalah rekapitulasi kehadiran putra/putri Anda:",
+        `✅ Total Hadir      : ${totalHadir} hari`,
+        `⏰ Terlambat      : ${summary.T} kali`,
+        `🤒 Sakit         : ${summary.S} hari`,
+        `✉️ Izin          : ${summary.I} hari`,
+        `✈️ Dispen        : ${summary.D} hari`,
+        `❌ Alfa           : ${summary.A} hari`,
+        "",
+        `Dari total ${totalSchoolDays} hari sekolah efektif pada bulan ini.`,
+        "",
+        "--",
+        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
+    ];
+
+    await sendTelegramMessage(config.botToken, parentChatId, messageLines.join("\n"));
+}
+
+
+/**
+ * Sends a monthly recap for a class to the designated advisors' group chat.
+ * @param className The name of the class being reported.
+ * @param grade The grade of the class.
+ * @param month The month of the recap (0-11).
+ * @param year The year of the recap.
+ * @param summary The complete monthly summary object for all students in the report.
+ */
+export async function sendClassMonthlyRecap(
+    className: string,
+    grade: string,
+    month: number,
+    year: number,
+    summary: { [studentId: string]: MonthlySummaryData }
+) {
+    const config = await getTelegramConfig();
+    if (!config?.botToken || !config.groupChatId) return;
+
+    let totalPresent = 0;
+    let totalLate = 0;
+    let totalSick = 0;
+    let totalPermission = 0;
+    let totalDispen = 0;
+    let totalAlfa = 0;
+    
+    Object.values(summary).forEach(studentData => {
+        totalPresent += studentData.summary.H;
+        totalLate += studentData.summary.T;
+        totalSick += studentData.summary.S;
+        totalPermission += studentData.summary.I;
+        totalDispen += studentData.summary.D;
+        totalAlfa += studentData.summary.A;
+    });
+
+    const totalStudents = Object.keys(summary).length;
+    const totalKehadiran = totalPresent + totalLate;
+
+    const messageLines = [
+        "🏫 *SMAS PGRI Naringgul*",
+        `*Laporan Bulanan Untuk Wali Kelas*`,
+        `*${className} (${grade}) - ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
+        "",
+        `Berikut adalah rekapitulasi absensi untuk kelas Anda dengan total *${totalStudents}* siswa:`,
+        `✅ Total Hadir      : ${totalKehadiran} Kehadiran`,
+        `⏰ Total Terlambat  : ${totalLate} Pelanggaran`,
+        `🤒 Total Sakit      : ${totalSick} Hari`,
+        `✉️ Total Izin       : ${totalPermission} Hari`,
+        `✈️ Total Dispen     : ${totalDispen} Hari`,
+        `❌ Total Alfa       : ${totalAlfa} Hari`,
+        "",
+        "--",
+        "_Pesan ini dikirim otomatis oleh sistem._"
+    ];
+
+    await sendTelegramMessage(config.botToken, config.groupChatId, messageLines.join("\n"));
+}
+
 
 /**
  * Tests the connection to the Telegram API using the provided bot token.
@@ -192,8 +317,7 @@ export async function testTelegramConnection(botToken: string): Promise<{ succes
         if (data.ok) {
             return { success: true, message: `Koneksi berhasil! Terhubung dengan bot: ${data.result.first_name} (@${data.result.username}).` };
         } else {
-            // Error from Telegram API (e.g., invalid token)
-            return { success: false, message: `Gagal terhubung ke Telegram: ${data.description}` };
+            return { success: false, message: `Gagal terhubung ke Telegram: ${data.description || 'Unknown error'}` };
         }
     } catch (error) {
         console.error("Failed to test Telegram connection:", error);
