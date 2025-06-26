@@ -113,11 +113,21 @@ export async function processTelegramWebhook(payload: any) {
         return;
     }
 
-    const message = payload?.message;
-    const chatId = message?.chat?.id;
-    const text = message?.text?.trim();
+    // Handle different types of messages from Telegram
+    const message = payload.message || payload.edited_message;
+    if (!message) {
+        console.log("Received a non-message update, skipping:", payload);
+        return;
+    }
 
-    if (!chatId || !text) return;
+    const chatId = message.chat?.id;
+    const text = message.text?.trim();
+
+    if (!chatId || !text) {
+        console.log("Update does not have a chat ID or text, skipping:", message);
+        return;
+    }
+
 
     if (text === '/start') {
         const welcomeMessage = "Selamat datang di Notifikasi AbsensiKu Cerdas SMAS PGRI Naringgul. Untuk menghubungkan akun Anda dengan data absensi putra/i Anda, silakan masukkan Nomor Induk Siswa Nasional (NISN) anak Anda.";
