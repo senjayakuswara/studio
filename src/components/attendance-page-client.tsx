@@ -20,12 +20,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
@@ -36,14 +30,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2 } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert"
-import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -89,12 +82,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord>>({})
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const [scanMode, setScanMode] = useState<'input' | 'camera'>('input');
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
+    const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     
-    const isProcessingRef = useRef(false);
+    const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
@@ -199,16 +192,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         fetchData()
     }, [grade, toast, addLog])
     
-    useEffect(() => {
-        if (!isLoading && scanMode === 'input') {
-            setTimeout(() => scannerInputRef.current?.focus(), 100);
-        }
-    }, [isLoading, scanMode]);
-
     const handleScan = useCallback(async (nisn: string) => {
-        if (!nisn.trim() || isProcessingRef.current) return;
+        if (!nisn.trim() || processingLock.current) return;
         
-        isProcessingRef.current = true;
+        processingLock.current = true;
         setIsProcessing(true);
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
@@ -301,79 +288,76 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
         } finally {
             setTimeout(() => {
-              isProcessingRef.current = false;
+              processingLock.current = false;
               setIsProcessing(false);
-            }, 2000);
+            }, 1500); // Cooldown to prevent double scans
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast]);
     
-    // Using a ref to hold the latest version of handleScan for the camera callback
-    const handleScanRef = useRef(handleScan);
-    useEffect(() => {
-        handleScanRef.current = handleScan;
-    }, [handleScan]);
-
     const stopScanner = useCallback(() => {
-        if (html5QrCodeRef.current?.isScanning) {
+        if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
             html5QrCodeRef.current.stop()
+                .then(() => {
+                    addLog("Kamera dinonaktifkan.", "info");
+                })
                 .catch(err => {
-                    console.warn("Failed to stop scanner cleanly.", err);
+                    console.warn("Gagal menghentikan pemindai dengan bersih.", err);
                 })
                 .finally(() => {
                     html5QrCodeRef.current = null;
+                    setIsCameraActive(false);
+                    setIsCameraInitializing(false);
+                    setCameraError(null);
                 });
         }
-    }, []);
+    }, [addLog]);
 
     const startScanner = useCallback(() => {
-        if (html5QrCodeRef.current) {
-            return; // Already started or starting
-        }
+        if (isCameraActive || isCameraInitializing) return;
 
         setIsCameraInitializing(true);
         setCameraError(null);
-
+        
         const newScanner = new Html5Qrcode(scannerContainerId, { verbose: false });
         html5QrCodeRef.current = newScanner;
+
+        const onScanSuccess = (decodedText: string) => {
+            handleScan(decodedText);
+        };
+        const onScanFailure = (error: any) => { /* ignore */ };
 
         newScanner.start(
             { facingMode: "user" },
             { fps: 5, qrbox: { width: 250, height: 250 } },
-            (decodedText) => {
-                handleScanRef.current(decodedText);
-            },
-            (errorMessage) => { /* ignore */ }
+            onScanSuccess,
+            onScanFailure
         )
-        .then(() => setIsCameraInitializing(false))
+        .then(() => {
+            setIsCameraInitializing(false);
+            setIsCameraActive(true);
+            addLog("Kamera berhasil diaktifkan.", "success");
+        })
         .catch((err) => {
             const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
             setIsCameraInitializing(false);
-            html5QrCodeRef.current = null; // Clean up on failure
+            setIsCameraActive(false);
+            html5QrCodeRef.current = null;
+            addLog(`Error kamera: ${errorMessage}`, "error");
             toast({
                 variant: 'destructive',
                 title: 'Gagal Mengakses Kamera',
-                description: 'Harap izinkan akses kamera di pengaturan browser Anda.'
+                description: 'Harap izinkan akses kamera di pengaturan browser Anda dan coba lagi.'
             });
         });
-    }, [scannerContainerId, toast]);
+    }, [scannerContainerId, toast, addLog, handleScan, isCameraActive, isCameraInitializing]);
     
     useEffect(() => {
+        // Cleanup function to stop scanner on component unmount
         return () => {
-            // Ensure scanner is stopped on component unmount
             stopScanner();
         };
     }, [stopScanner]);
-
-    const handleTabChange = (value: 'input' | 'camera') => {
-        setScanMode(value);
-        if (value === 'camera') {
-            startScanner();
-        } else {
-            stopScanner();
-        }
-    };
-
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -428,85 +412,89 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-                <CardHeader>
-                    <CardTitle>Mode Pemindai</CardTitle>
-                    <CardDescription>
-                        Pilih antara input manual atau menggunakan pemindaian kamera.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Tabs value={scanMode} onValueChange={(value) => handleTabChange(value as 'input' | 'camera')} className="w-full">
-                        <TabsList className="grid w-full grid-cols-2">
-                            <TabsTrigger value="input">
-                                <ScanLine className="mr-2 h-4 w-4" />
-                                Input Manual
-                            </TabsTrigger>
-                            <TabsTrigger value="camera">
-                                <Camera className="mr-2 h-4 w-4" />
-                                Pindai Kamera
-                            </TabsTrigger>
-                        </TabsList>
-                        <TabsContent value="input" className="mt-4">
-                            <Input
-                                ref={scannerInputRef}
-                                id={`nisn-input-${grade}`}
-                                placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                                disabled={isLoading || isProcessing}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                        handleScan(e.currentTarget.value);
-                                    }
-                                }}
-                            />
-                        </TabsContent>
-                        <TabsContent value="camera" className="mt-4">
-                            <div className="w-full aspect-square rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                                <div id={scannerContainerId} className="w-full h-full" />
-                                
-                                {isCameraInitializing && (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80">
-                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                        <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
-                                    </div>
-                                )}
-
-                                {cameraError && !isCameraInitializing && (
-                                    <div className="absolute inset-0 flex items-center justify-center p-4 bg-background/80">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><ScanLine /> Mode Input</CardTitle>
+                        <CardDescription>
+                            Gunakan barcode scanner atau ketik NISN manual lalu tekan Enter.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Input
+                            ref={scannerInputRef}
+                            id={`nisn-input-${grade}`}
+                            placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
+                            disabled={isLoading || isProcessing}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                    handleScan(e.currentTarget.value);
+                                }
+                            }}
+                        />
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><Camera /> Mode Kamera</CardTitle>
+                         <CardDescription>
+                           Gunakan kamera perangkat untuk memindai QR code atau barcode.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-4">
+                        <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                             <div id={scannerContainerId} className={isCameraActive ? "w-full h-full" : "hidden"} />
+                             
+                             {!isCameraActive && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+                                    {isCameraInitializing ? (
+                                        <>
+                                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                            <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
+                                        </>
+                                    ) : cameraError ? (
                                         <Alert variant="destructive">
                                           <ShieldAlert className="h-4 w-4" />
                                           <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
-                                          <AlertDescription>
-                                            {cameraError}
-                                          </AlertDescription>
+                                          <AlertDescription>{cameraError}</AlertDescription>
                                         </Alert>
-                                    </div>
-                                )}
-                            </div>
-                            <p className="text-xs text-muted-foreground text-center mt-2">
-                                Arahkan kamera ke QR Code atau Barcode NISN siswa.
-                            </p>
-                        </TabsContent>
-                    </Tabs>
-                </CardContent>
-            </Card>
-
-             <Card>
+                                    ) : (
+                                        <>
+                                            <Video className="h-10 w-10 text-muted-foreground" />
+                                            <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
+                                            <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
+                                        </>
+                                    )}
+                                </div>
+                             )}
+                        </div>
+                        <div className="flex gap-2 justify-center">
+                            <Button onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
+                                <Video className="mr-2"/> Aktifkan Kamera
+                            </Button>
+                            <Button onClick={stopScanner} variant="destructive" disabled={!isCameraActive}>
+                                <VideoOff className="mr-2"/> Matikan Kamera
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+             <Card className="lg:col-span-1">
                 <CardHeader>
                     <CardTitle>Log Aktivitas</CardTitle>
                     <CardDescription>Catatan pemindaian absensi hari ini.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="h-64 overflow-y-auto rounded-md border p-2 space-y-2">
+                    <div className="h-80 overflow-y-auto rounded-md border p-2 space-y-2">
                         {logMessages.length > 0 ? (
                             logMessages.map((log, i) => (
-                                <div key={i} className="flex items-center gap-2 text-sm">
-                                    <span className="font-mono text-xs text-muted-foreground">{log.timestamp}</span>
-                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />}
-                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500" />}
-                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500" />}
-                                    <span className="flex-1 truncate">{log.message}</span>
+                                <div key={i} className="flex items-start gap-2 text-sm">
+                                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
+                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
+                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
+                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                    <span className="flex-1">{log.message}</span>
                                 </div>
                             ))
                         ) : (
