@@ -62,7 +62,7 @@ const months = Array.from({ length: 12 }, (_, i) => ({
 
 
 export default function RekapitulasiPage() {
-    const [selectedClass, setSelectedClass] = useState<string>("")
+    const [selectedTarget, setSelectedTarget] = useState<string>("")
     const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()))
     const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()))
     const [classes, setClasses] = useState<Class[]>([])
@@ -87,10 +87,7 @@ export default function RekapitulasiPage() {
                 const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[];
                 classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`));
                 setClasses(classList);
-                if (classList.length > 0) {
-                    setSelectedClass(classList[0].id);
-                }
-
+                
             } catch (error) {
                 console.error("Error fetching initial data:", error);
                 toast({
@@ -106,8 +103,8 @@ export default function RekapitulasiPage() {
     }, [toast]);
 
     const handleGenerateMonthlyReport = async () => {
-        if (!selectedClass) {
-            toast({ variant: "destructive", title: "Pilih Kelas", description: "Anda harus memilih kelas terlebih dahulu." });
+        if (!selectedTarget) {
+            toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat terlebih dahulu." });
             return;
         }
         if (!reportConfig) {
@@ -118,17 +115,53 @@ export default function RekapitulasiPage() {
         setIsGenerating(true);
 
         try {
-            // 1. Get all students for the selected class
-            const studentsQuery = query(collection(db, "students"), where("classId", "==", selectedClass));
-            const studentsSnapshot = await getDocs(studentsQuery);
-            const students = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
-            students.sort((a, b) => a.nama.localeCompare(b.nama));
+            // 1. Get all students based on selected target
+            let classIdsToQuery: string[] = [];
+            if (selectedTarget.startsWith("grade-")) {
+                const grade = selectedTarget.split('-')[1];
+                classIdsToQuery = classes.filter(c => c.grade === grade).map(c => c.id);
+            } else if (selectedTarget === "all-grades") {
+                classIdsToQuery = classes.map(c => c.id);
+            } else {
+                classIdsToQuery = [selectedTarget];
+            }
+
+            if (classIdsToQuery.length === 0) {
+                 toast({ title: "Tidak Ada Kelas", description: "Tidak ada kelas yang cocok dengan target yang dipilih." });
+                 setIsGenerating(false);
+                 return;
+            }
+
+            const students: Student[] = [];
+            const classIdChunks = [];
+            for (let i = 0; i < classIdsToQuery.length; i += 30) {
+                classIdChunks.push(classIdsToQuery.slice(i, i + 30));
+            }
+            
+            for (const chunk of classIdChunks) {
+                if (chunk.length === 0) continue;
+                const studentsQuery = query(collection(db, "students"), where("classId", "in", chunk));
+                const studentsSnapshot = await getDocs(studentsQuery);
+                studentsSnapshot.forEach(doc => {
+                    students.push({ id: doc.id, ...doc.data() } as Student);
+                });
+            }
 
             if (students.length === 0) {
-                toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa di kelas ini untuk dilaporkan." });
+                toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa di target ini untuk dilaporkan." });
                 setIsGenerating(false);
                 return;
             }
+
+            const classMap = new Map(classes.map(c => [c.id, c]));
+            students.sort((a, b) => {
+                const classA = classMap.get(a.classId);
+                const classB = classMap.get(b.classId);
+                const classAKey = classA ? `${classA.grade}-${classA.name}` : '';
+                const classBKey = classB ? `${classB.grade}-${classB.name}` : '';
+                if (classAKey !== classBKey) return classAKey.localeCompare(classBKey);
+                return a.nama.localeCompare(b.nama);
+            });
 
             // 2. Prepare date range for the selected month
             const monthStart = startOfMonth(new Date(selectedYear, selectedMonth));
@@ -138,12 +171,12 @@ export default function RekapitulasiPage() {
             const studentIds = students.map(s => s.id);
             const attendanceRecords: AttendanceRecord[] = [];
             
-            const chunks = [];
+            const studentIdChunks = [];
             for (let i = 0; i < studentIds.length; i += 30) {
-                chunks.push(studentIds.slice(i, i + 30));
+                studentIdChunks.push(studentIds.slice(i, i + 30));
             }
 
-            for (const chunk of chunks) {
+            for (const chunk of studentIdChunks) {
                 if (chunk.length === 0) continue;
                 const attendanceQuery = query(
                     collection(db, "attendance"),
@@ -184,7 +217,7 @@ export default function RekapitulasiPage() {
             });
 
             // 5. Generate PDF
-            generatePdf(summary, students);
+            generatePdf(summary, students, selectedTarget);
 
         } catch (error) {
             console.error("Error generating monthly report:", error);
@@ -198,7 +231,7 @@ export default function RekapitulasiPage() {
         }
     }
 
-    const generatePdf = (summary: MonthlySummary, students: Student[]) => {
+    const generatePdf = (summary: MonthlySummary, students: Student[], target: string) => {
         const doc = new jsPDF({ orientation: "landscape" });
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageMargin = 15;
@@ -208,7 +241,7 @@ export default function RekapitulasiPage() {
         if (reportConfig?.headerImageUrl) {
             try {
                 const imgWidth = pageWidth - pageMargin * 2;
-                const imgHeight = imgWidth * (150 / 950); // Assuming 950x150 aspect ratio, adjust if needed
+                const imgHeight = imgWidth * (150 / 950); // Assuming 950x150 aspect ratio
                 doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, 10, imgWidth, imgHeight);
                 lastY = 10 + imgHeight + 5;
             } catch (e) {
@@ -222,7 +255,23 @@ export default function RekapitulasiPage() {
         }
 
         // --- Report Title ---
-        const selectedClassInfo = classes.find(c => c.id === selectedClass);
+        let scopeText = "";
+        let fileNameScope = "Laporan"
+        if (target.startsWith("grade-")) {
+            const grade = target.split('-')[1];
+            scopeText = `Tingkat: ${grade}`;
+            fileNameScope = `Tingkat_${grade}`
+        } else if (target === "all-grades") {
+            scopeText = `Tingkat: Semua`;
+            fileNameScope = `Semua_Tingkat`
+        } else {
+            const selectedClassInfo = classes.find(c => c.id === target);
+            if (selectedClassInfo) {
+                scopeText = `Kelas: ${selectedClassInfo.name}, Tingkat: ${selectedClassInfo.grade}`;
+                fileNameScope = `Kelas_${selectedClassInfo.name.replace(/ /g, '_')}`
+            }
+        }
+
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(12);
         doc.text("REKAPITULASI ABSENSI SISWA", pageWidth / 2, lastY, { align: 'center' });
@@ -231,24 +280,27 @@ export default function RekapitulasiPage() {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
         const textY = lastY + 5;
-        doc.text(`Kelas: ${selectedClassInfo?.name} (${selectedClassInfo?.grade})`, pageMargin, textY);
+        doc.text(scopeText, pageMargin, textY);
         doc.text(`Bulan: ${format(new Date(selectedYear, selectedMonth), "MMMM yyyy", { locale: localeID })}`, pageWidth - pageMargin, textY, { align: 'right' });
         lastY = textY + 10;
         
         // --- Table ---
         const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
         const head = [
-            [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
+            [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Kelas', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
             [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
         ];
         
+        const classMap = new Map(classes.map(c => [c.id, c]));
         const body = students.map((student, index) => {
             const studentSummary = summary[student.id];
             const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '');
+            const studentClass = classMap.get(student.classId);
             return [
                 index + 1,
                 student.nama,
                 student.nisn,
+                studentClass ? `${studentClass.name} (${studentClass.grade})` : 'N/A',
                 ...attendanceRow,
                 studentSummary.summary.H,
                 studentSummary.summary.T,
@@ -279,6 +331,7 @@ export default function RekapitulasiPage() {
                 0: { halign: 'center', cellWidth: 8 },  // No
                 1: { halign: 'left', cellWidth: 40 }, // Nama
                 2: { halign: 'center', cellWidth: 18 }, // NISN
+                3: { halign: 'left', cellWidth: 20 }, // Kelas
             }
         });
 
@@ -314,7 +367,7 @@ export default function RekapitulasiPage() {
         }
         
         // --- Save PDF ---
-        doc.save(`Laporan_Bulanan_${selectedClassInfo?.name}_${format(new Date(selectedYear, selectedMonth), "MMMM_yyyy")}.pdf`);
+        doc.save(`Laporan_Bulanan_${fileNameScope}_${format(new Date(selectedYear, selectedMonth), "MMMM_yyyy")}.pdf`);
     }
 
     return (
@@ -326,7 +379,7 @@ export default function RekapitulasiPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Laporan Bulanan</CardTitle>
-                    <CardDescription>Pilih periode dan kelas untuk membuat laporan rekapitulasi absensi bulanan.</CardDescription>
+                    <CardDescription>Pilih periode dan target untuk membuat laporan rekapitulasi absensi bulanan.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -357,15 +410,25 @@ export default function RekapitulasiPage() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm font-medium">Kelas</label>
-                            <Select value={selectedClass} onValueChange={setSelectedClass} disabled={isLoading || classes.length === 0}>
+                            <label className="text-sm font-medium">Target Laporan</label>
+                            <Select value={selectedTarget} onValueChange={setSelectedTarget} disabled={isLoading || classes.length === 0}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Pilih Kelas" />
+                                    <SelectValue placeholder="Pilih Target Laporan" />
                                 </SelectTrigger>
                                 <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Grup Global</SelectLabel>
+                                        <SelectItem value="all-grades">Semua Tingkat</SelectItem>
+                                    </SelectGroup>
+                                    <SelectGroup>
+                                        <SelectLabel>Per Tingkat</SelectLabel>
+                                        <SelectItem value="grade-X">Semua Kelas X</SelectItem>
+                                        <SelectItem value="grade-XI">Semua Kelas XI</SelectItem>
+                                        <SelectItem value="grade-XII">Semua Kelas XII</SelectItem>
+                                    </SelectGroup>
                                     {["X", "XI", "XII"].map(grade => (
                                         <SelectGroup key={grade}>
-                                            <SelectLabel>Kelas {grade}</SelectLabel>
+                                            <SelectLabel>Per Kelas - Tingkat {grade}</SelectLabel>
                                             {classes.filter(c => c.grade === grade).map(c => (
                                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                             ))}
@@ -376,7 +439,7 @@ export default function RekapitulasiPage() {
                         </div>
                      </div>
                      <div className="flex justify-end">
-                         <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedClass}>
+                         <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>
                             {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             {isGenerating ? 'Membuat Laporan...' : 'Cetak Laporan Bulanan'}
                         </Button>
