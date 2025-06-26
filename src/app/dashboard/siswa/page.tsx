@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, type ChangeEvent, useMemo } from "react"
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore"
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, writeBatch, query, where } from "firebase/firestore"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -64,6 +64,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
@@ -77,7 +78,7 @@ const studentSchema = z.object({
 type Student = z.infer<typeof studentSchema> & { id: string }
 type NewStudent = z.infer<typeof studentSchema>;
 type Class = { id: string; name: string; grade: string };
-type ParsedStudent = Omit<NewStudent, 'classId'> & { className: string };
+type ImportStudent = NewStudent & { id?: string; status: 'Baru' | 'Diperbarui' | 'Identik' }
 
 export default function SiswaPage() {
   const [students, setStudents] = useState<Student[]>([])
@@ -88,14 +89,14 @@ export default function SiswaPage() {
   const [isAlertOpen, setIsAlertOpen] = useState(false)
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
-  const [parsedStudents, setParsedStudents] = useState<NewStudent[]>([]);
+  const [importedStudents, setImportedStudents] = useState<ImportStudent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [filterName, setFilterName] = useState("")
   const [filterClass, setFilterClass] = useState("all")
   const { toast } = useToast()
 
-  const classMap = useMemo(() => new Map(classes.map(c => [c.id, c.name])), [classes]);
-  const classNameMap = useMemo(() => new Map(classes.map(c => [c.name, c.id])), [classes]);
+  const classMap = useMemo(() => new Map(classes.map(c => [c.id, `${c.name} (${c.grade})`])), [classes]);
+  const classNameAndGradeMap = useMemo(() => new Map(classes.map(c => [`${c.name} (${c.grade})`, c.id])), [classes]);
   
   const filteredStudents = useMemo(() => {
     return students
@@ -151,25 +152,44 @@ export default function SiswaPage() {
 
   async function handleSaveStudent(values: NewStudent) {
     try {
-      if (editingStudent) {
-        const studentRef = doc(db, "students", editingStudent.id)
-        await updateDoc(studentRef, values)
-        toast({ title: "Sukses", description: "Data siswa berhasil diperbarui." })
-      } else {
-        await addDoc(collection(db, "students"), values)
-        toast({ title: "Sukses", description: "Siswa baru berhasil ditambahkan." })
+      const existingStudentQuery = query(collection(db, "students"), where("nisn", "==", values.nisn));
+      const querySnapshot = await getDocs(existingStudentQuery);
+      
+      let existingStudentId: string | null = null;
+      if (!querySnapshot.empty) {
+        existingStudentId = querySnapshot.docs[0].id;
       }
-      await fetchData()
-      setIsFormDialogOpen(false)
-      setEditingStudent(null)
-      form.reset()
+      
+      if (editingStudent) {
+        // Editing an existing student
+        if (existingStudentId && existingStudentId !== editingStudent.id) {
+          toast({ variant: "destructive", title: "Gagal Menyimpan", description: "NISN ini sudah digunakan oleh siswa lain." });
+          return;
+        }
+        const studentRef = doc(db, "students", editingStudent.id);
+        await updateDoc(studentRef, values);
+        toast({ title: "Sukses", description: "Data siswa berhasil diperbarui." });
+      } else {
+        // Adding a new student
+        if (existingStudentId) {
+          toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Siswa dengan NISN ini sudah terdaftar." });
+          return;
+        }
+        await addDoc(collection(db, "students"), values);
+        toast({ title: "Sukses", description: "Siswa baru berhasil ditambahkan." });
+      }
+
+      await fetchData();
+      setIsFormDialogOpen(false);
+      setEditingStudent(null);
+      form.reset();
     } catch (error) {
-      console.error("Error saving student: ", error)
+      console.error("Error saving student: ", error);
       toast({
         variant: "destructive",
         title: "Gagal Menyimpan",
         description: "Terjadi kesalahan saat menyimpan data siswa.",
-      })
+      });
     }
   }
 
@@ -209,8 +229,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Nama Kelas", "Jenis Kelamin"];
-    const example = ["1234567890", "Budi Santoso", "X-1", "Laki-laki"];
+    const header = ["NISN", "Nama", "Nama Kelas (Tingkat)", "Jenis Kelamin"];
+    const example = ["1234567890", "Budi Santoso", "MIPA 1 (X)", "Laki-laki"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -233,37 +253,60 @@ export default function SiswaPage() {
             
             json.shift();
 
-            let validStudents: NewStudent[] = [];
+            const studentNisnMap = new Map(students.map(s => [s.nisn, s]));
+            let processedStudents: ImportStudent[] = [];
             let invalidCount = 0;
 
             json.forEach((row: any[]) => {
+                const classId = classNameAndGradeMap.get(String(row[2] || ""));
                 const studentData = {
                     nisn: String(row[0] || ""),
                     nama: String(row[1] || ""),
-                    classId: classNameMap.get(String(row[2] || "")),
+                    classId: classId,
                     jenisKelamin: String(row[3] || ""),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
                 if (validation.success) {
-                    validStudents.push(validation.data as NewStudent);
+                    const validStudent = validation.data as NewStudent;
+                    const existingStudent = studentNisnMap.get(validStudent.nisn);
+                    
+                    if (existingStudent) {
+                        const isIdentical = existingStudent.nama === validStudent.nama &&
+                                            existingStudent.classId === validStudent.classId &&
+                                            existingStudent.jenisKelamin === validStudent.jenisKelamin;
+                        
+                        processedStudents.push({ 
+                            ...validStudent, 
+                            id: existingStudent.id, 
+                            status: isIdentical ? 'Identik' : 'Diperbarui' 
+                        });
+                    } else {
+                        processedStudents.push({ ...validStudent, status: 'Baru' });
+                    }
                 } else {
                     invalidCount++;
                 }
             });
-
-            setParsedStudents(validStudents);
             
-            if (validStudents.length > 0) {
+            setImportedStudents(processedStudents);
+            
+            const toImportCount = processedStudents.filter(s => s.status !== 'Identik').length;
+            if (toImportCount > 0) {
                 toast({
                     title: "File Diproses",
-                    description: `Ditemukan ${validStudents.length} data siswa yang valid. ${invalidCount > 0 ? `${invalidCount} baris tidak valid.` : ''}`,
+                    description: `Ditemukan ${toImportCount} data untuk diimpor/diperbarui. ${invalidCount > 0 ? `${invalidCount} baris tidak valid.` : ''}`,
+                });
+            } else if (processedStudents.length > 0) {
+                 toast({
+                    title: "Tidak Ada Perubahan",
+                    description: "Semua data siswa di file sudah sesuai dengan data di database.",
                 });
             } else {
                  toast({
                     variant: "destructive",
                     title: "Gagal Memproses File",
-                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Nama Kelas' di file Excel sudah terdaftar di Manajemen Kelas.",
+                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Nama Kelas (Tingkat)' di file Excel sudah terdaftar di Manajemen Kelas.",
                 });
             }
 
@@ -274,7 +317,7 @@ export default function SiswaPage() {
                 title: "File Tidak Valid",
                 description: "Terjadi kesalahan saat membaca file Excel.",
             });
-            setParsedStudents([]);
+            setImportedStudents([]);
         }
     };
     reader.readAsBinaryString(file);
@@ -282,25 +325,34 @@ export default function SiswaPage() {
   }
   
   const handleSaveImportedStudents = async () => {
-    if (parsedStudents.length === 0) {
+    const studentsToProcess = importedStudents.filter(s => s.status !== 'Identik');
+    if (studentsToProcess.length === 0) {
         toast({ variant: "destructive", title: "Tidak ada data untuk diimpor." });
         return;
     }
     setIsImporting(true);
     try {
         const batch = writeBatch(db);
-        parsedStudents.forEach(student => {
-            const docRef = doc(collection(db, "students"));
-            batch.set(docRef, student);
+        
+        studentsToProcess.forEach(student => {
+            const { id, status, ...studentData } = student;
+            if (status === 'Baru') {
+                const docRef = doc(collection(db, "students"));
+                batch.set(docRef, studentData);
+            } else if (status === 'Diperbarui' && id) {
+                const docRef = doc(db, "students", id);
+                batch.update(docRef, studentData);
+            }
         });
+
         await batch.commit();
         toast({
             title: "Impor Berhasil",
-            description: `${parsedStudents.length} siswa berhasil ditambahkan ke database.`,
+            description: `${studentsToProcess.length} data siswa berhasil disimpan ke database.`,
         });
         await fetchData();
         setIsImportDialogOpen(false);
-        setParsedStudents([]);
+        setImportedStudents([]);
     } catch (error) {
          console.error("Error importing students: ", error);
          toast({
@@ -427,25 +479,28 @@ export default function SiswaPage() {
                 )}
               />
                <DialogFooter>
-                    <Button type="submit">Simpan</Button>
+                    <Button type="submit" disabled={form.formState.isSubmitting}>
+                      {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Simpan
+                    </Button>
                 </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
       
-      <Dialog open={isImportDialogOpen} onOpenChange={(isOpen) => { setIsImportDialogOpen(isOpen); if (!isOpen) setParsedStudents([]); }}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={isImportDialogOpen} onOpenChange={(isOpen) => { setIsImportDialogOpen(isOpen); if (!isOpen) setImportedStudents([]); }}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Impor Data Siswa</DialogTitle>
             <DialogDescription>
-              Unggah file Excel (.xlsx) untuk menambahkan banyak siswa sekaligus.
+              Unggah file Excel untuk menambah atau memperbarui data siswa secara massal.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 py-2">
             <div className="p-4 border rounded-md space-y-3">
                 <h3 className="font-medium">Langkah 1: Unduh Template</h3>
-                <p className="text-sm text-muted-foreground">Unduh dan isi file template dengan data siswa Anda. Pastikan nama kelas sesuai dengan yang ada di Manajemen Kelas.</p>
+                <p className="text-sm text-muted-foreground">Unduh template dan isi dengan data siswa. Pastikan format 'Nama Kelas (Tingkat)' sesuai.</p>
                 <Button variant="secondary" onClick={handleDownloadTemplate}>
                     <Download className="mr-2 h-4 w-4" />
                     Unduh Template Excel
@@ -461,21 +516,27 @@ export default function SiswaPage() {
                     className="file:font-medium file:text-primary"
                 />
             </div>
-            {parsedStudents.length > 0 && (
+            {importedStudents.length > 0 && (
                 <div className="space-y-3">
-                    <h3 className="font-medium">Pratinjau Data ({parsedStudents.length} siswa)</h3>
+                    <h3 className="font-medium">Pratinjau Data ({importedStudents.filter(s => s.status !== 'Identik').length} akan diproses)</h3>
                     <div className="max-h-60 overflow-auto rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow>
+                                    <TableHead>Status</TableHead>
                                     <TableHead>NISN</TableHead>
                                     <TableHead>Nama</TableHead>
                                     <TableHead>Kelas</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {parsedStudents.map((student, index) => (
-                                    <TableRow key={index}>
+                                {importedStudents.map((student, index) => (
+                                    <TableRow key={index} className={student.status === 'Identik' ? 'text-muted-foreground' : ''}>
+                                        <TableCell>
+                                            <Badge variant={student.status === 'Baru' ? 'default' : student.status === 'Diperbarui' ? 'secondary' : 'outline'}>
+                                                {student.status}
+                                            </Badge>
+                                        </TableCell>
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell>{student.nama}</TableCell>
                                         <TableCell>{classMap.get(student.classId) || "Error"}</TableCell>
@@ -489,7 +550,7 @@ export default function SiswaPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsImportDialogOpen(false)}>Batal</Button>
-            <Button onClick={handleSaveImportedStudents} disabled={parsedStudents.length === 0 || isImporting}>
+            <Button onClick={handleSaveImportedStudents} disabled={importedStudents.filter(s => s.status !== 'Identik').length === 0 || isImporting}>
               {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Simpan ke Database
             </Button>
@@ -570,7 +631,7 @@ export default function SiswaPage() {
                         <TableRow key={student.id}>
                         <TableCell>{student.nisn}</TableCell>
                         <TableCell className="font-medium">{student.nama}</TableCell>
-                        <TableCell>{classMap.get(student.classId) || "Kelas Dihapus"}</TableCell>
+                        <TableCell>{classMap.get(student.classId)?.split(' (')[0] || "Kelas Dihapus"}</TableCell>
                         <TableCell>{student.jenisKelamin}</TableCell>
                         <TableCell>
                             <DropdownMenu>
@@ -609,3 +670,5 @@ export default function SiswaPage() {
     </div>
   )
 }
+
+    
