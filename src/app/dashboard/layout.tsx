@@ -1,7 +1,8 @@
+
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { doc, getDoc } from "firebase/firestore"
 import Image from "next/image"
@@ -13,6 +14,7 @@ import {
   Clock,
   Fingerprint,
   LayoutDashboard,
+  Loader2,
   Printer,
   School,
   Send,
@@ -21,6 +23,7 @@ import {
 } from "lucide-react"
 
 import { db } from "@/lib/firebase"
+import { onAuthChange } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 import {
   Collapsible,
@@ -53,11 +56,24 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
+  const router = useRouter();
   const isActive = (path: string) => pathname.startsWith(path)
   const [appName, setAppName] = useState("AbTrack")
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const { toast } = useToast()
+
+  useEffect(() => {
+    const unsubscribe = onAuthChange((user) => {
+      if (!user) {
+        router.push('/login');
+      } else {
+        setIsAuthLoading(false);
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
 
   useEffect(() => {
     async function fetchSettings() {
@@ -71,7 +87,6 @@ export default function DashboardLayout({
           setLogoUrl(data.logoUrl || null);
           document.title = `${data.appName || "AbTrack"} - Dashboard`;
           
-          // Apply theme colors
           const theme = data.theme || {};
           if (theme.primary) document.documentElement.style.setProperty('--primary', theme.primary);
           if (theme.background) document.documentElement.style.setProperty('--background', theme.background);
@@ -91,6 +106,14 @@ export default function DashboardLayout({
     }
     fetchSettings();
   }, [toast]);
+
+  if (isAuthLoading) {
+      return (
+          <div className="flex h-screen w-full items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+      )
+  }
 
   return (
     <SidebarProvider>

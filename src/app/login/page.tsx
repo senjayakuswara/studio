@@ -1,3 +1,4 @@
+
 "use client"
 
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -7,9 +8,10 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { doc, getDoc } from "firebase/firestore"
 import Image from "next/image"
-import { School } from "lucide-react"
+import { School, Loader2 } from "lucide-react"
 
 import { db } from "@/lib/firebase"
+import { signInWithEmail } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import {
   Form,
@@ -45,6 +47,7 @@ export default function LoginPage() {
   const [appName, setAppName] = useState("AbTrack")
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     async function fetchSettings() {
@@ -75,24 +78,29 @@ export default function LoginPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      email: "",
-      password: "",
+      email: "admin@absen.com",
+      password: "admin123456",
     },
   })
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    if (values.email === "admin@absen.com" && values.password === "admin123456") {
+  async function onSubmit(values: z.infer<typeof formSchema>) {
+    setIsLoggingIn(true);
+    try {
+      await signInWithEmail(values.email, values.password);
       toast({
         title: "Login Berhasil",
-        description: "Selamat datang kembali, Admin!",
+        description: "Selamat datang kembali!",
       })
       router.push("/dashboard")
-    } else {
+    } catch (error) {
+      console.error("Login failed:", error);
       toast({
         variant: "destructive",
         title: "Login Gagal",
         description: "Email atau password salah. Silakan coba lagi.",
       })
+    } finally {
+      setIsLoggingIn(false);
     }
   }
 
@@ -161,16 +169,14 @@ export default function LoginPage() {
                     </FormItem>
                     )}
                 />
-                <Button type="submit" className="w-full font-headline">
+                <Button type="submit" className="w-full font-headline" disabled={isLoggingIn}>
+                    {isLoggingIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Masuk
                 </Button>
                 </form>
             </Form>
             </CardContent>
         </Card>
-        <p className="mt-4 text-xs text-muted-foreground">
-            Email: admin@absen.com | Password: admin123456
-        </p>
       </main>
       <footer className="bg-muted p-4 text-center text-sm text-muted-foreground">
         <p>2025 @ E-Absensi created by KS</p>

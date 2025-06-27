@@ -1,3 +1,4 @@
+
 "use client"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -13,9 +14,24 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useRouter } from "next/navigation"
 import { User, Settings, LogOut } from "lucide-react"
+import { signOut } from "@/lib/auth"
+import { useToast } from "@/hooks/use-toast"
+
 
 export function UserNav() {
   const router = useRouter()
+  const { toast } = useToast()
+
+  const handleSignOut = async () => {
+    try {
+        await signOut();
+        toast({ title: "Anda telah keluar." })
+        router.push('/login');
+    } catch (error) {
+        toast({ variant: "destructive", title: "Gagal Keluar", description: "Terjadi kesalahan saat mencoba keluar." })
+    }
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -48,7 +64,7 @@ export function UserNav() {
           </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => router.push('/login')}>
+        <DropdownMenuItem onClick={handleSignOut}>
           <LogOut />
           Keluar
         </DropdownMenuItem>
