@@ -115,14 +115,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [attendanceData]);
 
     useEffect(() => {
-        // Initialize AudioContext on the client side after a user interaction
         const initAudio = () => {
             if (!audioContextRef.current) {
                 try {
                     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-                } catch(e) {
-                    console.error("Web Audio API is not supported in this browser");
-                }
+                } catch(e) { console.error("Web Audio API is not supported in this browser"); }
             }
             document.removeEventListener('click', initAudio);
             document.removeEventListener('keydown', initAudio);
@@ -151,15 +148,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         if (type === 'success') {
             oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(1046.50, audioCtx.currentTime); // High C note for a clear bell sound
-            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime); // High volume
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5); // Decay over 1.5 seconds
+            oscillator.frequency.setValueAtTime(1046.50, audioCtx.currentTime); 
+            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime); 
+            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5); 
             oscillator.start(audioCtx.currentTime);
             oscillator.stop(audioCtx.currentTime + 1.5);
         } else { // error
-            oscillator.type = 'sawtooth'; // A more grating, "buzzy" sound for errors
-            oscillator.frequency.setValueAtTime(164.81, audioCtx.currentTime); // Low E note
-            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime); // High volume
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(164.81, audioCtx.currentTime);
+            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime); 
             gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
             oscillator.start(audioCtx.currentTime);
             oscillator.stop(audioCtx.currentTime + 1.5);
@@ -260,6 +257,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         fetchData()
     }, [grade, toast, addLog])
     
+    // Effect to manage the scanner lifecycle
+    useEffect(() => {
+        // Create a scanner instance on mount
+        const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
+        html5QrCodeRef.current = scanner;
+
+        // Cleanup function to stop scanning on unmount
+        return () => {
+            if (scanner?.isScanning) {
+                scanner.stop().catch(err => {
+                    console.error("Failed to stop QR scanner on component unmount.", err);
+                });
+            }
+        };
+    }, [scannerContainerId]);
+
+
     const handleScan = useCallback(async (nisn: string) => {
         if (!nisn.trim() || processingLock.current) return;
         
@@ -382,46 +396,41 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
-    const stopScanner = useCallback(() => {
-        if (html5QrCodeRef.current?.isScanning) {
-            html5QrCodeRef.current.stop()
-                .then(() => {
-                    addLog("Kamera dinonaktifkan.", "info");
-                    setIsCameraActive(false);
-                })
-                .catch(err => {
-                    console.warn("Gagal menghentikan pemindai dengan bersih.", err);
-                    setIsCameraActive(false);
-                });
+    const stopScanner = useCallback(async () => {
+        if (!html5QrCodeRef.current?.isScanning) return;
+
+        try {
+            await html5QrCodeRef.current.stop();
+            addLog("Kamera dinonaktifkan.", "info");
+            setIsCameraActive(false);
+            setCameraError(null);
+        } catch (err) {
+            console.warn("Gagal menghentikan pemindai dengan bersih.", err);
+            setIsCameraActive(false);
         }
     }, [addLog]);
 
-    const startScanner = useCallback(() => {
-        if (isCameraActive || isCameraInitializing) return;
+    const startScanner = useCallback(async () => {
+        if (isCameraActive || isCameraInitializing || !html5QrCodeRef.current) return;
 
         setIsCameraInitializing(true);
         setCameraError(null);
         
-        // Ensure AudioContext is resumed by a user gesture
         if (audioContextRef.current?.state === 'suspended') {
             audioContextRef.current.resume();
         }
         
-        const qrCode = new Html5Qrcode(scannerContainerId, { verbose: false });
-        html5QrCodeRef.current = qrCode;
-
-        qrCode.start(
-            { facingMode: "user" },
-            { fps: 5, qrbox: { width: 250, height: 250 } },
-            (decodedText) => handleScan(decodedText),
-            (errorMessage) => { /* ignore scan failure */ }
-        )
-        .then(() => {
+        try {
+            await html5QrCodeRef.current.start(
+                { facingMode: "user" },
+                { fps: 5, qrbox: { width: 250, height: 250 } },
+                (decodedText) => handleScan(decodedText),
+                (errorMessage) => { /* ignore scan failure */ }
+            );
             setIsCameraInitializing(false);
             setIsCameraActive(true);
             addLog("Kamera berhasil diaktifkan.", "success");
-        })
-        .catch((err) => {
+        } catch (err: any) {
             const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
             setIsCameraInitializing(false);
@@ -432,16 +441,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 title: 'Gagal Mengakses Kamera',
                 description: 'Harap izinkan akses kamera di pengaturan browser Anda dan coba lagi.'
             });
-        });
-    }, [scannerContainerId, toast, addLog, handleScan, isCameraActive, isCameraInitializing]);
+        }
+    }, [isCameraActive, isCameraInitializing, addLog, handleScan, toast]);
     
-    useEffect(() => {
-        return () => {
-           if (html5QrCodeRef.current?.isScanning) {
-                stopScanner();
-            }
-        };
-    }, [stopScanner]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
