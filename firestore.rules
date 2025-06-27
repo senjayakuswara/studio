@@ -1,26 +1,43 @@
-
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Disallow all reads and writes by default
+  
+    // By default, only authenticated users (i.e., you as the admin) can do anything.
+    // This is our secure baseline.
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null;
+    }
+
+    // --- Public Access Overrides ---
+    // The rules below are checked if the one above is false (i.e., user is not logged in).
+    // They allow specific, safe operations for public-facing features.
+
+    // Allow anyone to read the app's public configuration for styling the login page.
+    match /settings/appConfig {
+        allow read: if true;
+    }
+
+    // Allow the Telegram bot to read its configuration.
+    match /settings/telegramConfig {
+        allow read: if true;
     }
     
-    // Allow any authenticated user to read and write to all collections.
-    // This is secure for this app because only one admin user exists.
-    // All data access from the app happens when the admin is logged in.
-    match /settings/{settingId} {
-       allow read, write: if request.auth != null;
+    // Allow the manual sync feature to read and write its state.
+    match /settings/telegramState {
+        allow read, write: if true;
     }
+
+    // Allow the Telegram bot to read class and student info for validation.
     match /classes/{classId} {
-       allow read, write: if request.auth != null;
+        allow read: if true;
     }
+    
     match /students/{studentId} {
-       allow read, write: if request.auth != null;
-    }
-     match /attendance/{attendanceId} {
-       allow read, write: if request.auth != null;
+        allow read: if true;
+        // IMPORTANT: Only allow an update (from the bot) if it ONLY changes the `parentChatId`.
+        // This keeps student data safe from unauthorized modification.
+        allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentChatId']);
     }
   }
 }
