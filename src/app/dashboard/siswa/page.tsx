@@ -270,6 +270,7 @@ export default function SiswaPage() {
       const gradeXIIClasses = classes.filter(c => c.grade === 'XII').map(c => c.id);
       if (gradeXIIClasses.length === 0) {
         toast({ variant: "destructive", title: "Tidak ada kelas XII", description: "Tidak ditemukan kelas tingkat XII untuk diluluskan." });
+        setIsGraduating(false);
         return;
       }
       
@@ -278,6 +279,7 @@ export default function SiswaPage() {
       
       if (studentsSnapshot.empty) {
         toast({ title: "Tidak ada siswa", description: "Tidak ada siswa aktif di kelas XII untuk diluluskan." });
+        setIsGraduating(false);
         return;
       }
       
@@ -888,7 +890,8 @@ export default function SiswaPage() {
                     </TableHead>
                     <TableHead>NISN</TableHead>
                     <TableHead>Nama</TableHead>
-                    <TableHead>Kelas</TableHead>
+                    <TableHead>Nama Kelas</TableHead>
+                    <TableHead>Tingkat</TableHead>
                     <TableHead>Jenis Kelamin</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
@@ -918,10 +921,11 @@ export default function SiswaPage() {
                              </TableCell>
                             <TableCell>{student.nisn}</TableCell>
                             <TableCell className="font-medium">{student.nama}</TableCell>
-                            <TableCell>{classInfo ? `${classInfo.name} (${classInfo.grade})` : 'Kelas Dihapus'}</TableCell>
+                            <TableCell>{classInfo ? classInfo.name : 'Kelas Dihapus'}</TableCell>
+                            <TableCell>{classInfo ? classInfo.grade : 'N/A'}</TableCell>
                             <TableCell>{student.jenisKelamin}</TableCell>
                             <TableCell>
-                                <Badge variant={status === 'Lulus' ? 'secondary' : 'default'}>{status}</Badge>
+                                <Badge variant={status === 'Lulus' ? 'secondary' : status === 'Pindah' ? 'outline' : 'default'}>{status}</Badge>
                             </TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
@@ -947,7 +951,7 @@ export default function SiswaPage() {
                     })
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
+                        <TableCell colSpan={8} className="h-24 text-center">
                           {students.length > 0 ? "Tidak ada siswa yang cocok dengan filter." : "Belum ada data siswa."}
                         </TableCell>
                     </TableRow>
@@ -961,5 +965,3 @@ export default function SiswaPage() {
     </div>
   )
 }
-
-    
