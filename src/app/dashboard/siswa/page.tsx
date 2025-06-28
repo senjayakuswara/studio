@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -77,12 +77,13 @@ const studentSchema = z.object({
     required_error: "Jenis kelamin harus dipilih.",
   }),
   parentChatId: z.string().optional(),
+  status: z.enum(["Aktif", "Lulus", "Pindah"]).optional().default("Aktif"),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
 type NewStudent = z.infer<typeof studentSchema>;
 type Class = { id: string; name: string; grade: string };
-type ImportStudent = NewStudent & { id?: string; status: 'Baru' | 'Diperbarui' | 'Identik' }
+type ImportStudent = NewStudent & { id?: string; importStatus: 'Baru' | 'Diperbarui' | 'Identik' }
 
 export default function SiswaPage() {
   const [students, setStudents] = useState<Student[]>([])
@@ -92,11 +93,13 @@ export default function SiswaPage() {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false)
   const [isAlertOpen, setIsAlertOpen] = useState(false)
+  const [isGraduateAlertOpen, setIsGraduateAlertOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
   const [importedStudents, setImportedStudents] = useState<ImportStudent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
+  const [isGraduating, setIsGraduating] = useState(false);
   const [targetClassId, setTargetClassId] = useState<string>("");
   const [filterName, setFilterName] = useState("")
   const [filterClass, setFilterClass] = useState("all")
@@ -121,6 +124,7 @@ export default function SiswaPage() {
       classId: undefined,
       jenisKelamin: undefined,
       parentChatId: "",
+      status: "Aktif",
     },
   })
 
@@ -260,14 +264,48 @@ export default function SiswaPage() {
     }
   }
 
+  const handleGraduateStudents = async () => {
+    setIsGraduating(true);
+    try {
+      const gradeXIIClasses = classes.filter(c => c.grade === 'XII').map(c => c.id);
+      if (gradeXIIClasses.length === 0) {
+        toast({ variant: "destructive", title: "Tidak ada kelas XII", description: "Tidak ditemukan kelas tingkat XII untuk diluluskan." });
+        return;
+      }
+      
+      const studentsToGraduateQuery = query(collection(db, "students"), where("classId", "in", gradeXIIClasses), where("status", "==", "Aktif"));
+      const studentsSnapshot = await getDocs(studentsToGraduateQuery);
+      
+      if (studentsSnapshot.empty) {
+        toast({ title: "Tidak ada siswa", description: "Tidak ada siswa aktif di kelas XII untuk diluluskan." });
+        return;
+      }
+      
+      const batch = writeBatch(db);
+      studentsSnapshot.docs.forEach(doc => {
+        batch.update(doc.ref, { status: "Lulus" });
+      });
+      await batch.commit();
+
+      toast({ title: "Sukses", description: `${studentsSnapshot.size} siswa kelas XII telah berhasil diluluskan.` });
+      await fetchData();
+    } catch(error) {
+      console.error("Error graduating students:", error);
+      toast({ variant: "destructive", title: "Gagal Meluluskan", description: "Terjadi kesalahan saat memproses kelulusan." });
+    } finally {
+      setIsGraduating(false);
+      setIsGraduateAlertOpen(false);
+    }
+  };
+
   const openDeleteAlert = (studentId: string | null) => {
     setDeletingStudentId(studentId);
     setIsAlertOpen(true);
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Parent Chat ID"];
-    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", ""];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Parent Chat ID", "Status"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "", "Aktif"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -294,6 +332,7 @@ export default function SiswaPage() {
             "Nama Kelas": classInfo?.name || "Kelas Dihapus",
             "Jenis Kelamin": student.jenisKelamin,
             "Parent Chat ID": student.parentChatId || "",
+            "Status": student.status || "Aktif",
         }
     });
     
@@ -308,6 +347,7 @@ export default function SiswaPage() {
         { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
         { wch: 15 }, // Parent Chat ID
+        { wch: 10 }, // Status
     ];
     worksheet['!cols'] = columnWidths;
 
@@ -344,6 +384,7 @@ export default function SiswaPage() {
                     classId: classId,
                     jenisKelamin: String(row[4] || ""),
                     parentChatId: String(row[5] || "").trim() || undefined,
+                    status: String(row[6] || "Aktif")
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -355,15 +396,16 @@ export default function SiswaPage() {
                         const isIdentical = existingStudent.nama === validStudent.nama &&
                                             existingStudent.classId === validStudent.classId &&
                                             existingStudent.jenisKelamin === validStudent.jenisKelamin &&
-                                            (existingStudent.parentChatId || "") === (validStudent.parentChatId || "");
-                        
+                                            (existingStudent.parentChatId || "") === (validStudent.parentChatId || "") &&
+                                            (existingStudent.status || "Aktif") === (validStudent.status || "Aktif");
+
                         processedStudents.push({ 
                             ...validStudent, 
                             id: existingStudent.id, 
-                            status: isIdentical ? 'Identik' : 'Diperbarui' 
+                            importStatus: isIdentical ? 'Identik' : 'Diperbarui' 
                         });
                     } else {
-                        processedStudents.push({ ...validStudent, status: 'Baru' });
+                        processedStudents.push({ ...validStudent, importStatus: 'Baru' });
                     }
                 } else {
                     invalidCount++;
@@ -372,7 +414,7 @@ export default function SiswaPage() {
             
             setImportedStudents(processedStudents);
             
-            const toImportCount = processedStudents.filter(s => s.status !== 'Identik').length;
+            const toImportCount = processedStudents.filter(s => s.importStatus !== 'Identik').length;
             if (toImportCount > 0) {
                 toast({
                     title: "File Diproses",
@@ -406,7 +448,7 @@ export default function SiswaPage() {
   }
   
   const handleSaveImportedStudents = async () => {
-    const studentsToProcess = importedStudents.filter(s => s.status !== 'Identik');
+    const studentsToProcess = importedStudents.filter(s => s.importStatus !== 'Identik');
     if (studentsToProcess.length === 0) {
         toast({ variant: "destructive", title: "Tidak ada data untuk diimpor." });
         return;
@@ -416,12 +458,12 @@ export default function SiswaPage() {
         const batch = writeBatch(db);
         
         studentsToProcess.forEach(student => {
-            const { id, status, ...studentData } = student;
+            const { id, importStatus, ...studentData } = student;
             const dataToSave = { ...studentData, parentChatId: studentData.parentChatId || "" };
-            if (status === 'Baru') {
+            if (importStatus === 'Baru') {
                 const docRef = doc(collection(db, "students"));
                 batch.set(docRef, dataToSave);
-            } else if (status === 'Diperbarui' && id) {
+            } else if (importStatus === 'Diperbarui' && id) {
                 const docRef = doc(db, "students", id);
                 batch.update(docRef, dataToSave);
             }
@@ -449,7 +491,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "" })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "", status: "Aktif" })
     setIsFormDialogOpen(true)
   }
 
@@ -475,6 +517,10 @@ export default function SiswaPage() {
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
                 <FileUp className="mr-2 h-4 w-4" />
                 Impor Siswa
+            </Button>
+            <Button onClick={() => setIsGraduateAlertOpen(true)} variant="secondary">
+                <Award className="mr-2 h-4 w-4" />
+                Luluskan Siswa XII
             </Button>
             <Button onClick={openAddDialog}>
                 <PlusCircle className="mr-2 h-4 w-4" />
@@ -540,6 +586,28 @@ export default function SiswaPage() {
                                   ))}
                                 </SelectGroup>
                               ))}
+                            </SelectContent>
+                        </Select>
+                        <FormMessage />
+                    </FormItem>
+                )}
+              />
+               <FormField
+                control={form.control}
+                name="status"
+                render={({ field }) => (
+                    <FormItem>
+                        <FormLabel>Status Siswa</FormLabel>
+                         <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Pilih status siswa" />
+                                </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Aktif">Aktif</SelectItem>
+                                <SelectItem value="Lulus">Lulus</SelectItem>
+                                <SelectItem value="Pindah">Pindah</SelectItem>
                             </SelectContent>
                         </Select>
                         <FormMessage />
@@ -632,12 +700,12 @@ export default function SiswaPage() {
             </div>
             {importedStudents.length > 0 && (
                 <div className="space-y-3">
-                    <h3 className="font-medium">Pratinjau Data ({importedStudents.filter(s => s.status !== 'Identik').length} akan diproses)</h3>
+                    <h3 className="font-medium">Pratinjau Data ({importedStudents.filter(s => s.importStatus !== 'Identik').length} akan diproses)</h3>
                     <div className="max-h-60 overflow-auto rounded-md border">
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Status</TableHead>
+                                    <TableHead>Status Impor</TableHead>
                                     <TableHead>NISN</TableHead>
                                     <TableHead>Nama</TableHead>
                                     <TableHead>Kelas</TableHead>
@@ -645,10 +713,10 @@ export default function SiswaPage() {
                             </TableHeader>
                             <TableBody>
                                 {importedStudents.map((student, index) => (
-                                    <TableRow key={index} className={student.status === 'Identik' ? 'text-muted-foreground' : ''}>
+                                    <TableRow key={index} className={student.importStatus === 'Identik' ? 'text-muted-foreground' : ''}>
                                         <TableCell>
-                                            <Badge variant={student.status === 'Baru' ? 'default' : student.status === 'Diperbarui' ? 'secondary' : 'outline'}>
-                                                {student.status}
+                                            <Badge variant={student.importStatus === 'Baru' ? 'default' : student.importStatus === 'Diperbarui' ? 'secondary' : 'outline'}>
+                                                {student.importStatus}
                                             </Badge>
                                         </TableCell>
                                         <TableCell>{student.nisn}</TableCell>
@@ -664,7 +732,7 @@ export default function SiswaPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsImportDialogOpen(false)}>Batal</Button>
-            <Button onClick={handleSaveImportedStudents} disabled={importedStudents.filter(s => s.status !== 'Identik').length === 0 || isImporting}>
+            <Button onClick={handleSaveImportedStudents} disabled={importedStudents.filter(s => s.importStatus !== 'Identik').length === 0 || isImporting}>
               {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Simpan ke Database
             </Button>
@@ -683,6 +751,24 @@ export default function SiswaPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
             <AlertDialogAction onClick={() => handleDeleteStudent(deletingStudentId ? [deletingStudentId] : selectedRowIds)}>Hapus</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={isGraduateAlertOpen} onOpenChange={setIsGraduateAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Konfirmasi Kelulusan</AlertDialogTitle>
+            <AlertDialogDescription>
+              Anda akan mengubah status semua siswa aktif di kelas XII menjadi "Lulus". Tindakan ini tidak dapat dibatalkan dengan mudah. Lanjutkan?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleGraduateStudents} disabled={isGraduating}>
+              {isGraduating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Ya, Luluskan Siswa
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -802,9 +888,9 @@ export default function SiswaPage() {
                     </TableHead>
                     <TableHead>NISN</TableHead>
                     <TableHead>Nama</TableHead>
-                    <TableHead>Tingkat</TableHead>
                     <TableHead>Kelas</TableHead>
                     <TableHead>Jenis Kelamin</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -813,6 +899,7 @@ export default function SiswaPage() {
                     filteredStudents.map((student) => {
                         const classInfo = classObjectMap.get(student.classId);
                         const isSelected = selectedRowIds.includes(student.id);
+                        const status = student.status || "Aktif";
                         return (
                             <TableRow key={student.id} data-state={isSelected ? "selected" : ""}>
                              <TableCell padding="checkbox">
@@ -831,9 +918,11 @@ export default function SiswaPage() {
                              </TableCell>
                             <TableCell>{student.nisn}</TableCell>
                             <TableCell className="font-medium">{student.nama}</TableCell>
-                            <TableCell>{classInfo?.grade || 'N/A'}</TableCell>
-                            <TableCell>{classInfo?.name || 'Kelas Dihapus'}</TableCell>
+                            <TableCell>{classInfo ? `${classInfo.name} (${classInfo.grade})` : 'Kelas Dihapus'}</TableCell>
                             <TableCell>{student.jenisKelamin}</TableCell>
+                            <TableCell>
+                                <Badge variant={status === 'Lulus' ? 'secondary' : 'default'}>{status}</Badge>
+                            </TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -844,7 +933,7 @@ export default function SiswaPage() {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Aksi</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => { setEditingStudent(student); setIsFormDialogOpen(true); form.reset(student) }}>
+                                    <DropdownMenuItem onClick={() => openEditDialog(student)}>
                                         Edit
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
@@ -872,3 +961,5 @@ export default function SiswaPage() {
     </div>
   )
 }
+
+    
