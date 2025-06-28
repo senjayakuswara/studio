@@ -78,8 +78,8 @@ export default function LoginPage() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      email: "admin@absen.com",
-      password: "admin123456",
+      email: "",
+      password: "",
     },
   })
 
@@ -144,7 +144,7 @@ export default function LoginPage() {
                         <FormLabel>Email</FormLabel>
                         <FormControl>
                         <Input
-                            placeholder="admin@absen.com"
+                            placeholder="Masukan email anda"
                             {...field}
                         />
                         </FormControl>
@@ -161,7 +161,7 @@ export default function LoginPage() {
                         <FormControl>
                         <Input
                             type="password"
-                            placeholder="********"
+                            placeholder="Masukan password anda"
                             {...field}
                         />
                         </FormControl>
