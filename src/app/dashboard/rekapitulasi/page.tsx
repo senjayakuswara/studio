@@ -80,6 +80,7 @@ export default function RekapitulasiPage() {
     // State for Individual Report
     const [allStudents, setAllStudents] = useState<Student[]>([])
     const [selectedStudent, setSelectedStudent] = useState<Student | null>(null)
+    const [individualReportClassId, setIndividualReportClassId] = useState<string>("");
     const [dateRange, setDateRange] = useState<DateRange | undefined>({
         from: startOfMonth(new Date()),
         to: endOfMonth(new Date()),
@@ -92,15 +93,15 @@ export default function RekapitulasiPage() {
     const [isLoading, setIsLoading] = useState(true)
     const { toast } = useToast()
     
-    const studentOptions = useMemo(() => {
-        return allStudents.map(student => {
-            const studentClass = classes.find(c => c.id === student.classId);
-            return {
+    const individualStudentOptions = useMemo(() => {
+        if (!individualReportClassId) return [];
+        return allStudents
+            .filter(student => student.classId === individualReportClassId)
+            .map(student => ({
                 value: student.id,
-                label: `${student.nama} (${studentClass?.name ?? 'Tanpa Kelas'})`,
-            };
-        });
-    }, [allStudents, classes]);
+                label: student.nama,
+            }));
+    }, [allStudents, individualReportClassId]);
 
     useEffect(() => {
         async function fetchInitialData() {
@@ -399,7 +400,7 @@ export default function RekapitulasiPage() {
             return;
         }
         if (!selectedStudent || !dateRange?.from) {
-            toast({ variant: "destructive", title: "Pilihan Tidak Lengkap", description: "Harap pilih siswa dan tentukan rentang tanggal." });
+            toast({ variant: "destructive", title: "Pilihan Tidak Lengkap", description: "Harap pilih kelas, siswa, dan tentukan rentang tanggal." });
             return;
         }
 
@@ -582,20 +583,40 @@ export default function RekapitulasiPage() {
                             <CardDescription>Pilih siswa dan rentang tanggal untuk mencetak laporan kehadiran personal.</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Pilih Kelas</Label>
+                                    <Select 
+                                        value={individualReportClassId}
+                                        onValueChange={(value) => {
+                                            setIndividualReportClassId(value);
+                                            setSelectedStudent(null);
+                                        }}
+                                        disabled={isLoading || classes.length === 0}
+                                    >
+                                        <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
+                                        <SelectContent>
+                                            {["X", "XI", "XII"].map(grade => (
+                                                <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
+                                                    {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                                                </SelectGroup>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                                 <div className="space-y-2">
                                     <Label>Pilih Siswa</Label>
                                     <ComboBox
-                                        options={studentOptions}
+                                        options={individualStudentOptions}
                                         value={selectedStudent?.id}
                                         onSelect={(value) => {
                                             const student = allStudents.find(s => s.id === value) || null;
                                             setSelectedStudent(student);
                                         }}
-                                        placeholder="Cari nama siswa..."
+                                        placeholder="Pilih siswa..."
                                         searchPlaceholder="Ketik nama untuk mencari..."
                                         emptyState="Siswa tidak ditemukan."
-                                        disabled={isLoading || allStudents.length === 0}
+                                        disabled={isLoading || !individualReportClassId}
                                     />
                                 </div>
                                 <div className="space-y-2">
