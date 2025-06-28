@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2 } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -89,11 +89,14 @@ export default function SiswaPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
+  const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false)
   const [isAlertOpen, setIsAlertOpen] = useState(false)
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
   const [importedStudents, setImportedStudents] = useState<ImportStudent[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [isMoving, setIsMoving] = useState(false);
+  const [targetClassId, setTargetClassId] = useState<string>("");
   const [filterName, setFilterName] = useState("")
   const [filterClass, setFilterClass] = useState("all")
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
@@ -226,6 +229,33 @@ export default function SiswaPage() {
         title: "Gagal Menghapus",
         description: "Terjadi kesalahan saat menghapus data siswa.",
       })
+    }
+  }
+
+  async function handleMoveClass() {
+    if (!targetClassId) {
+        toast({ variant: "destructive", title: "Gagal", description: "Anda harus memilih kelas tujuan." });
+        return;
+    }
+    setIsMoving(true);
+    try {
+        const batch = writeBatch(db);
+        selectedRowIds.forEach(studentId => {
+            const studentRef = doc(db, "students", studentId);
+            batch.update(studentRef, { classId: targetClassId });
+        });
+        await batch.commit();
+        
+        toast({ title: "Sukses", description: `${selectedRowIds.length} siswa berhasil dipindahkan.` });
+        await fetchData();
+        setIsMoveDialogOpen(false);
+        setSelectedRowIds([]);
+        setTargetClassId("");
+    } catch (error) {
+        console.error("Error moving students:", error);
+        toast({ variant: "destructive", title: "Gagal Pindah Kelas", description: "Terjadi kesalahan saat memindahkan siswa." });
+    } finally {
+        setIsMoving(false);
     }
   }
 
@@ -656,6 +686,44 @@ export default function SiswaPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+       <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
+            <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Pindahkan Kelas Siswa</DialogTitle>
+                    <DialogDescription>
+                        Anda akan memindahkan {selectedRowIds.length} siswa terpilih. Silakan pilih kelas tujuan.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="py-4 space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="target-class">Kelas Tujuan</Label>
+                        <Select onValueChange={setTargetClassId} value={targetClassId}>
+                            <SelectTrigger id="target-class">
+                                <SelectValue placeholder="Pilih kelas tujuan..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {["X", "XI", "XII"].map(grade => (
+                                    <SelectGroup key={grade}>
+                                        <SelectLabel>Kelas {grade}</SelectLabel>
+                                        {classes.filter(c => c.grade === grade).map(c => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsMoveDialogOpen(false)}>Batal</Button>
+                    <Button onClick={handleMoveClass} disabled={isMoving}>
+                        {isMoving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Pindahkan Siswa
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
       <Card>
         <CardHeader>
           <div className="flex justify-between items-start">
@@ -665,12 +733,20 @@ export default function SiswaPage() {
                 Tabel berisi semua siswa yang terdaftar. Gunakan filter di bawah untuk mencari data.
               </CardDescription>
             </div>
-             {selectedRowIds.length > 0 && (
-              <Button variant="destructive" onClick={() => openDeleteAlert(null)}>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Hapus ({selectedRowIds.length}) Siswa
-              </Button>
-            )}
+            <div className="flex gap-2">
+                {selectedRowIds.length > 0 && (
+                    <>
+                        <Button variant="outline" onClick={() => setIsMoveDialogOpen(true)}>
+                            <ChevronsRight className="mr-2 h-4 w-4" />
+                            Pindahkan Kelas ({selectedRowIds.length})
+                        </Button>
+                        <Button variant="destructive" onClick={() => openDeleteAlert(null)}>
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Hapus ({selectedRowIds.length})
+                        </Button>
+                    </>
+                )}
+            </div>
           </div>
           <div className="mt-4 flex flex-col md:flex-row gap-4">
               <Input
@@ -795,3 +871,5 @@ export default function SiswaPage() {
     </div>
   )
 }
+
+    
