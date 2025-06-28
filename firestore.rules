@@ -4,42 +4,38 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // Aturan dasar: Secara default, hanya admin yang sudah login yang bisa melakukan apa pun.
-    // Ini adalah fondasi keamanan kita.
+    // Aturan dasar: Hanya admin yang terautentikasi yang dapat membaca dan menulis semua data.
+    // Ini adalah jaring pengaman utama.
     match /{document=**} {
       allow read, write: if request.auth != null;
     }
 
-    // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
-    // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
-    // yang perlu diakses oleh sistem eksternal seperti bot Telegram.
-
-    // Izinkan siapa saja membaca konfigurasi aplikasi untuk halaman login.
+    // --- PENGECUALIAN AKSES PUBLIK ---
+    // Aturan di bawah ini memberikan izin baca spesifik untuk fitur yang dapat diakses publik,
+    // seperti halaman login dan webhook Telegram, tanpa membahayakan keamanan data lainnya.
+    
+    // Izinkan siapa saja membaca konfigurasi aplikasi untuk styling halaman login.
     match /settings/appConfig {
-      allow read: if true;
+        allow get: if true;
     }
-
-    // Izinkan bot Telegram membaca konfigurasinya.
+    
+    // Izinkan webhook/bot Telegram untuk membaca data yang diperlukannya untuk validasi.
     match /settings/telegramConfig {
-      allow read: if true;
+        allow get: if true;
     }
-    
-    // Izinkan fitur sinkronisasi manual untuk membaca dan menulis status terakhirnya.
     match /settings/telegramState {
-      allow read, write: if true;
+        // Hanya bot yang bisa membaca/menulis state 'lastUpdateId'.
+        allow read, write: if true;
     }
-
-    // Izinkan bot Telegram membaca data kelas untuk validasi.
     match /classes/{classId} {
-      allow read: if true;
+        allow get: if true;
     }
-    
-    // Izinkan bot Telegram membaca data siswa untuk validasi.
     match /students/{studentId} {
-      allow read: if true;
-      // PENTING: Hanya izinkan bot untuk MENGUBAH field `parentChatId`.
-      // Ini melindungi data siswa lainnya dari perubahan yang tidak sah.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentChatId']);
+        // Izinkan bot membaca data siswa.
+        allow get: if true;
+        // PENTING: Izinkan pembaruan HANYA pada field `parentChatId` oleh bot.
+        // Ini mencegah bot mengubah data sensitif lainnya seperti nama atau NISN.
+        allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentChatId']);
     }
   }
 }
