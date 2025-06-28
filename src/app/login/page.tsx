@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { useState, useEffect } from "react"
 import { doc, getDoc } from "firebase/firestore"
 import Image from "next/image"
-import { School, Loader2 } from "lucide-react"
+import { School, Loader2, AlertTriangle } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { signInWithEmail } from "@/lib/auth"
@@ -32,6 +32,46 @@ import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
 import { Skeleton } from "@/components/ui/skeleton"
 
+const requiredEnvVars = [
+  'NEXT_PUBLIC_FIREBASE_API_KEY',
+  'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+  'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+  'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
+  'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
+  'NEXT_PUBLIC_FIREBASE_APP_ID'
+];
+
+const EnvVarCheck = () => {
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+  if (missingVars.length > 0) {
+    return (
+      <Card className="w-full max-w-2xl bg-destructive/10 border-destructive">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle />
+            Kesalahan Konfigurasi
+          </CardTitle>
+          <CardDescription className="text-destructive/80">
+            Aplikasi tidak dapat terhubung ke Firebase karena beberapa kunci konfigurasi hilang.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="font-medium">Harap periksa file `.env` Anda dan pastikan variabel berikut ini sudah diisi dengan benar:</p>
+          <ul className="mt-2 list-disc list-inside space-y-1 font-mono text-sm">
+            {missingVars.map(varName => <li key={varName}>{varName}</li>)}
+          </ul>
+           <p className="mt-4 text-xs text-muted-foreground text-destructive/80">
+            Setelah Anda mengisi semua variabel di file .env, segarkan halaman ini.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return null;
+}
+
 const formSchema = z.object({
   email: z.string().email({
     message: "Format email tidak valid.",
@@ -49,7 +89,13 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
+  const configError = EnvVarCheck();
+
   useEffect(() => {
+    if (configError) {
+      setIsLoading(false);
+      return;
+    }
     async function fetchSettings() {
       setIsLoading(true)
       try {
@@ -63,17 +109,25 @@ export default function LoginPage() {
         }
       } catch (error) {
         console.error("Error fetching settings:", error);
-        toast({
-            variant: "destructive",
-            title: "Gagal memuat data aplikasi",
-            description: "Gagal terhubung ke server. Periksa koneksi internet Anda atau pastikan izin akses database sudah benar.",
-        })
+        if (error instanceof Error && error.message.includes("Failed to get document because the client is offline")) {
+             toast({
+                variant: "destructive",
+                title: "Gagal Terhubung ke Firebase",
+                description: "Pastikan konfigurasi Firebase Anda benar dan Anda terhubung ke internet.",
+            })
+        } else {
+            toast({
+                variant: "destructive",
+                title: "Gagal memuat data aplikasi",
+                description: "Gagal terhubung ke server. Periksa koneksi internet Anda.",
+            })
+        }
       } finally {
         setIsLoading(false);
       }
     }
     fetchSettings();
-  }, [toast]);
+  }, [toast, configError]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -102,6 +156,14 @@ export default function LoginPage() {
     } finally {
       setIsLoggingIn(false);
     }
+  }
+
+  if (configError) {
+    return (
+       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+        {configError}
+      </div>
+    )
   }
 
   return (
