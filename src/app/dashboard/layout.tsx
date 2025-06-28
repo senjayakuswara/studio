@@ -9,6 +9,7 @@ import Image from "next/image"
 import {
   BookCopy,
   BookText,
+  CalendarDays,
   ChevronDown,
   ClipboardCheck,
   Clock,
@@ -292,6 +293,17 @@ export default function DashboardLayout({
                   >
                     <Clock />
                     <span>Jam Sekolah</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <Link href="/dashboard/pengaturan/jadwal">
+                  <SidebarMenuButton
+                    tooltip="Pengaturan Jadwal"
+                    isActive={isActive("/dashboard/pengaturan/jadwal")}
+                  >
+                    <CalendarDays />
+                    <span>Jadwal Sekolah</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

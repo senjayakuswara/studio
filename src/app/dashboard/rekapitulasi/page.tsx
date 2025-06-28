@@ -3,11 +3,10 @@
 
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
-import { addDays } from "date-fns"
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate } from "date-fns"
+import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Download, Loader2, Send } from "lucide-react"
 import jsPDF from "jspdf"
@@ -39,6 +38,7 @@ import { Label } from "@/components/ui/label"
 // Types
 type Class = { id: string; name: string; grade: string }
 type Student = { id: string; nisn: string; nama: string; classId: string }
+type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
 type AttendanceRecord = {
   studentId: string
@@ -58,8 +58,8 @@ type ReportConfig = {
 }
 type MonthlySummaryData = {
     studentInfo: Student,
-    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D'
-    summary: { H: number, T: number, S: number, I: number, A: number, D: number }
+    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D', 'L'
+    summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
 }
 type MonthlySummary = {
     [studentId: string]: MonthlySummaryData
@@ -88,6 +88,7 @@ export default function RekapitulasiPage() {
 
     // Common State
     const [classes, setClasses] = useState<Class[]>([])
+    const [holidays, setHolidays] = useState<Holiday[]>([]);
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
@@ -107,10 +108,11 @@ export default function RekapitulasiPage() {
         async function fetchInitialData() {
             setIsLoading(true);
             try {
-                const [classesSnapshot, reportConfigSnap, studentsSnapshot] = await Promise.all([
+                const [classesSnapshot, reportConfigSnap, studentsSnapshot, holidaysSnapshot] = await Promise.all([
                     getDocs(collection(db, "classes")),
                     getDoc(doc(db, "settings", "reportConfig")),
-                    getDocs(collection(db, "students"))
+                    getDocs(collection(db, "students")),
+                    getDocs(collection(db, "holidays"))
                 ]);
                 
                 if (reportConfigSnap.exists()) {
@@ -124,6 +126,9 @@ export default function RekapitulasiPage() {
                 const studentList = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
                 studentList.sort((a,b) => a.nama.localeCompare(b.nama));
                 setAllStudents(studentList);
+
+                const holidayList = holidaysSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Holiday[];
+                setHolidays(holidayList);
                 
             } catch (error) {
                 console.error("Error fetching initial data:", error);
@@ -140,7 +145,7 @@ export default function RekapitulasiPage() {
     }, [toast]);
 
     // --- MONTHLY REPORT LOGIC ---
-    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[]} | null> => {
+    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
         if (!selectedTarget) {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat." });
             return null;
@@ -207,24 +212,56 @@ export default function RekapitulasiPage() {
                 attendanceSnapshot.forEach(doc => attendanceRecords.push(doc.data() as AttendanceRecord));
             }
 
+            const holidayDateStrings = new Set<string>();
+            holidays.forEach(holiday => {
+                const start = holiday.startDate.toDate();
+                const end = holiday.endDate.toDate();
+                const interval = eachDayOfInterval({ start, end });
+                interval.forEach(day => {
+                    if (getMonth(day) === selectedMonth && getYear(day) === selectedYear) {
+                        holidayDateStrings.add(format(day, 'yyyy-MM-dd'));
+                    }
+                });
+            });
+
             const summary: MonthlySummary = {};
+            const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
+            
             students.forEach(student => {
-                summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0 } };
-            });
-            attendanceRecords.forEach(record => {
-                const day = getDate(record.recordDate.toDate());
-                let statusChar = '';
-                switch (record.status) {
-                    case "Hadir": statusChar = 'H'; summary[record.studentId].summary.H++; break;
-                    case "Terlambat": statusChar = 'T'; summary[record.studentId].summary.T++; break;
-                    case "Sakit": statusChar = 'S'; summary[record.studentId].summary.S++; break;
-                    case "Izin": statusChar = 'I'; summary[record.studentId].summary.I++; break;
-                    case "Alfa": statusChar = 'A'; summary[record.studentId].summary.A++; break;
-                    case "Dispen": statusChar = 'D'; summary[record.studentId].summary.D++; break;
+                summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 } };
+                const studentRecords = attendanceRecords.filter(r => r.studentId === student.id);
+                
+                for(let day = 1; day <= daysInMonth; day++) {
+                    const currentDate = new Date(selectedYear, selectedMonth, day);
+                    const dateString = format(currentDate, 'yyyy-MM-dd');
+                    const dayOfWeek = getDay(currentDate);
+
+                    if (holidayDateStrings.has(dateString) || dayOfWeek === 0) { // Sunday is a holiday
+                        summary[student.id].attendance[day] = 'L';
+                        summary[student.id].summary.L++;
+                        continue;
+                    }
+
+                    const recordForDay = studentRecords.find(r => getDate(r.recordDate.toDate()) === day);
+                    if (recordForDay) {
+                        let statusChar = '';
+                        switch (recordForDay.status) {
+                            case "Hadir": statusChar = 'H'; summary[student.id].summary.H++; break;
+                            case "Terlambat": statusChar = 'T'; summary[student.id].summary.T++; break;
+                            case "Sakit": statusChar = 'S'; summary[student.id].summary.S++; break;
+                            case "Izin": statusChar = 'I'; summary[student.id].summary.I++; break;
+                            case "Alfa": statusChar = 'A'; summary[student.id].summary.A++; break;
+                            case "Dispen": statusChar = 'D'; summary[student.id].summary.D++; break;
+                        }
+                         if (statusChar) summary[student.id].attendance[day] = statusChar;
+                    } else {
+                        summary[student.id].attendance[day] = 'A';
+                        summary[student.id].summary.A++;
+                    }
                 }
-                if (statusChar) summary[record.studentId].attendance[day] = statusChar;
             });
-            return { summary, students };
+
+            return { summary, students, holidayDateStrings };
         } catch(e) {
              console.error("Error generating summary data:", e);
              toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat memproses data absensi." });
@@ -241,7 +278,7 @@ export default function RekapitulasiPage() {
         }
         const data = await generateSummaryData();
         if (data) {
-            generateMonthlyPdf(data.summary, data.students, selectedTarget);
+            generateMonthlyPdf(data.summary, data.students, selectedTarget, data.holidayDateStrings);
         }
     }
 
@@ -279,7 +316,7 @@ export default function RekapitulasiPage() {
         toast({ title: "Pengiriman Selesai", description: "Semua notifikasi rekapitulasi telah dikirim." });
     }
 
-    const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string) => {
+    const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string, holidayDateStrings: Set<string>) => {
         const doc = new jsPDF({ orientation: "landscape" });
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageMargin = 15;
@@ -346,7 +383,7 @@ export default function RekapitulasiPage() {
                 studentClass ? studentClass.name : 'N/A',
                 studentClass ? studentClass.grade : 'N/A',
                 ...attendanceRow,
-                studentSummary.summary.H,
+                studentSummary.summary.H + studentSummary.summary.T, // Total Hadir (H+T)
                 studentSummary.summary.T,
                 studentSummary.summary.S,
                 studentSummary.summary.I,
@@ -365,6 +402,16 @@ export default function RekapitulasiPage() {
             columnStyles: {
                 0: { halign: 'center', cellWidth: 8 }, 1: { halign: 'left', cellWidth: 35 }, 2: { halign: 'center', cellWidth: 18 },
                 3: { halign: 'left', cellWidth: 15 }, 4: { halign: 'center', cellWidth: 10 },
+            },
+            willDrawCell: (data) => {
+                const dayIndex = data.column.index - 5;
+                if(data.section === 'body' && dayIndex >= 0 && dayIndex < daysInMonth) {
+                    const dateString = format(new Date(selectedYear, selectedMonth, dayIndex + 1), 'yyyy-MM-dd');
+                    const dayOfWeek = getDay(new Date(selectedYear, selectedMonth, dayIndex + 1));
+                    if (holidayDateStrings.has(dateString) || dayOfWeek === 0) {
+                        doc.setFillColor(229, 231, 235); // Light gray
+                    }
+                }
             }
         });
         lastY = (doc as any).lastAutoTable.finalY || lastY + 20;
@@ -632,7 +679,7 @@ export default function RekapitulasiPage() {
                                  <Button onClick={handleGenerateIndividualReport} disabled={isGenerating || isLoading || !selectedStudent}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat Laporan...' : 'Cetak Laporan Individual'}
-                                </Button>
+                                 </Button>
                              </div>
                         </CardContent>
                      </Card>
