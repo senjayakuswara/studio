@@ -1,9 +1,12 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
 import { collection, getDocs, query, where, Timestamp, limit, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
+import { onAuthChange } from "@/lib/auth"
+import type { User } from "firebase/auth"
 import {
   Card,
   CardContent,
@@ -13,11 +16,18 @@ import {
 } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Users, UserCheck, UserX, Clock, UserCog, HeartPulse, FileText } from "lucide-react"
-import { format, startOfDay, endOfDay } from "date-fns"
+import { Users, UserCheck, UserX, Clock, UserCog, HeartPulse, FileText, BarChart3 } from "lucide-react"
+import { startOfDay, endOfDay, subDays, format, eachDayOfInterval } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
 
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
 type AttendanceRecord = {
@@ -50,6 +60,19 @@ type DashboardStats = {
   dispensationToday: number
 }
 
+type ChartData = {
+  date: string;
+  Hadir: number;
+  Terlambat: number;
+  Absen: number; // Sakit + Izin + Alfa + Dispen
+}
+
+const chartConfig = {
+  Hadir: { label: "Hadir", color: "hsl(var(--chart-2))" },
+  Terlambat: { label: "Terlambat", color: "hsl(var(--chart-5))" },
+  Absen: { label: "Absen", color: "hsl(var(--chart-3))" },
+} satisfies ChartConfig
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     totalStudents: 0,
@@ -61,12 +84,19 @@ export default function DashboardPage() {
     dispensationToday: 0,
   })
   const [recentActivities, setRecentActivities] = useState<AttendanceRecord[]>([])
+  const [chartData, setChartData] = useState<ChartData[]>([]);
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
   
   const [adminName, setAdminName] = useState("Admin")
 
   useEffect(() => {
+    const unsubscribe = onAuthChange((user: User | null) => {
+        if (user) {
+            setAdminName(user.displayName || "Admin");
+        }
+    });
+
     async function fetchDashboardData() {
       setIsLoading(true)
       try {
@@ -77,14 +107,14 @@ export default function DashboardPage() {
         const studentsSnapshot = await getDocs(collection(db, "students"))
         const totalStudents = studentsSnapshot.size
 
-        // Fetch today's attendance records
-        const attendanceQuery = query(
+        // Fetch today's attendance records for stats cards
+        const todayAttendanceQuery = query(
           collection(db, "attendance"),
           where("recordDate", ">=", todayStart),
           where("recordDate", "<=", todayEnd)
         )
-        const attendanceSnapshot = await getDocs(attendanceQuery)
-        const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
+        const todayAttendanceSnapshot = await getDocs(todayAttendanceQuery)
+        const todayRecords = todayAttendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
 
         let presentToday = 0
         let lateToday = 0
@@ -93,7 +123,7 @@ export default function DashboardPage() {
         let permissionToday = 0
         let dispensationToday = 0
 
-        records.forEach(record => {
+        todayRecords.forEach(record => {
             switch(record.status) {
                 case "Hadir":
                     presentToday++;
@@ -102,39 +132,39 @@ export default function DashboardPage() {
                     presentToday++;
                     lateToday++;
                     break;
-                case "Sakit":
-                    sickToday++;
-                    break;
-                case "Izin":
-                    permissionToday++;
-                    break;
-                case "Dispen":
-                    dispensationToday++;
-                    break;
-                case "Alfa":
-                    alfaToday++;
-                    break;
+                case "Sakit": sickToday++; break;
+                case "Izin": permissionToday++; break;
+                case "Dispen": dispensationToday++; break;
+                case "Alfa": alfaToday++; break;
             }
         })
         
-        setStats({ 
-            totalStudents, 
-            presentToday, 
-            lateToday, 
-            alfaToday, 
-            sickToday, 
-            permissionToday,
-            dispensationToday
-        })
+        setStats({ totalStudents, presentToday, lateToday, alfaToday, sickToday, permissionToday, dispensationToday })
 
         // Fetch recent activities
-        const recentActivityQuery = query(
-          collection(db, "attendance"),
-          orderBy("recordDate", "desc"),
-          limit(5)
-        )
+        const recentActivityQuery = query(collection(db, "attendance"), orderBy("recordDate", "desc"), limit(5))
         const recentActivitySnapshot = await getDocs(recentActivityQuery)
         setRecentActivities(recentActivitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AttendanceRecord))
+
+        // Fetch last 7 days attendance for chart
+        const sevenDaysAgo = subDays(todayStart, 6);
+        const last7DaysAttendanceQuery = query(collection(db, "attendance"), where("recordDate", ">=", sevenDaysAgo), where("recordDate", "<=", todayEnd));
+        const last7DaysSnapshot = await getDocs(last7DaysAttendanceQuery);
+        const last7DaysRecords = last7DaysSnapshot.docs.map(doc => doc.data() as AttendanceRecord);
+        
+        const dateInterval = eachDayOfInterval({ start: sevenDaysAgo, end: todayStart });
+        const processedChartData = dateInterval.map(day => {
+            const dayString = format(day, "yyyy-MM-dd");
+            const recordsForDay = last7DaysRecords.filter(r => format(r.recordDate.toDate(), "yyyy-MM-dd") === dayString);
+            
+            return {
+                date: format(day, "dd/MM"),
+                Hadir: recordsForDay.filter(r => r.status === "Hadir").length,
+                Terlambat: recordsForDay.filter(r => r.status === "Terlambat").length,
+                Absen: recordsForDay.filter(r => ["Sakit", "Izin", "Alfa", "Dispen"].includes(r.status)).length,
+            };
+        });
+        setChartData(processedChartData);
 
       } catch (error) {
         console.error("Error fetching dashboard data:", error)
@@ -148,6 +178,8 @@ export default function DashboardPage() {
       }
     }
     fetchDashboardData()
+
+    return () => unsubscribe();
   }, [toast])
 
   const getInitials = (name: string) => {
@@ -268,52 +300,90 @@ export default function DashboardPage() {
           </>
         )}
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Aktivitas Absensi Terbaru</CardTitle>
-           <CardDescription>Menampilkan 5 aktivitas terakhir.</CardDescription>
-        </CardHeader>
-        <CardContent>
-            {isLoading ? (
-                 <div className="space-y-4">
-                    {[...Array(3)].map((_, i) => (
-                        <div key={i} className="flex items-center space-x-4">
-                            <Skeleton className="h-10 w-10 rounded-full" />
-                            <div className="flex-1 space-y-2">
-                                <Skeleton className="h-4 w-3/4" />
-                                <Skeleton className="h-3 w-1/2" />
-                            </div>
-                        </div>
-                    ))}
-                 </div>
-            ) : recentActivities.length > 0 ? (
-                <div className="space-y-4">
-                    {recentActivities.map(activity => (
-                        <div key={activity.id} className="flex items-center space-x-4">
-                            <Avatar className="h-10 w-10">
-                                <AvatarFallback className={cn(
-                                    {"bg-green-100 text-green-700": activity.status === 'Hadir'},
-                                    {"bg-red-100 text-red-700": activity.status === 'Terlambat' || activity.status === 'Alfa'},
-                                    {"bg-yellow-100 text-yellow-700": activity.status === 'Izin' || activity.status === 'Sakit' || activity.status === 'Dispen'},
-                                )}>
-                                    {getInitials(activity.studentName)}
-                                </AvatarFallback>
-                            </Avatar>
-                            <div className="flex-1">
-                                <p className="font-medium">{activity.studentName}</p>
-                                <div className="text-sm text-muted-foreground">
-                                    Status: <Badge variant={statusBadgeVariant[activity.status] || 'outline'} className="ml-1">{activity.status}</Badge> 
-                                    {activity.timestampMasuk && ` pada ${format(activity.timestampMasuk.toDate(), "dd/MM/yy HH:mm")}`}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <p className="text-center text-muted-foreground py-8">Belum ada aktivitas absensi hari ini.</p>
-            )}
-        </CardContent>
-      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <Card className="lg:col-span-3">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><BarChart3 /> Tren Kehadiran Mingguan</CardTitle>
+             <CardDescription>Menampilkan data kehadiran selama 7 hari terakhir.</CardDescription>
+          </CardHeader>
+          <CardContent>
+              {isLoading ? (
+                  <Skeleton className="w-full h-[350px]" />
+              ) : chartData.length > 0 ? (
+                 <ChartContainer config={chartConfig} className="w-full h-[350px]">
+                  <BarChart accessibilityLayer data={chartData} margin={{ top: 20, right: 20, bottom: 5, left: 0 }}>
+                    <CartesianGrid vertical={false} />
+                    <XAxis
+                      dataKey="date"
+                      tickLine={false}
+                      axisLine={false}
+                      tickMargin={8}
+                      tickFormatter={(value) => value.slice(0, 5)}
+                    />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="Hadir" stackId="a" fill="var(--color-Hadir)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Terlambat" stackId="a" fill="var(--color-Terlambat)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Absen" stackId="a" fill="var(--color-Absen)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              ) : (
+                  <div className="flex h-[350px] items-center justify-center text-muted-foreground">
+                      Tidak cukup data untuk menampilkan grafik.
+                  </div>
+              )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Aktivitas Absensi Terbaru</CardTitle>
+             <CardDescription>Menampilkan 5 aktivitas terakhir.</CardDescription>
+          </CardHeader>
+          <CardContent>
+              {isLoading ? (
+                   <div className="space-y-4">
+                      {[...Array(5)].map((_, i) => (
+                          <div key={i} className="flex items-center space-x-4">
+                              <Skeleton className="h-10 w-10 rounded-full" />
+                              <div className="flex-1 space-y-2">
+                                  <Skeleton className="h-4 w-3/4" />
+                                  <Skeleton className="h-3 w-1/2" />
+                              </div>
+                          </div>
+                      ))}
+                   </div>
+              ) : recentActivities.length > 0 ? (
+                  <div className="space-y-4">
+                      {recentActivities.map(activity => (
+                          <div key={activity.id} className="flex items-center space-x-4">
+                              <Avatar className="h-10 w-10">
+                                  <AvatarFallback className={cn(
+                                      {"bg-green-100 text-green-700": activity.status === 'Hadir'},
+                                      {"bg-orange-100 text-orange-700": activity.status === 'Terlambat'},
+                                      {"bg-red-100 text-red-700": activity.status === 'Alfa'},
+                                      {"bg-yellow-100 text-yellow-700": ['Izin', 'Sakit', 'Dispen'].includes(activity.status)},
+                                  )}>
+                                      {getInitials(activity.studentName)}
+                                  </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                  <p className="font-medium">{activity.studentName}</p>
+                                  <div className="text-sm text-muted-foreground">
+                                      Status: <Badge variant={statusBadgeVariant[activity.status] || 'outline'} className="ml-1">{activity.status}</Badge> 
+                                      {activity.timestampMasuk && ` pada ${format(activity.timestampMasuk.toDate(), "dd/MM/yy HH:mm")}`}
+                                  </div>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              ) : (
+                  <p className="text-center text-muted-foreground py-8">Belum ada aktivitas absensi hari ini.</p>
+              )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

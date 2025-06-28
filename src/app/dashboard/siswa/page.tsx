@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, type ChangeEvent, useMemo } from "react"
@@ -6,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2 } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2 } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -65,6 +66,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
@@ -94,6 +96,7 @@ export default function SiswaPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [filterName, setFilterName] = useState("")
   const [filterClass, setFilterClass] = useState("all")
+  const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const { toast } = useToast()
 
   const classObjectMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -152,6 +155,11 @@ export default function SiswaPage() {
   useEffect(() => {
     fetchData()
   }, [])
+  
+  // Effect to clear selection when filters change
+  useEffect(() => {
+    setSelectedRowIds([]);
+  }, [filterName, filterClass]);
 
   async function handleSaveStudent(values: NewStudent) {
     try {
@@ -196,14 +204,21 @@ export default function SiswaPage() {
     }
   }
 
-  async function handleDeleteStudent() {
-    if (!deletingStudentId) return
+  async function handleDeleteStudent(ids: string[]) {
+    if (!ids || ids.length === 0) return
     try {
-      await deleteDoc(doc(db, "students", deletingStudentId))
-      toast({ title: "Sukses", description: "Data siswa berhasil dihapus." })
-      await fetchData()
+      const batch = writeBatch(db);
+      ids.forEach(id => {
+        const docRef = doc(db, "students", id);
+        batch.delete(docRef);
+      });
+      await batch.commit();
+
+      toast({ title: "Sukses", description: `${ids.length} data siswa berhasil dihapus.` })
+      await fetchData();
       setIsAlertOpen(false)
       setDeletingStudentId(null)
+      setSelectedRowIds([]);
     } catch (error) {
       console.error("Error deleting student: ", error)
       toast({
@@ -214,21 +229,9 @@ export default function SiswaPage() {
     }
   }
 
-  const openAddDialog = () => {
-    setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "" })
-    setIsFormDialogOpen(true)
-  }
-
-  const openEditDialog = (student: Student) => {
-    setEditingStudent(student)
-    form.reset(student)
-    setIsFormDialogOpen(true)
-  }
-
-  const openDeleteAlert = (studentId: string) => {
-    setDeletingStudentId(studentId)
-    setIsAlertOpen(true)
+  const openDeleteAlert = (studentId: string | null) => {
+    setDeletingStudentId(studentId);
+    setIsAlertOpen(true);
   }
 
   const handleDownloadTemplate = () => {
@@ -411,6 +414,18 @@ export default function SiswaPage() {
     } finally {
         setIsImporting(false);
     }
+  }
+
+  const openAddDialog = () => {
+    setEditingStudent(null)
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "" })
+    setIsFormDialogOpen(true)
+  }
+
+  const openEditDialog = (student: Student) => {
+    setEditingStudent(student)
+    form.reset(student)
+    setIsFormDialogOpen(true)
   }
 
 
@@ -631,22 +646,32 @@ export default function SiswaPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Anda Yakin?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tindakan ini tidak dapat dibatalkan. Ini akan menghapus data siswa secara permanen.
+              Tindakan ini tidak dapat dibatalkan. Ini akan menghapus data {deletingStudentId ? '1 siswa' : `${selectedRowIds.length} siswa`} secara permanen.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Batal</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteStudent}>Hapus</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleDeleteStudent(deletingStudentId ? [deletingStudentId] : selectedRowIds)}>Hapus</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
       <Card>
         <CardHeader>
-          <CardTitle>Daftar Siswa</CardTitle>
-          <CardDescription>
-            Tabel berisi semua siswa yang terdaftar. Gunakan filter di bawah untuk mencari data.
-          </CardDescription>
+          <div className="flex justify-between items-start">
+            <div>
+              <CardTitle>Daftar Siswa</CardTitle>
+              <CardDescription>
+                Tabel berisi semua siswa yang terdaftar. Gunakan filter di bawah untuk mencari data.
+              </CardDescription>
+            </div>
+             {selectedRowIds.length > 0 && (
+              <Button variant="destructive" onClick={() => openDeleteAlert(null)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Hapus ({selectedRowIds.length}) Siswa
+              </Button>
+            )}
+          </div>
           <div className="mt-4 flex flex-col md:flex-row gap-4">
               <Input
                   placeholder="Cari berdasarkan nama siswa..."
@@ -684,28 +709,55 @@ export default function SiswaPage() {
                 <Table>
                 <TableHeader>
                     <TableRow>
+                    <TableHead padding="checkbox" className="w-[60px]">
+                      <Checkbox
+                        checked={selectedRowIds.length === filteredStudents.length && filteredStudents.length > 0}
+                        onCheckedChange={(checked) => {
+                          const isChecked = checked === true;
+                          if (isChecked) {
+                            setSelectedRowIds(filteredStudents.map((s) => s.id));
+                          } else {
+                            setSelectedRowIds([]);
+                          }
+                        }}
+                        aria-label="Pilih semua baris"
+                      />
+                    </TableHead>
                     <TableHead>NISN</TableHead>
                     <TableHead>Nama</TableHead>
                     <TableHead>Tingkat</TableHead>
                     <TableHead>Kelas</TableHead>
                     <TableHead>Jenis Kelamin</TableHead>
-                    <TableHead>
-                        <span className="sr-only">Aksi</span>
-                    </TableHead>
+                    <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {filteredStudents.length > 0 ? (
                     filteredStudents.map((student) => {
                         const classInfo = classObjectMap.get(student.classId);
+                        const isSelected = selectedRowIds.includes(student.id);
                         return (
-                            <TableRow key={student.id}>
+                            <TableRow key={student.id} data-state={isSelected ? "selected" : ""}>
+                             <TableCell padding="checkbox">
+                                <Checkbox
+                                    checked={isSelected}
+                                    onCheckedChange={(checked) => {
+                                        const isChecked = checked === true;
+                                        if (isChecked) {
+                                            setSelectedRowIds((prev) => [...prev, student.id]);
+                                        } else {
+                                            setSelectedRowIds((prev) => prev.filter((id) => id !== student.id));
+                                        }
+                                    }}
+                                    aria-label={`Pilih baris ${student.nama}`}
+                                />
+                             </TableCell>
                             <TableCell>{student.nisn}</TableCell>
                             <TableCell className="font-medium">{student.nama}</TableCell>
                             <TableCell>{classInfo?.grade || 'N/A'}</TableCell>
                             <TableCell>{classInfo?.name || 'Kelas Dihapus'}</TableCell>
                             <TableCell>{student.jenisKelamin}</TableCell>
-                            <TableCell>
+                            <TableCell className="text-right">
                                 <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" className="h-8 w-8 p-0">
@@ -715,11 +767,11 @@ export default function SiswaPage() {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Aksi</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => openEditDialog(student)}>
-                                    Edit
+                                    <DropdownMenuItem onClick={() => { setEditingStudent(student); setIsFormDialogOpen(true); form.reset(student) }}>
+                                        Edit
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => openDeleteAlert(student.id)}>
-                                    Hapus
+                                        Hapus
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                                 </DropdownMenu>
@@ -729,7 +781,7 @@ export default function SiswaPage() {
                     })
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={6} className="h-24 text-center">
+                        <TableCell colSpan={7} className="h-24 text-center">
                           {students.length > 0 ? "Tidak ada siswa yang cocok dengan filter." : "Belum ada data siswa."}
                         </TableCell>
                     </TableRow>
