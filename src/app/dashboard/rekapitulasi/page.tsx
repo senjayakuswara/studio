@@ -34,6 +34,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ComboBox } from "@/components/ui/combobox"
 import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { Label } from "@/components/ui/label"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -619,5 +620,3 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
-
-    
