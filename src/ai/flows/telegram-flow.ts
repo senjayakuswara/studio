@@ -7,11 +7,12 @@
  * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
  * - syncTelegramMessages: Fetches and processes new messages from Telegram upon manual request.
  * - deleteTelegramWebhook: Removes the currently active webhook from the bot.
+ * - runMonthlyRecapAutomation: Runs the entire monthly recap process automatically for all classes.
  */
 
-import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, setDoc, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns";
+import { format, subMonths, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, getDaysInMonth } from "date-fns";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -24,6 +25,7 @@ type TelegramSettings = {
 
 type Class = { id: string; name: string; grade: string };
 type Student = { id: string; nisn: string; nama: string; classId: string };
+type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceRecord = {
   id?: string
   studentId: string
@@ -35,6 +37,11 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
   recordDate: Timestamp
 };
+type AutomationAttendanceRecord = {
+  studentId: string
+  status: "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
+  recordDate: Timestamp
+}
 
 // New type for Server Action to avoid non-plain objects
 export type SerializableAttendanceRecord = {
@@ -52,8 +59,12 @@ export type SerializableAttendanceRecord = {
 type MonthlySummaryData = {
     studentInfo: Student,
     attendance: { [day: number]: string },
-    summary: { H: number, T: number, S: number, I: number, A: number, D: number }
+    summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
 };
+
+type MonthlySummary = {
+    [studentId: string]: MonthlySummaryData
+}
 
 // Internal helper to get bot token from environment variables
 function getBotToken(): string | null {
@@ -454,4 +465,140 @@ export async function deleteTelegramWebhook(): Promise<{ success: boolean; messa
         console.error("Failed to delete webhook:", error);
         return { success: false, message: "Gagal terhubung ke server Telegram." };
     }
+}
+
+/**
+ * Runs the automated process to send monthly recap reports to all parents and class advisors.
+ * This function is designed to be triggered by a cron job.
+ */
+export async function runMonthlyRecapAutomation() {
+    console.log("Starting monthly recap automation process...");
+    
+    // 1. Determine the target month (previous month)
+    const today = new Date();
+    const previousMonthDate = subMonths(today, 1);
+    const targetMonth = getMonth(previousMonthDate);
+    const targetYear = getYear(previousMonthDate);
+    
+    console.log(`Targeting report for: ${format(previousMonthDate, "MMMM yyyy")}`);
+
+    // 2. Fetch all necessary data from Firestore
+    const [classesSnapshot, studentsSnapshot, holidaysSnapshot] = await Promise.all([
+        getDocs(collection(db, "classes")),
+        getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
+        getDocs(collection(db, "holidays"))
+    ]);
+
+    const classes = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[];
+    const students = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
+    const holidays = holidaysSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Holiday[];
+    
+    if (students.length === 0) {
+        console.log("No active students found. Aborting recap automation.");
+        return;
+    }
+
+    // 3. Fetch all attendance records for the target month
+    const monthStart = startOfMonth(previousMonthDate);
+    const monthEnd = endOfMonth(previousMonthDate);
+    const studentIds = students.map(s => s.id);
+    const attendanceRecords: AutomationAttendanceRecord[] = [];
+
+    const studentIdChunks = [];
+    for (let i = 0; i < studentIds.length; i += 30) {
+        studentIdChunks.push(studentIds.slice(i, i + 30));
+    }
+
+    for (const chunk of studentIdChunks) {
+        if (chunk.length === 0) continue;
+        const attendanceQuery = query(
+            collection(db, "attendance"),
+            where("studentId", "in", chunk),
+            where("recordDate", ">=", monthStart),
+            where("recordDate", "<=", monthEnd)
+        );
+        const attendanceSnapshot = await getDocs(attendanceQuery);
+        attendanceSnapshot.forEach(doc => attendanceRecords.push(doc.data() as AutomationAttendanceRecord));
+    }
+
+    // 4. Process data into summary format
+    const holidayDateStrings = new Set<string>();
+    holidays.forEach(holiday => {
+        const start = holiday.startDate.toDate();
+        const end = holiday.endDate.toDate();
+        const interval = eachDayOfInterval({ start, end });
+        interval.forEach(day => {
+            if (getMonth(day) === targetMonth && getYear(day) === targetYear) {
+                holidayDateStrings.add(format(day, 'yyyy-MM-dd'));
+            }
+        });
+    });
+
+    const summary: MonthlySummary = {};
+    const daysInMonth = getDaysInMonth(previousMonthDate);
+            
+    students.forEach(student => {
+        summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 } };
+        const studentRecords = attendanceRecords.filter(r => r.studentId === student.id);
+        
+        for(let day = 1; day <= daysInMonth; day++) {
+            const currentDate = new Date(targetYear, targetMonth, day);
+            const dateString = format(currentDate, 'yyyy-MM-dd');
+            const dayOfWeek = getDay(currentDate);
+
+            if (holidayDateStrings.has(dateString) || dayOfWeek === 0) { // Sunday is a holiday
+                summary[student.id].attendance[day] = 'L';
+                summary[student.id].summary.L++;
+                continue;
+            }
+
+            const recordForDay = studentRecords.find(r => getDate(r.recordDate.toDate()) === day);
+            if (recordForDay) {
+                let statusChar = '';
+                switch (recordForDay.status) {
+                    case "Hadir": statusChar = 'H'; summary[student.id].summary.H++; break;
+                    case "Terlambat": statusChar = 'T'; summary[student.id].summary.T++; break;
+                    case "Sakit": statusChar = 'S'; summary[student.id].summary.S++; break;
+                    case "Izin": statusChar = 'I'; summary[student.id].summary.I++; break;
+                    case "Alfa": statusChar = 'A'; summary[student.id].summary.A++; break;
+                    case "Dispen": statusChar = 'D'; summary[student.id].summary.D++; break;
+                }
+                 if (statusChar) summary[student.id].attendance[day] = statusChar;
+            } else {
+                summary[student.id].attendance[day] = 'A';
+                summary[student.id].summary.A++;
+            }
+        }
+    });
+
+    // 5. Send notifications
+    // Send to individual parents
+    console.log(`Sending recaps to ${students.length} parents...`);
+    for (const studentData of Object.values(summary)) {
+        await sendMonthlyRecapToParent(studentData, targetMonth, targetYear);
+        // Add a small delay to avoid hitting rate limits
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    console.log("Finished sending recaps to parents.");
+
+    // Send to class advisor groups
+    console.log("Sending recaps to class advisor groups...");
+    const classSummaries: { [classId: string]: MonthlySummary } = {};
+    Object.values(summary).forEach(studentData => {
+        const classId = studentData.studentInfo.classId;
+        if (!classSummaries[classId]) {
+            classSummaries[classId] = {};
+        }
+        classSummaries[classId][studentData.studentInfo.id] = studentData;
+    });
+
+    for (const classId in classSummaries) {
+        const classInfo = classes.find(c => c.id === classId);
+        if (classInfo) {
+            await sendClassMonthlyRecap(classInfo.name, classInfo.grade, targetMonth, targetYear, classSummaries[classId]);
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    console.log("Finished sending recaps to advisors.");
+    console.log("Monthly recap automation process completed.");
 }
