@@ -99,3 +99,20 @@
     transform: scaleX(-1);
   }
 }
+
+@layer utilities {
+  @keyframes flash-success {
+    0% { background-color: hsl(var(--primary) / 0.3); }
+    100% { background-color: transparent; }
+  }
+  .animate-flash-success {
+    animation: flash-success 1.5s ease-out;
+  }
+  @keyframes flash-error {
+    0% { background-color: hsl(var(--destructive) / 0.3); }
+    100% { background-color: transparent; }
+  }
+  .animate-flash-error {
+    animation: flash-error 1.5s ease-out;
+  }
+}

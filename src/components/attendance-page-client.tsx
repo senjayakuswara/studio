@@ -38,6 +38,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert"
+import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -87,6 +88,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
+    const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" } | null>(null);
     
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null)
@@ -293,6 +295,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     
             if (!student) {
                 addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
+                setHighlightedNisn({ nisn: nisn.trim(), type: 'error' });
                 toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
                 playSound('error');
                 return;
@@ -301,6 +304,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (student.grade !== grade) {
                 const studentClass = classMap.get(student.classId)
                 addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
+                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
                 playSound('error');
                 return;
@@ -311,6 +315,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
+                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
                 playSound('error');
                 return;
@@ -324,6 +329,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!existingRecord || !existingRecord.timestampMasuk) {
                  if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
+                    setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
                     playSound('error');
                     return;
@@ -355,6 +361,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 const newRecord = { ...payload, id: docId };
                 setAttendanceData(prev => ({...prev, [student.id]: newRecord }));
                 addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
+                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
                 playSound('success');
                 
@@ -364,6 +371,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
                     addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
+                    setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
                     playSound('error');
                     return;
@@ -374,21 +382,25 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  const updatedRecord = { ...existingRecord, ...payload };
                  setAttendanceData(prev => ({...prev, [student.id]: updatedRecord}));
                  addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
+                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
                  toast({ title: "Absen Pulang Berhasil" });
                  playSound('success');
                 
                  notifyParentOnAttendance(serializableRecordForTele(updatedRecord as AttendanceRecord));
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
+                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
                 playSound('error');
             }
         } catch (error) {
             console.error("Error handling scan:", error);
             addLog(`Gagal memproses NISN ${nisn}.`, 'error');
+            setHighlightedNisn({ nisn: nisn.trim(), type: 'error' });
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
             playSound('error');
         } finally {
+            setTimeout(() => setHighlightedNisn(null), 1500);
             setTimeout(() => {
               processingLock.current = false;
               setIsProcessing(false);
@@ -494,7 +506,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Pindai barcode untuk absen masuk & pulang.</p>
+            <p className="text-muted-foreground">Pindai barcode untuk absen masuk &amp; pulang.</p>
             </div>
         </div>
 
@@ -632,7 +644,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 const studentClass = classMap.get(student.classId);
                                 const status = record.status || 'Belum Absen';
                                 return (
-                                    <TableRow key={student.id} data-status={status}>
+                                    <TableRow 
+                                      key={student.id} 
+                                      data-status={status}
+                                      className={cn({
+                                          'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
+                                          'animate-flash-error': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'error',
+                                      })}
+                                    >
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell className="font-medium">{student.nama}</TableCell>
                                         <TableCell>{studentClass?.name || 'N/A'}</TableCell>

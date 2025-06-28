@@ -1,14 +1,17 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Calendar as CalendarIcon, Download, Loader2 } from "lucide-react"
+import { Calendar as CalendarIcon, Download, Loader2, MoreHorizontal } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import * as z from "zod"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -44,6 +47,22 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -57,6 +76,7 @@ type AttendanceRecord = {
   status: AttendanceStatus
   timestampMasuk: Timestamp | null
   timestampPulang: Timestamp | null
+  notes?: string
 }
 type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
 
@@ -69,6 +89,10 @@ type ReportConfig = {
     principalName: string
     principalNpa: string
 }
+
+const attendanceEditSchema = z.object({
+  status: z.enum(["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen"]),
+})
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary'> = {
     "Hadir": "default",
@@ -87,7 +111,13 @@ export default function AbsensiPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
+  const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
+  const [editingRecord, setEditingRecord] = useState<CombinedAttendanceRecord | null>(null)
   const { toast } = useToast()
+
+  const form = useForm<z.infer<typeof attendanceEditSchema>>({
+    resolver: zodResolver(attendanceEditSchema),
+  })
 
   useEffect(() => {
     async function fetchData() {
@@ -105,13 +135,11 @@ export default function AbsensiPage() {
             setReportConfig(reportConfigSnap.data() as ReportConfig);
         }
 
-        // Fetch classes
         const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
         classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`))
         setClasses(classList)
         const classMap = new Map(classList.map(c => [c.id, c]))
 
-        // Fetch attendance records for the selected date
         const attendanceQuery = query(
           collection(db, "attendance"),
           where("recordDate", ">=", selectedDateStart),
@@ -153,6 +181,37 @@ export default function AbsensiPage() {
     return attendanceRecords.filter(record => record.classId === filterClass)
   }, [attendanceRecords, filterClass])
 
+  const openEditDialog = (record: CombinedAttendanceRecord) => {
+    setEditingRecord(record)
+    form.reset({
+      status: record.status,
+    })
+    setIsFormDialogOpen(true)
+  }
+
+  const handleSaveAttendance = async (values: z.infer<typeof attendanceEditSchema>) => {
+    if (!editingRecord) return
+
+    try {
+      const docRef = doc(db, "attendance", editingRecord.id)
+      await updateDoc(docRef, {
+        status: values.status,
+      })
+
+      setAttendanceRecords(prev =>
+        prev.map(rec =>
+          rec.id === editingRecord.id ? { ...rec, status: values.status } : rec
+        )
+      )
+
+      toast({ title: "Sukses", description: "Data absensi berhasil diperbarui." })
+      setIsFormDialogOpen(false)
+    } catch (error) {
+      console.error("Error updating attendance:", error)
+      toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan data." })
+    }
+  }
+
   const handlePrintReport = () => {
     if (!reportConfig) {
       toast({
@@ -170,21 +229,18 @@ export default function AbsensiPage() {
       const pageMargin = 15;
       let lastY = 10;
 
-      // === KOP SURAT / HEADER ===
       if (reportConfig.headerImageUrl) {
           try {
-              // Assuming the header image has an aspect ratio of roughly 950x150
               const imgWidth = pageWidth - pageMargin * 2;
               const imgHeight = imgWidth * (150 / 950);
               doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, 10, imgWidth, imgHeight);
-              lastY = 10 + imgHeight + 5; // Position cursor below the image
+              lastY = 10 + imgHeight + 5;
           } catch (e) {
               console.error("Could not add header image", e);
               toast({ variant: "destructive", title: "Gagal Memuat Kop Surat", description: "Pastikan gambar kop surat valid." });
-              lastY = 40; // Fallback position
+              lastY = 40;
           }
       } else {
-        // Fallback if no header image is set
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(14);
         doc.text("Laporan Absensi", pageWidth / 2, 20, { align: 'center' });
@@ -193,7 +249,6 @@ export default function AbsensiPage() {
         lastY = 35;
       }
       
-      // === JUDUL LAPORAN ===
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12);
       doc.text(reportConfig.reportTitle || "Laporan Absensi", pageWidth / 2, lastY, { align: 'center' });
@@ -203,7 +258,6 @@ export default function AbsensiPage() {
       doc.text(`Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`, pageWidth / 2, lastY, { align: 'center' });
       lastY += 10;
       
-      // Table (or no data message)
       if (filteredRecords.length > 0) {
         const tableData = filteredRecords.map((record) => [
           format(date, "dd/MM/yyyy"),
@@ -221,7 +275,7 @@ export default function AbsensiPage() {
           head: [['Tanggal', 'Nama Siswa', 'NISN', 'Kelas', 'Tingkat', 'Masuk', 'Pulang', 'Status']],
           body: tableData,
           theme: 'grid',
-          headStyles: { fillColor: [22, 163, 74], textColor: 255 }, // Green-600
+          headStyles: { fillColor: [22, 163, 74], textColor: 255 },
           styles: { cellPadding: 2, fontSize: 8 },
           margin: { left: pageMargin, right: pageMargin }
         });
@@ -233,12 +287,11 @@ export default function AbsensiPage() {
         lastY = lastY + 20;
       }
 
-      // === TITIMANGSA / FOOTER ===
       let signatureY = lastY + 15;
       
       if (signatureY > doc.internal.pageSize.getHeight() - 60) {
           doc.addPage();
-          signatureY = 40; // Start higher on new page
+          signatureY = 40;
       }
 
       const leftX = pageWidth / 4;
@@ -247,7 +300,6 @@ export default function AbsensiPage() {
       doc.setFontSize(10);
       doc.setFont('times', 'normal');
 
-      // Left side: Principal
       doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
       doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
       doc.setFont('times', 'bold');
@@ -255,7 +307,6 @@ export default function AbsensiPage() {
       doc.setFont('times', 'normal');
       doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
 
-      // Right side: Officer
       doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
       doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
       doc.setFont('times', 'bold');
@@ -263,7 +314,6 @@ export default function AbsensiPage() {
       doc.setFont('times', 'normal');
       doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
       
-      // Save PDF
       doc.save(`Laporan_Absensi_Harian_${format(date, "yyyy-MM-dd")}.pdf`);
 
     } catch (error) {
@@ -279,120 +329,183 @@ export default function AbsensiPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Absensi</h1>
-          <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
-        </div>
-        <div className="flex flex-col gap-2 md:flex-row md:items-center">
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={"outline"}
-                  className={cn(
-                    "w-full justify-start text-left font-normal md:w-[240px]",
-                    !date && "text-muted-foreground"
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(d) => d && setDate(d)}
-                  initialFocus
-                  disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
-                />
-              </PopoverContent>
-            </Popover>
-            <Select value={filterClass} onValueChange={setFilterClass}>
-              <SelectTrigger className="w-full md:w-[280px]">
-                <SelectValue placeholder="Filter berdasarkan kelas" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Semua Kelas</SelectItem>
-                {["X", "XI", "XII"].map(grade => (
-                  <SelectGroup key={grade}>
-                    <SelectLabel>Kelas {grade}</SelectLabel>
-                    {classes.filter(c => c.grade === grade).map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
-                {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
-            </Button>
-        </div>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Data Absensi - {format(date, "eeee, dd MMMM yyyy", { locale: localeID })}</CardTitle>
-          <CardDescription>
-            Menampilkan {filteredRecords.length} dari {attendanceRecords.length} catatan absensi.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>NISN</TableHead>
-                  <TableHead>Nama Siswa</TableHead>
-                  <TableHead>Kelas</TableHead>
-                  <TableHead>Tingkat</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Jam Masuk</TableHead>
-                  <TableHead>Jam Pulang</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  [...Array(5)].map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell colSpan={7}>
-                        <Skeleton className="h-6 w-full" />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : filteredRecords.length > 0 ? (
-                  filteredRecords.map((record) => (
-                    <TableRow key={record.id}>
-                      <TableCell>{record.nisn}</TableCell>
-                      <TableCell className="font-medium">{record.studentName}</TableCell>
-                      <TableCell>{record.classInfo?.name || 'N/A'}</TableCell>
-                      <TableCell>{record.classInfo?.grade || 'N/A'}</TableCell>
-                       <TableCell>
-                          <Badge variant={statusBadgeVariant[record.status] || "outline"}>
-                            {record.status}
-                          </Badge>
-                       </TableCell>
-                      <TableCell className="font-mono">
-                        {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : " - "}
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : " - "}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center">
-                      Tidak ada data absensi untuk tanggal ini.
-                    </TableCell>
-                  </TableRow>
+    <>
+      <Dialog open={isFormDialogOpen} onOpenChange={setIsFormDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Absensi</DialogTitle>
+            <DialogDescription>
+              Ubah status absensi untuk siswa <span className="font-semibold">{editingRecord?.studentName}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleSaveAttendance)} className="space-y-4 py-4">
+              <FormField
+                control={form.control}
+                name="status"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Status Kehadiran</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Pilih status" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                          <SelectItem value="Hadir">Hadir</SelectItem>
+                          <SelectItem value="Terlambat">Terlambat</SelectItem>
+                          <SelectItem value="Sakit">Sakit</SelectItem>
+                          <SelectItem value="Izin">Izin</SelectItem>
+                          <SelectItem value="Alfa">Alfa</SelectItem>
+                          <SelectItem value="Dispen">Dispen</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
                 )}
-              </TableBody>
-            </Table>
+              />
+              <DialogFooter>
+                <Button type="submit" disabled={form.formState.isSubmitting}>
+                  {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Simpan Perubahan
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+    
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Absensi</h1>
+            <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
           </div>
-        </CardContent>
-      </Card>
-    </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-full justify-start text-left font-normal md:w-[240px]",
+                      !date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={(d) => d && setDate(d)}
+                    initialFocus
+                    disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
+                  />
+                </PopoverContent>
+              </Popover>
+              <Select value={filterClass} onValueChange={setFilterClass}>
+                <SelectTrigger className="w-full md:w-[280px]">
+                  <SelectValue placeholder="Filter berdasarkan kelas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Semua Kelas</SelectItem>
+                  {["X", "XI", "XII"].map(grade => (
+                    <SelectGroup key={grade}>
+                      <SelectLabel>Kelas {grade}</SelectLabel>
+                      {classes.filter(c => c.grade === grade).map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
+                  {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
+              </Button>
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Data Absensi - {format(date, "eeee, dd MMMM yyyy", { locale: localeID })}</CardTitle>
+            <CardDescription>
+              Menampilkan {filteredRecords.length} dari {attendanceRecords.length} catatan absensi.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="border rounded-md">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>NISN</TableHead>
+                    <TableHead>Nama Siswa</TableHead>
+                    <TableHead>Kelas</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Jam Masuk</TableHead>
+                    <TableHead>Jam Pulang</TableHead>
+                    <TableHead className="text-right">Aksi</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading ? (
+                    [...Array(5)].map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={7}>
+                          <Skeleton className="h-6 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : filteredRecords.length > 0 ? (
+                    filteredRecords.map((record) => (
+                      <TableRow key={record.id}>
+                        <TableCell>{record.nisn}</TableCell>
+                        <TableCell className="font-medium">{record.studentName}</TableCell>
+                        <TableCell>{record.classInfo?.name || 'N/A'}</TableCell>
+                         <TableCell>
+                            <Badge variant={statusBadgeVariant[record.status] || "outline"}>
+                              {record.status}
+                            </Badge>
+                         </TableCell>
+                        <TableCell className="font-mono">
+                          {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : " - "}
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : " - "}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                      <span className="sr-only">Buka menu</span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Aksi</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => openEditDialog(record)}>
+                                      Edit Status
+                                  </DropdownMenuItem>
+                              </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-24 text-center">
+                        Tidak ada data absensi untuk tanggal ini.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </>
   )
 }
