@@ -41,37 +41,6 @@ const requiredEnvVars = [
   'NEXT_PUBLIC_FIREBASE_APP_ID'
 ];
 
-const EnvVarCheck = () => {
-  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
-  if (missingVars.length > 0) {
-    return (
-      <Card className="w-full max-w-2xl bg-destructive/10 border-destructive">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive">
-            <AlertTriangle />
-            Kesalahan Konfigurasi
-          </CardTitle>
-          <CardDescription className="text-destructive/80">
-            Aplikasi tidak dapat terhubung ke Firebase karena beberapa kunci konfigurasi hilang.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="font-medium">Harap periksa file `.env` Anda dan pastikan variabel berikut ini sudah diisi dengan benar:</p>
-          <ul className="mt-2 list-disc list-inside space-y-1 font-mono text-sm">
-            {missingVars.map(varName => <li key={varName}>{varName}</li>)}
-          </ul>
-           <p className="mt-4 text-xs text-muted-foreground text-destructive/80">
-            Setelah Anda mengisi semua variabel di file .env, segarkan halaman ini.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return null;
-}
-
 const formSchema = z.object({
   email: z.string().email({
     message: "Format email tidak valid.",
@@ -86,18 +55,25 @@ export default function LoginPage() {
   const { toast } = useToast()
   const [appName, setAppName] = useState("AbTrack")
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isSettingsLoading, setIsSettingsLoading] = useState(true)
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-  const configError = EnvVarCheck();
+  const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    if (configError) {
-      setIsLoading(false);
+    setIsClient(true);
+  }, []);
+
+  const missingVars = isClient ? requiredEnvVars.filter(varName => !process.env[varName]) : [];
+  const hasConfigError = isClient && missingVars.length > 0;
+
+  useEffect(() => {
+    if (hasConfigError || !isClient) {
+      setIsSettingsLoading(false);
       return;
     }
+    
     async function fetchSettings() {
-      setIsLoading(true)
+      setIsSettingsLoading(true)
       try {
         const docRef = doc(db, "settings", "appConfig");
         const docSnap = await getDoc(docRef);
@@ -123,11 +99,11 @@ export default function LoginPage() {
             })
         }
       } finally {
-        setIsLoading(false);
+        setIsSettingsLoading(false);
       }
     }
     fetchSettings();
-  }, [toast, configError]);
+  }, [toast, hasConfigError, isClient]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -158,36 +134,57 @@ export default function LoginPage() {
     }
   }
 
-  if (configError) {
-    return (
-       <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
-        {configError}
-      </div>
-    )
-  }
+  const renderMainContent = () => {
+    if (!isClient || isSettingsLoading) {
+      return (
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="font-headline text-2xl">Masuk</CardTitle>
+            <CardDescription className="font-body">
+                Selamat datang! Silakan masuk ke akun Anda.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="space-y-2">
+                <Skeleton className="h-4 w-12" />
+                <Skeleton className="h-10 w-full" />
+            </div>
+            <div className="space-y-2">
+                <Skeleton className="h-4 w-12" />
+                <Skeleton className="h-10 w-full" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      );
+    }
 
-  return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex items-center gap-4 bg-primary p-4 text-primary-foreground shadow-md">
-        {isLoading ? (
-            <>
-                <Skeleton className="h-10 w-10 rounded-full" />
-                <Skeleton className="h-6 w-32" />
-            </>
-        ) : (
-            <>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background text-primary">
-                    {logoUrl ? (
-                        <Image src={logoUrl} alt="Logo" width={32} height={32} className="rounded-full" />
-                    ) : (
-                        <School className="h-6 w-6" />
-                    )}
-                </div>
-                <h1 className="font-headline text-xl font-semibold">{appName}</h1>
-            </>
-        )}
-      </header>
-      <main className="flex flex-1 flex-col items-center justify-center bg-background p-4">
+    if (hasConfigError) {
+      return (
+        <Card className="w-full max-w-2xl bg-destructive/10 border-destructive">
+            <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+                <AlertTriangle />
+                Kesalahan Konfigurasi
+            </CardTitle>
+            <CardDescription className="text-destructive/80">
+                Aplikasi tidak dapat terhubung ke Firebase karena beberapa kunci konfigurasi hilang.
+            </CardDescription>
+            </CardHeader>
+            <CardContent>
+            <p className="font-medium">Harap periksa pengaturan Environment Variables di Vercel Anda dan pastikan variabel berikut ini sudah diisi dengan benar:</p>
+            <ul className="mt-2 list-disc list-inside space-y-1 font-mono text-sm">
+                {missingVars.map(varName => <li key={varName}>{varName}</li>)}
+            </ul>
+            <p className="mt-4 text-xs text-muted-foreground text-destructive/80">
+                Setelah Anda mengisi semua variabel di Vercel, lakukan Redeploy.
+            </p>
+            </CardContent>
+        </Card>
+      );
+    }
+
+    return (
         <Card className="w-full max-w-sm">
             <CardHeader className="text-center">
                 <CardTitle className="font-headline text-2xl">Masuk</CardTitle>
@@ -239,6 +236,32 @@ export default function LoginPage() {
             </Form>
             </CardContent>
         </Card>
+    );
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <header className="flex items-center gap-4 bg-primary p-4 text-primary-foreground shadow-md">
+        {isSettingsLoading ? (
+            <>
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <Skeleton className="h-6 w-32" />
+            </>
+        ) : (
+            <>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background text-primary">
+                    {logoUrl ? (
+                        <Image src={logoUrl} alt="Logo" width={32} height={32} className="rounded-full" />
+                    ) : (
+                        <School className="h-6 w-6" />
+                    )}
+                </div>
+                <h1 className="font-headline text-xl font-semibold">{appName}</h1>
+            </>
+        )}
+      </header>
+      <main className="flex flex-1 flex-col items-center justify-center bg-background p-4">
+        {renderMainContent()}
       </main>
       <footer className="bg-muted p-4 text-center text-sm text-muted-foreground">
         <p>2025 @ E-Absensi created by KS</p>
