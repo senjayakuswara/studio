@@ -4,8 +4,8 @@ import { cn } from '@/lib/utils';
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: 'AbTrack',
-  description: 'A modern attendance tracking application.',
+  title: 'AbsensiKu Cerdas',
+  description: 'Aplikasi absensi cerdas untuk sekolah.',
 };
 
 export default function RootLayout({
