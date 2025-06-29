@@ -1,3 +1,4 @@
+
 rules_version = '2';
 
 service cloud.firestore {
@@ -11,14 +12,14 @@ service cloud.firestore {
 
     // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
     // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
-    // yang perlu diakses oleh sistem eksternal seperti bot Telegram.
+    // yang perlu diakses oleh sistem eksternal seperti bot Telegram atau cron job.
 
-    // Izinkan siapa saja membaca konfigurasi aplikasi untuk halaman login.
+    // Izinkan siapa saja membaca (get) konfigurasi aplikasi untuk halaman login.
     match /settings/appConfig {
       allow get: if true;
     }
 
-    // Izinkan bot Telegram membaca konfigurasinya.
+    // Izinkan bot Telegram/cron jobs membaca (get) konfigurasinya.
     match /settings/telegramConfig {
       allow get: if true;
     }
@@ -28,17 +29,27 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // Izinkan bot Telegram membaca data kelas untuk validasi.
+    // Izinkan bot/cron jobs membaca data kelas. 'read' diperlukan untuk query.
     match /classes/{classId} {
-      allow get: if true;
+      allow read: if true;
     }
     
-    // Izinkan bot Telegram membaca data siswa untuk validasi.
+    // Izinkan bot/cron jobs membaca data siswa. 'read' diperlukan untuk query.
     match /students/{studentId} {
-      allow get: if true;
+      allow read: if true;
       // PENTING: Hanya izinkan bot untuk MENGUBAH field `parentChatId`.
       // Ini melindungi data siswa lainnya dari perubahan yang tidak sah.
       allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentChatId']);
+    }
+
+    // Izinkan cron job untuk membaca data absensi untuk rekapitulasi.
+    match /attendance/{attendanceId} {
+      allow read: if true;
+    }
+
+    // Izinkan cron job untuk membaca data hari libur.
+    match /holidays/{holidayId} {
+      allow read: if true;
     }
   }
 }
