@@ -1,9 +1,8 @@
 'use server';
 /**
- * @fileOverview Handles all student and parent notifications.
- * This file is now responsible for sending notifications via WhatsApp.
- * - processWhatsappRegistration: Handles new user registrations via WhatsApp. (Placeholder for future)
- * - notifyParentOnAttendance: Sends daily attendance notifications to parents.
+ * @fileOverview Handles all student and parent notifications via Telegram.
+ * - processTelegramWebhook: Main entry point for incoming Telegram messages.
+ * - notifyParentOnAttendance: Sends daily attendance notifications.
  * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
  * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
  * - runMonthlyRecapAutomation: Runs the entire monthly recap process automatically for all classes.
@@ -13,10 +12,11 @@ import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, s
 import { db } from "@/lib/firebase";
 import { format, subMonths, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, getDaysInMonth } from "date-fns";
 import { id as localeID } from "date-fns/locale";
-import { sendWhatsappMessage } from "@/services/whatsapp-service";
 
 // Types
-type WhatsappSettings = {
+type TelegramSettings = {
+  botToken: string;
+  chatId: string;
   groupChatId?: string;
   notifHadir: boolean;
   notifTerlambat: boolean;
@@ -24,7 +24,7 @@ type WhatsappSettings = {
 };
 
 type Class = { id: string; name: string; grade: string };
-type Student = { id: string; nisn: string; nama: string; classId: string, parentWaNumber?: string };
+type Student = { id: string; nisn: string; nama: string; classId: string };
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceRecord = {
   id?: string
@@ -50,7 +50,7 @@ export type SerializableAttendanceRecord = {
   nisn: string
   studentName: string
   classId: string
-  status: "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
+  status: "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
   timestampMasuk: string | null
   timestampPulang: string | null
   recordDate: string
@@ -66,41 +66,69 @@ type MonthlySummary = {
     [studentId: string]: MonthlySummaryData
 }
 
-// Internal helper to get WhatsApp config from Firestore
-async function getWhatsappConfig(): Promise<WhatsappSettings | null> {
+
+// Internal helper to get Telegram config from Firestore
+async function getTelegramConfig(): Promise<TelegramSettings | null> {
     try {
-        // We reuse the telegramConfig doc for whatsapp settings to avoid migration
         const docRef = doc(db, "settings", "telegramConfig");
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-            return docSnap.data() as WhatsappSettings;
+            return docSnap.data() as TelegramSettings;
         }
         return null;
     } catch (error) {
-        console.error("Error fetching Whatsapp config:", error);
+        console.error("Error fetching Telegram config:", error);
         return null;
     }
 }
 
-/**
- * Placeholder for future WhatsApp registration logic.
- * Currently, parent WA numbers must be added manually in the student management page.
- */
-export async function processWhatsappRegistration(payload: any) {
-    console.log("Received WhatsApp payload:", payload);
-    // This is where you would handle incoming messages from parents,
-    // for example, a "DAFTAR <NISN>" message to link their number.
-    // For now, we do nothing.
-    return;
+// Internal helper to send a message via Telegram API
+async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text,
+                parse_mode: 'Markdown'
+            }),
+        });
+    } catch (error) {
+        console.error("Failed to send Telegram message:", error);
+    }
 }
 
 /**
- * Formats and sends a daily attendance notification to a parent via WhatsApp.
+ * Handles incoming webhook payloads from Telegram.
+ * @param payload The webhook payload from Telegram.
+ */
+export async function processTelegramWebhook(payload: any) {
+    console.log("Received Telegram payload:", payload);
+    const message = payload.message || payload.edited_message;
+    if (!message) return;
+
+    const chatId = message.chat.id;
+    const text = message.text;
+
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken) return;
+
+    if (text === '/myid') {
+        const responseText = `Your Chat ID is: \`${chatId}\``;
+        await sendTelegramMessage(config.botToken, String(chatId), responseText);
+    }
+    // Add other command handlers here if needed.
+}
+
+/**
+ * Formats and sends a daily attendance notification to the admin via Telegram.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyParentOnAttendance(record: SerializableAttendanceRecord) {
-    const config = await getWhatsappConfig();
-    if (!config) return;
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken || !config.chatId) return;
 
     const status = record.status;
     const isClockOut = !!record.timestampPulang;
@@ -111,16 +139,6 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     if (isClockOut && !config.notifHadir) return; // Assume clock-out notif follows "hadir" setting
     if (['Sakit', 'Izin', 'Alfa', 'Dispen'].includes(status) && !config.notifAbsen) return;
     
-    const studentDocRef = doc(db, "students", record.studentId);
-    const studentSnap = await getDoc(studentDocRef);
-    const studentData = studentSnap.data() as Student;
-    const parentWaNumber = studentData?.parentWaNumber;
-
-    if (!parentWaNumber) {
-        console.log(`No WhatsApp number for parent of ${record.studentName}. Skipping notification.`);
-        return;
-    }
-
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     const classInfo = classSnap.data() as Class;
     
@@ -147,18 +165,15 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
         `⏰ *Jam*       : ${format(timestamp, "HH:mm:ss")}`,
-        `👋 *Status*    : *${finalStatus}*`,
-        "",
-        "--",
-        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
+        `👋 *Status*    : *${finalStatus}*`
     ];
     
     const message = messageLines.join("\n");
-    await sendWhatsappMessage(parentWaNumber, message);
+    await sendTelegramMessage(config.botToken, config.chatId, message);
 }
 
 /**
- * Sends a monthly recap notification to a parent via WhatsApp.
+ * Sends a monthly recap notification to the admin via Telegram.
  * @param studentData The student's full summary data for the month.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
@@ -168,13 +183,11 @@ export async function sendMonthlyRecapToParent(
     month: number,
     year: number
 ) {
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken || !config.chatId) return;
+
     const student = studentData.studentInfo;
     const summary = studentData.summary;
-
-    const studentDocRef = doc(db, "students", student.id);
-    const studentSnap = await getDoc(studentDocRef);
-    const parentWaNumber = (studentSnap.data() as Student)?.parentWaNumber;
-    if (!parentWaNumber) return; // Skip if parent WA is not registered
 
     const classSnap = await getDoc(doc(db, "classes", student.classId));
     const classInfo = classSnap.data() as Class;
@@ -186,12 +199,12 @@ export async function sendMonthlyRecapToParent(
         "🏫 *SMAS PGRI Naringgul*",
         `*Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
         "",
-        "Yth. Orang Tua/Wali dari:",
+        "Laporan untuk:",
         `👤 *Nama*      : ${student.nama}`,
         `🆔 *NISN*      : ${student.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
         "",
-        "Berikut adalah rekapitulasi kehadiran putra/putri Anda:",
+        "Berikut adalah rekapitulasi kehadiran:",
         `✅ *Total Hadir*      : ${totalHadir} hari`,
         `⏰ *Terlambat*      : ${summary.T} kali`,
         `🤒 *Sakit*         : ${summary.S} hari`,
@@ -200,17 +213,13 @@ export async function sendMonthlyRecapToParent(
         `❌ *Alfa*           : ${summary.A} hari`,
         "",
         `Dari total ${totalSchoolDays} hari sekolah efektif pada bulan ini.`,
-        "",
-        "--",
-        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
     ];
 
-    await sendWhatsappMessage(parentWaNumber, messageLines.join("\n"));
+    await sendTelegramMessage(config.botToken, config.chatId, messageLines.join("\n"));
 }
 
-
 /**
- * Sends a monthly recap for a class to the designated advisors' group chat via WhatsApp.
+ * Sends a monthly recap for a class to the designated advisors' group chat via Telegram.
  * @param className The name of the class being reported.
  * @param grade The grade of the class.
  * @param month The month of the recap (0-11).
@@ -224,8 +233,8 @@ export async function sendClassMonthlyRecap(
     year: number,
     summary: { [studentId: string]: MonthlySummaryData }
 ) {
-    const config = await getWhatsappConfig();
-    if (!config?.groupChatId) return;
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken || !config.groupChatId) return;
 
     let totalPresent = 0;
     let totalLate = 0;
@@ -260,22 +269,18 @@ export async function sendClassMonthlyRecap(
         `Total Izin: ${totalPermission}`,
         `Total Dispensasi: ${totalDispen}`,
         `Total Tanpa Keterangan (Alfa): ${totalAlfa}`,
-        "",
-        "--",
-        "_Pesan ini dikirim otomatis oleh sistem._"
     ];
 
-    await sendWhatsappMessage(config.groupChatId, messageLines.join("\n"));
+    await sendTelegramMessage(config.botToken, config.groupChatId, messageLines.join("\n"));
 }
 
 /**
- * Runs the automated process to send monthly recap reports to all parents and class advisors.
+ * Runs the automated process to send monthly recap reports to the admin and class advisors.
  * This function is designed to be triggered by a cron job.
  */
 export async function runMonthlyRecapAutomation() {
     console.log("Starting monthly recap automation process...");
     
-    // 1. Determine the target month (previous month)
     const today = new Date();
     const previousMonthDate = subMonths(today, 1);
     const targetMonth = getMonth(previousMonthDate);
@@ -283,7 +288,6 @@ export async function runMonthlyRecapAutomation() {
     
     console.log(`Targeting report for: ${format(previousMonthDate, "MMMM yyyy")}`);
 
-    // 2. Fetch all necessary data from Firestore
     const [classesSnapshot, studentsSnapshot, holidaysSnapshot] = await Promise.all([
         getDocs(collection(db, "classes")),
         getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
@@ -299,7 +303,6 @@ export async function runMonthlyRecapAutomation() {
         return;
     }
 
-    // 3. Fetch all attendance records for the target month
     const monthStart = startOfMonth(previousMonthDate);
     const monthEnd = endOfMonth(previousMonthDate);
     const studentIds = students.map(s => s.id);
@@ -322,7 +325,6 @@ export async function runMonthlyRecapAutomation() {
         attendanceSnapshot.forEach(doc => attendanceRecords.push(doc.data() as AutomationAttendanceRecord));
     }
 
-    // 4. Process data into summary format
     const holidayDateStrings = new Set<string>();
     holidays.forEach(holiday => {
         const start = holiday.startDate.toDate();
@@ -372,13 +374,13 @@ export async function runMonthlyRecapAutomation() {
         }
     });
 
-    // 5. Send notifications
-    // NOTE: The random delay is now handled inside sendWhatsappMessage, so we can remove the explicit delay here.
-    console.log(`Sending recaps to ${students.length} parents...`);
+    // Send to admin
+    console.log(`Sending recaps to admin...`);
     for (const studentData of Object.values(summary)) {
         await sendMonthlyRecapToParent(studentData, targetMonth, targetYear);
+        await new Promise(resolve => setTimeout(resolve, 500)); // Delay to avoid rate limiting
     }
-    console.log("Finished sending recaps to parents.");
+    console.log("Finished sending recaps to admin.");
 
     // Send to class advisor groups
     console.log("Sending recaps to class advisor groups...");
@@ -395,20 +397,101 @@ export async function runMonthlyRecapAutomation() {
         const classInfo = classes.find(c => c.id === classId);
         if (classInfo) {
             await sendClassMonthlyRecap(classInfo.name, classInfo.grade, targetMonth, targetYear, classSummaries[classId]);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Delay to avoid rate limiting
         }
     }
     console.log("Finished sending recaps to advisors.");
     console.log("Monthly recap automation process completed.");
 }
 
-// These functions below are now deprecated as we are not using a public webhook or manual polling for WhatsApp.
-export async function syncTelegramMessages(): Promise<{ success: boolean; message: string }> {
-    return { success: false, message: "This feature is deprecated for WhatsApp." };
+// --- Webhook Management Functions ---
+
+/**
+ * Sets up the Telegram webhook to point to our Vercel endpoint.
+ */
+async function setTelegramWebhook(): Promise<{ success: boolean; message: string }> {
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken) {
+        return { success: false, message: "Bot Token belum diatur." };
+    }
+
+    const vercelUrl = process.env.VERCEL_URL;
+    if (!vercelUrl) {
+        return { success: false, message: "URL Vercel tidak ditemukan. Pastikan variabel VERCEL_URL sudah diatur." };
+    }
+    const webhookUrl = `https://${vercelUrl}/api/telegram/webhook`;
+    const tgUrl = `https://api.telegram.org/bot${config.botToken}/setWebhook?url=${webhookUrl}`;
+
+    try {
+        const response = await fetch(tgUrl);
+        const data = await response.json();
+        if (data.ok) {
+            return { success: true, message: `Webhook berhasil diatur ke: ${webhookUrl}` };
+        } else {
+            return { success: false, message: `Gagal mengatur webhook: ${data.description}` };
+        }
+    } catch (error) {
+        return { success: false, message: "Gagal terhubung ke API Telegram." };
+    }
 }
+
+/**
+ * Deletes the currently set Telegram webhook.
+ */
 export async function deleteTelegramWebhook(): Promise<{ success: boolean; message: string }> {
-     return { success: false, message: "This feature is not applicable for WhatsApp." };
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken) {
+        return { success: false, message: "Bot Token belum diatur." };
+    }
+
+    const tgUrl = `https://api.telegram.org/bot${config.botToken}/deleteWebhook`;
+    try {
+        const response = await fetch(tgUrl);
+        const data = await response.json();
+        if (data.ok) {
+            return { success: true, message: "Webhook berhasil dihapus." };
+        } else {
+            return { success: false, message: `Gagal menghapus webhook: ${data.description}` };
+        }
+    } catch (error) {
+        return { success: false, message: "Gagal terhubung ke API Telegram." };
+    }
 }
-export async function processTelegramWebhook(payload: any) {
-    // Deprecated
-    return;
+
+
+/**
+ * Fetches new messages from Telegram manually. This is an alternative to using webhooks.
+ */
+export async function syncTelegramMessages(): Promise<{ success: boolean; message: string }> {
+    const config = await getTelegramConfig();
+    if (!config || !config.botToken) {
+        return { success: false, message: "Bot Token belum diatur." };
+    }
+
+    const lastUpdateIdDocRef = doc(db, "settings", "telegramState");
+    const lastUpdateIdSnap = await getDoc(lastUpdateIdDocRef);
+    const lastUpdateId = lastUpdateIdSnap.exists() ? lastUpdateIdSnap.data().lastUpdateId : 0;
+
+    const tgUrl = `https://api.telegram.org/bot${config.botToken}/getUpdates?offset=${lastUpdateId + 1}&limit=100`;
+
+    try {
+        const response = await fetch(tgUrl);
+        const data = await response.json();
+
+        if (data.ok && data.result.length > 0) {
+            for (const update of data.result) {
+                await processTelegramWebhook({ message: update.message });
+            }
+            const newLastUpdateId = data.result[data.result.length - 1].update_id;
+            await setDoc(lastUpdateIdDocRef, { lastUpdateId: newLastUpdateId });
+
+            return { success: true, message: `${data.result.length} pesan baru berhasil disinkronkan.` };
+        } else if (data.ok) {
+            return { success: true, message: "Tidak ada pesan baru." };
+        } else {
+            return { success: false, message: `Gagal mengambil pembaruan: ${data.description}` };
+        }
+    } catch (error) {
+        return { success: false, message: "Gagal terhubung ke API Telegram." };
+    }
 }
