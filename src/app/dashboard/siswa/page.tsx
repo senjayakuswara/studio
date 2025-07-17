@@ -109,7 +109,17 @@ export default function SiswaPage() {
   const { toast } = useToast()
 
   const classObjectMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
-  const classLookupMap = useMemo(() => new Map(classes.map(c => [`${c.grade.toUpperCase().replace(/\s/g, '')}|${c.name.toUpperCase().replace(/\s/g, '')}`, c.id])), [classes]);
+  
+  // Create a more robust lookup map that ignores case and whitespace
+  const classLookupMap = useMemo(() => {
+    const map = new Map<string, string>();
+    classes.forEach(c => {
+      const key = `${String(c.grade).toUpperCase().replace(/\s/g, '')}|${String(c.name).toUpperCase().replace(/\s/g, '')}`;
+      map.set(key, c.id);
+    });
+    return map;
+  }, [classes]);
+
   const classMapForPreview = useMemo(() => new Map(classes.map(c => [c.id, `${c.name} (${c.grade})`])), [classes]);
   
   const filteredStudents = useMemo(() => {
@@ -368,6 +378,7 @@ export default function SiswaPage() {
             const worksheet = workbook.Sheets[sheetName];
             const json: any[] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
             
+            // Remove header row
             json.shift();
 
             const studentNisnMap = new Map(students.map(s => [s.nisn, s]));
@@ -379,10 +390,11 @@ export default function SiswaPage() {
                 const className = String(row[3] || "").toUpperCase().replace(/\s/g, '');
                 const classId = classLookupMap.get(`${grade}|${className}`);
 
-                let jenisKelamin = String(row[4] || "").trim();
-                if (jenisKelamin.match(/^l(aki-?laki)?$/i)) {
+                let jkInput = String(row[4] || "").trim().toLowerCase();
+                let jenisKelamin: "Laki-laki" | "Perempuan" | undefined;
+                if (jkInput.startsWith('l')) {
                     jenisKelamin = "Laki-laki";
-                } else if (jenisKelamin.match(/^p(erempuan)?$/i)) {
+                } else if (jkInput.startsWith('p')) {
                     jenisKelamin = "Perempuan";
                 }
 
@@ -391,8 +403,8 @@ export default function SiswaPage() {
                     nama: String(row[1] || "").trim(),
                     classId: classId,
                     jenisKelamin: jenisKelamin,
-                    parentWaNumber: String(row[5] || "").trim() || undefined,
-                    status: String(row[6] || "Aktif").trim()
+                    parentWaNumber: String(row[5] || "").trim().replace(/\D/g, '') || undefined,
+                    status: String(row[6] || "Aktif").trim(),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -440,7 +452,7 @@ export default function SiswaPage() {
                  toast({
                     variant: "destructive",
                     title: "Gagal Memproses File",
-                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Tingkat' dan 'Nama Kelas' di file Excel sudah terdaftar di Manajemen Kelas.",
+                    description: "Tidak ada data siswa yang valid ditemukan. Pastikan 'Tingkat' dan 'Nama Kelas' di file Excel sudah terdaftar di Manajemen Kelas dan formatnya benar.",
                 });
             }
 
