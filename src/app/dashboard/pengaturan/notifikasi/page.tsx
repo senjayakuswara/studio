@@ -5,10 +5,11 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { doc, getDoc, setDoc } from "firebase/firestore"
-import { Loader2, Info, RefreshCw } from "lucide-react"
+import { Loader2, Info } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
+import { getWhatsappClient } from "@/services/whatsapp-service";
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -16,25 +17,23 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { syncTelegramMessages, deleteTelegramWebhook } from "@/ai/flows/telegram-flow"
 
-const telegramSettingsSchema = z.object({
+const whatsappSettingsSchema = z.object({
   groupChatId: z.string().optional().describe("Untuk notifikasi rekap ke grup wali kelas"),
   notifHadir: z.boolean().default(true),
   notifTerlambat: z.boolean().default(true),
   notifAbsen: z.boolean().default(true),
 });
 
-type TelegramSettings = z.infer<typeof telegramSettingsSchema>;
+type WhatsappSettings = z.infer<typeof whatsappSettingsSchema>;
 
 export default function NotifikasiPage() {
     const [isLoading, setIsLoading] = useState(true);
-    const [isSyncing, setIsSyncing] = useState(false);
-    const [isResetting, setIsResetting] = useState(false);
+    const [isInitializing, setIsInitializing] = useState(false);
     const { toast } = useToast();
 
-    const form = useForm<TelegramSettings>({
-        resolver: zodResolver(telegramSettingsSchema),
+    const form = useForm<WhatsappSettings>({
+        resolver: zodResolver(whatsappSettingsSchema),
         defaultValues: {
             groupChatId: "",
             notifHadir: true,
@@ -47,13 +46,14 @@ export default function NotifikasiPage() {
         async function fetchSettings() {
             setIsLoading(true);
             try {
+                // We reuse the same document for simplicity
                 const docRef = doc(db, "settings", "telegramConfig");
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
-                    form.reset(docSnap.data() as TelegramSettings);
+                    form.reset(docSnap.data() as WhatsappSettings);
                 }
             } catch (error) {
-                console.error("Error fetching telegram settings:", error);
+                console.error("Error fetching whatsapp settings:", error);
                 toast({
                     variant: "destructive",
                     title: "Gagal Memuat Pengaturan",
@@ -66,12 +66,12 @@ export default function NotifikasiPage() {
         fetchSettings();
     }, [form, toast]);
 
-    async function onSubmit(values: TelegramSettings) {
+    async function onSubmit(values: WhatsappSettings) {
         try {
             await setDoc(doc(db, "settings", "telegramConfig"), values, { merge: true });
             toast({
                 title: "Pengaturan Disimpan",
-                description: "Pengaturan notifikasi Telegram telah berhasil diperbarui.",
+                description: "Pengaturan notifikasi WhatsApp telah berhasil diperbarui.",
             });
         } catch (error) {
             console.error("Error saving settings:", error);
@@ -83,45 +83,28 @@ export default function NotifikasiPage() {
         }
     }
 
-    async function handleSyncMessages() {
-        setIsSyncing(true);
+    async function handleInitializeClient() {
+        setIsInitializing(true);
         toast({
-            title: "Memeriksa Pesan...",
-            description: "Menghubungi server Telegram untuk mengambil pesan baru.",
+            title: "Memulai Koneksi WhatsApp...",
+            description: "Silakan periksa terminal/konsol untuk melihat QR Code jika diperlukan.",
         });
-        const result = await syncTelegramMessages();
-
-        if (result.success) {
-            toast({
-                title: "Sinkronisasi Selesai",
-                description: result.message,
+        
+        try {
+            await getWhatsappClient();
+             toast({
+                title: "Koneksi WhatsApp Siap",
+                description: "Klien berhasil terhubung. Anda bisa mulai mengirim notifikasi.",
             });
-        } else {
-            toast({
+        } catch (error: any) {
+             toast({
                 variant: "destructive",
-                title: "Sinkronisasi Gagal",
-                description: result.message,
+                title: "Koneksi Gagal",
+                description: `Gagal terhubung ke WhatsApp: ${error.message}`,
             });
+        } finally {
+            setIsInitializing(false);
         }
-        setIsSyncing(false);
-    }
-    
-    async function handleResetWebhook() {
-        setIsResetting(true);
-        const result = await deleteTelegramWebhook();
-        if (result.success) {
-            toast({
-                title: "Koneksi Berhasil Direset",
-                description: result.message,
-            });
-        } else {
-            toast({
-                variant: "destructive",
-                title: "Reset Gagal",
-                description: result.message,
-            });
-        }
-        setIsResetting(false);
     }
 
     return (
@@ -129,23 +112,30 @@ export default function NotifikasiPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="font-headline text-3xl font-bold tracking-tight">Pengaturan Notifikasi</h1>
-                    <p className="text-muted-foreground">Konfigurasi notifikasi Telegram.</p>
+                    <p className="text-muted-foreground">Konfigurasi notifikasi WhatsApp.</p>
                 </div>
+                 <Button
+                    onClick={handleInitializeClient}
+                    disabled={isInitializing}
+                >
+                    {isInitializing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isInitializing ? "Menghubungkan..." : "Hubungkan ke WhatsApp"}
+                </Button>
             </div>
-             <Alert>
+             <Alert variant="destructive">
                 <Info className="h-4 w-4" />
-                <AlertTitle>Konfigurasi Bot & Pesan Masuk</AlertTitle>
+                <AlertTitle>Peringatan Penting</AlertTitle>
                 <AlertDescription>
-                  Token Bot Telegram dikelola melalui `TELEGRAM_BOT_TOKEN` di server. Untuk memproses pendaftaran, klik **Periksa Pesan Baru**. Jika terjadi error karena webhook aktif, klik **Reset Koneksi Webhook** terlebih dahulu.
+                  Metode ini menggunakan otomatisasi yang melanggar aturan WhatsApp dan dapat menyebabkan nomor Anda diblokir permanen. Gunakan nomor sekali pakai. Untuk memulai, klik "Hubungkan ke WhatsApp" dan pindai QR Code yang muncul di terminal tempat Anda menjalankan `npm run dev`.
                 </AlertDescription>
             </Alert>
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)}>
                     <Card>
                         <CardHeader>
-                            <CardTitle>Integrasi Telegram</CardTitle>
+                            <CardTitle>Integrasi WhatsApp</CardTitle>
                             <CardDescription>
-                                Hubungkan bot Telegram untuk mengirim notifikasi absensi otomatis ke orang tua dan wali kelas.
+                                Atur jenis notifikasi yang akan dikirim via WhatsApp ke orang tua dan wali kelas.
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-8">
@@ -164,10 +154,10 @@ export default function NotifikasiPage() {
                                             <FormItem>
                                                 <FormLabel>Group Chat ID (untuk Wali Kelas)</FormLabel>
                                                 <FormControl>
-                                                    <Input placeholder="(Opsional) Masukkan Chat ID grup/channel wali kelas" {...field} />
+                                                    <Input placeholder="(Opsional) Masukkan ID Grup WhatsApp" {...field} />
                                                 </FormControl>
                                                 <FormDescription>
-                                                    ID ini digunakan untuk mengirim rekapitulasi bulanan per kelas ke grup wali kelas.
+                                                    ID ini digunakan untuk mengirim rekapitulasi bulanan per kelas ke grup wali kelas. Format: `[nomor]@g.us`.
                                                 </FormDescription>
                                                 <FormMessage />
                                             </FormItem>
@@ -241,24 +231,6 @@ export default function NotifikasiPage() {
                         </CardContent>
                     </Card>
                     <div className="mt-6 flex flex-wrap justify-end gap-2">
-                        <Button
-                           variant="destructive"
-                           type="button"
-                           onClick={handleResetWebhook}
-                           disabled={isResetting || isLoading || form.formState.isSubmitting}
-                        >
-                            {isResetting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Reset Koneksi Webhook
-                        </Button>
-                        <Button
-                           variant="outline"
-                           type="button"
-                           onClick={handleSyncMessages}
-                           disabled={isSyncing || isLoading || form.formState.isSubmitting}
-                        >
-                            {isSyncing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Periksa Pesan Baru
-                        </Button>
                         <Button type="submit" disabled={form.formState.isSubmitting || isLoading}>
                           {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                           Simpan Pengaturan

@@ -91,6 +91,7 @@ export default function RekapitulasiPage() {
     const [holidays, setHolidays] = useState<Holiday[]>([]);
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
+    const [isSending, setIsSending] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const { toast } = useToast()
     
@@ -144,13 +145,13 @@ export default function RekapitulasiPage() {
         fetchInitialData();
     }, [toast]);
 
-    // --- MONTHLY REPORT LOGIC ---
-    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
+    const generateSummaryData = async (forPDF: boolean): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
         if (!selectedTarget) {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat." });
             return null;
         }
-        setIsGenerating(true);
+        if (forPDF) setIsGenerating(true); else setIsSending(true);
+
         try {
             let classIdsToQuery: string[] = [];
             if (selectedTarget.startsWith("grade-")) {
@@ -267,7 +268,7 @@ export default function RekapitulasiPage() {
              toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat memproses data absensi." });
              return null;
         } finally {
-            setIsGenerating(false);
+            if (forPDF) setIsGenerating(false); else setIsSending(false);
         }
     }
 
@@ -276,20 +277,20 @@ export default function RekapitulasiPage() {
             toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
             return;
         }
-        const data = await generateSummaryData();
+        const data = await generateSummaryData(true);
         if (data) {
             generateMonthlyPdf(data.summary, data.students, selectedTarget, data.holidayDateStrings);
         }
     }
 
-    const handleSendTeleReport = async () => {
-        const data = await generateSummaryData();
+    const handleSendWhatsappReport = async () => {
+        const data = await generateSummaryData(false);
         if (!data || Object.keys(data.summary).length === 0) {
             toast({ title: "Tidak Ada Data", description: "Tidak ada data untuk dikirim." });
             return;
         }
         
-        toast({ title: "Memulai Pengiriman...", description: `Mengirim ${Object.keys(data.summary).length} rekap ke orang tua...` });
+        toast({ title: "Memulai Pengiriman...", description: `Mengirim ${Object.keys(data.summary).length} rekap via WhatsApp...` });
 
         for (const studentData of Object.values(data.summary)) {
             await sendMonthlyRecapToParent(studentData, selectedMonth, selectedYear);
@@ -409,7 +410,7 @@ export default function RekapitulasiPage() {
                     const dateString = format(new Date(selectedYear, selectedMonth, dayIndex + 1), 'yyyy-MM-dd');
                     const dayOfWeek = getDay(new Date(selectedYear, selectedMonth, dayIndex + 1));
                     if (holidayDateStrings.has(dateString) || dayOfWeek === 0) {
-                        doc.setFillColor(229, 231, 235); // Light gray
+                        doc.setFillColor(229, 231, 235);
                     }
                 }
             }
@@ -440,7 +441,6 @@ export default function RekapitulasiPage() {
         doc.save(`Laporan_Bulanan_${fileNameScope}_${format(new Date(selectedYear, selectedMonth), "MMMM_yyyy")}.pdf`);
     }
 
-    // --- INDIVIDUAL REPORT LOGIC ---
     const handleGenerateIndividualReport = async () => {
         if (!reportConfig) {
             toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
@@ -610,11 +610,11 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleSendTeleReport} disabled={isGenerating || isLoading || !selectedTarget}>
-                                    {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    {isGenerating ? 'Mengirim...' : 'Kirim Rekap via Telegram'}
+                                <Button onClick={handleSendWhatsappReport} disabled={isGenerating || isLoading || !selectedTarget || isSending}>
+                                    {isSending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    {isSending ? 'Mengirim...' : 'Kirim Rekap via WhatsApp'}
                                 </Button>
-                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>
+                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget || isSending}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
                                 </Button>

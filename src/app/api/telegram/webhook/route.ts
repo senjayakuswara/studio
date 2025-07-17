@@ -1,17 +1,16 @@
-import { processTelegramWebhook } from "@/ai/flows/telegram-flow";
 import { NextResponse } from "next/server";
 
+// This endpoint is no longer used with the whatsapp-web.js implementation.
+// It is kept here to prevent 404 errors if Telegram tries to call it.
+// In a real-world scenario with whatsapp-web.js, incoming messages would be handled
+// by the 'message' event listener in the whatsapp-service.
 export async function POST(request: Request) {
     try {
         const payload = await request.json();
-        // Await the function to ensure it completes before the server responds.
-        await processTelegramWebhook(payload);
-        // Return an empty 200 OK response to acknowledge receipt of the update
+        console.log("Received a request on the old Telegram webhook endpoint. Ignoring.", payload);
         return new NextResponse(null, { status: 200 });
     } catch (error) {
-        console.error("Error in Telegram webhook:", error);
-        // It's better to still return a 200 OK to Telegram to avoid retry loops
-        // unless the request is truly malformed.
+        console.error("Error in deprecated Telegram webhook:", error);
         return new NextResponse(null, { status: 200 });
     }
 }

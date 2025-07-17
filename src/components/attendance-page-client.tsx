@@ -165,7 +165,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, []);
 
-    const serializableRecordForTele = (record: AttendanceRecord): SerializableAttendanceRecord => {
+    const serializableRecordForWa = (record: AttendanceRecord): SerializableAttendanceRecord => {
         return {
             ...record,
             id: record.id ?? undefined,
@@ -179,7 +179,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         async function fetchData() {
             setIsLoading(true)
             try {
-                // Fetch classes for the specific grade
                 const classQuery = query(collection(db, "classes"), where("grade", "==", grade))
                 const classSnapshot = await getDocs(classQuery)
                 const classList = classSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
@@ -188,7 +187,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
                 const localClassMap = new Map(classList.map(c => [c.id, c]));
 
-                // Fetch school hours settings
                 const hoursDocRef = doc(db, "settings", "schoolHours");
                 const hoursDocSnap = await getDoc(hoursDocRef);
                 if (hoursDocSnap.exists()) {
@@ -198,7 +196,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     toast({ variant: "destructive", title: "Pengaturan Jam Tidak Ditemukan", description: "Harap atur jam sekolah terlebih dahulu di menu pengaturan." });
                 }
                 
-                // Fetch students if classes exist
                 if (classList.length > 0) {
                     const studentQuery = query(collection(db, "students"), where("classId", "in", classList.map(c => c.id)));
                     const studentSnapshot = await getDocs(studentQuery);
@@ -212,7 +209,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     });
                     setAllStudents(studentList);
 
-                    // Fetch today's attendance records for these students
                     const studentIds = studentList.map(s => s.id);
                     if (studentIds.length > 0) {
                         const todayStart = startOfDay(new Date());
@@ -259,13 +255,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         fetchData()
     }, [grade, toast, addLog])
     
-    // Effect to manage the scanner lifecycle
     useEffect(() => {
-        // Create a scanner instance on mount
         const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
         html5QrCodeRef.current = scanner;
 
-        // Cleanup function to stop scanning on unmount
         return () => {
             if (scanner?.isScanning) {
                 scanner.stop().catch(err => {
@@ -325,7 +318,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const jamPulangTime = new Date();
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
     
-            // --- Logic for Clock-in ---
             if (!existingRecord || !existingRecord.timestampMasuk) {
                  if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
@@ -365,9 +357,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
                 playSound('success');
                 
-                notifyParentOnAttendance(serializableRecordForTele(newRecord));
+                notifyParentOnAttendance(serializableRecordForWa(newRecord));
             } 
-            // --- Logic for Clock-out ---
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
                     addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
@@ -386,7 +377,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  toast({ title: "Absen Pulang Berhasil" });
                  playSound('success');
                 
-                 notifyParentOnAttendance(serializableRecordForTele(updatedRecord as AttendanceRecord));
+                 notifyParentOnAttendance(serializableRecordForWa(updatedRecord as AttendanceRecord));
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
@@ -404,7 +395,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setTimeout(() => {
               processingLock.current = false;
               setIsProcessing(false);
-            }, 2000); // Cooldown to prevent double scans
+            }, 2000); 
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
@@ -492,7 +483,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
             
-            notifyParentOnAttendance(serializableRecordForTele(newRecord));
+            notifyParentOnAttendance(serializableRecordForWa(newRecord));
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');

@@ -1,12 +1,11 @@
 'use server';
 /**
- * @fileOverview Handles all Telegram bot interactions.
- * - processTelegramWebhook: Processes incoming messages from the Telegram webhook for user registration.
+ * @fileOverview Handles all student and parent notifications.
+ * This file is now responsible for sending notifications via WhatsApp.
+ * - processWhatsappRegistration: Handles new user registrations via WhatsApp. (Placeholder for future)
  * - notifyParentOnAttendance: Sends daily attendance notifications to parents.
  * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
  * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
- * - syncTelegramMessages: Fetches and processes new messages from Telegram upon manual request.
- * - deleteTelegramWebhook: Removes the currently active webhook from the bot.
  * - runMonthlyRecapAutomation: Runs the entire monthly recap process automatically for all classes.
  */
 
@@ -14,9 +13,10 @@ import { collection, doc, getDoc, getDocs, query, updateDoc, where, Timestamp, s
 import { db } from "@/lib/firebase";
 import { format, subMonths, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, getDaysInMonth } from "date-fns";
 import { id as localeID } from "date-fns/locale";
+import { sendWhatsappMessage } from "@/services/whatsapp-service";
 
 // Types
-type TelegramSettings = {
+type WhatsappSettings = {
   groupChatId?: string;
   notifHadir: boolean;
   notifTerlambat: boolean;
@@ -24,7 +24,7 @@ type TelegramSettings = {
 };
 
 type Class = { id: string; name: string; grade: string };
-type Student = { id: string; nisn: string; nama: string; classId: string };
+type Student = { id: string; nisn: string; nama: string; classId: string, parentWaNumber?: string };
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceRecord = {
   id?: string
@@ -66,154 +66,40 @@ type MonthlySummary = {
     [studentId: string]: MonthlySummaryData
 }
 
-// Internal helper to get bot token from environment variables
-function getBotToken(): string | null {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) {
-        console.error("TELEGRAM_BOT_TOKEN environment variable not set.");
-        return null;
-    }
-    return token;
-}
-
-// Internal helper to get Telegram config from Firestore
-async function getTelegramConfig(): Promise<TelegramSettings | null> {
+// Internal helper to get WhatsApp config from Firestore
+async function getWhatsappConfig(): Promise<WhatsappSettings | null> {
     try {
+        // We reuse the telegramConfig doc for whatsapp settings to avoid migration
         const docRef = doc(db, "settings", "telegramConfig");
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-            return docSnap.data() as TelegramSettings;
+            return docSnap.data() as WhatsappSettings;
         }
         return null;
     } catch (error) {
-        console.error("Error fetching Telegram config:", error);
+        console.error("Error fetching Whatsapp config:", error);
         return null;
-    }
-}
-
-// Internal helper to send a message via Telegram API
-async function sendTelegramMessage(botToken: string, chatId: string, text: string) {
-    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-            }),
-        });
-        if (!response.ok) {
-            const errorData = await response.json();
-            console.error("Telegram API Error:", errorData.description, errorData);
-        }
-    } catch (error) {
-        console.error("Failed to send Telegram message:", error);
     }
 }
 
 /**
- * Processes a single incoming update (message) from Telegram.
- * Handles user registration by matching NISN to a student.
- * @param payload The update object from Telegram.
+ * Placeholder for future WhatsApp registration logic.
+ * Currently, parent WA numbers must be added manually in the student management page.
  */
-export async function processTelegramWebhook(payload: any) {
-    const botToken = getBotToken();
-    if (!botToken) {
-        console.error("Bot token not configured on server.");
-        return;
-    }
-
-    const message = payload.message || payload.edited_message;
-    if (!message) {
-        return;
-    }
-
-    const chatId = message.chat?.id;
-    const text = message.text?.trim();
-
-    if (!chatId || !text) {
-        return;
-    }
-
-    // Handle /start command
-    if (text === '/start') {
-        const welcomeMessage = "👋 Selamat datang di layanan Notifikasi AbsensiKu Cerdas untuk SMAS PGRI Naringgul.\n\nSistem ini akan menghubungkan satu akun Telegram dengan satu siswa. Untuk memulai, silakan balas pesan ini dengan Nomor Induk Siswa Nasional (NISN) putra/putri Anda.";
-        await sendTelegramMessage(botToken, String(chatId), welcomeMessage);
-        return;
-    }
-    
-    // Handle NISN (numeric input)
-    if (/^\d+$/.test(text)) {
-        const nisn = text;
-        const stringChatId = String(chatId);
-
-        try {
-            // 1. Check if this Telegram account (chatId) is already linked to ANY student.
-            const chatQuery = query(collection(db, "students"), where("parentChatId", "==", stringChatId));
-            const chatSnapshot = await getDocs(chatQuery);
-
-            if (!chatSnapshot.empty) {
-                const linkedStudent = chatSnapshot.docs[0].data();
-                if (linkedStudent.nisn === nisn) {
-                    const alreadyRegisteredMessage = `✅ Akun Anda Sudah Terdaftar\n\nAkun Telegram ini sudah terhubung dengan siswa atas nama ${linkedStudent.nama}. Anda tidak perlu mendaftar lagi.`;
-                    await sendTelegramMessage(botToken, stringChatId, alreadyRegisteredMessage);
-                } else {
-                    const chatInUseMessage = `⚠️ Pendaftaran Gagal\n\nAkun Telegram Anda sudah terdaftar untuk siswa lain (${linkedStudent.nama}). Satu akun hanya bisa terhubung ke satu siswa.`;
-                    await sendTelegramMessage(botToken, stringChatId, chatInUseMessage);
-                }
-                return;
-            }
-
-            // 2. If the chat ID is free, check the status of the NISN.
-            const nisnQuery = query(collection(db, "students"), where("nisn", "==", nisn));
-            const nisnSnapshot = await getDocs(nisnQuery);
-
-            if (nisnSnapshot.empty) {
-                const notFoundMessage = `⚠️ NISN Tidak Ditemukan\n\nNISN ${nisn} tidak terdaftar dalam sistem kami. Mohon periksa kembali nomor tersebut dan coba lagi.`;
-                await sendTelegramMessage(botToken, stringChatId, notFoundMessage);
-                return;
-            }
-            
-            // 3. Check if the student found by NISN is already claimed by another parent.
-            const studentDoc = nisnSnapshot.docs[0];
-            const studentData = studentDoc.data();
-
-            if (studentData.parentChatId && studentData.parentChatId !== "") {
-                const nisnClaimedMessage = `⚠️ Pendaftaran Gagal\n\nSiswa atas nama ${studentData.nama} (NISN: ${nisn}) sudah terhubung dengan akun Telegram lain. Hubungi administrator jika Anda yakin ini adalah sebuah kesalahan.`;
-                await sendTelegramMessage(botToken, stringChatId, nisnClaimedMessage);
-                return;
-            }
-
-            // 4. All checks passed. Link the account.
-            await updateDoc(doc(db, "students", studentDoc.id), {
-                parentChatId: stringChatId
-            });
-            const successMessage = `✅ Pendaftaran Berhasil!\n\nAkun Telegram Anda telah berhasil terhubung dengan data absensi atas nama ${studentData.nama}.\n\nAnda akan mulai menerima notifikasi absensi.`;
-            await sendTelegramMessage(botToken, stringChatId, successMessage);
-
-        } catch (error) {
-            console.error("Error during NISN registration:", error);
-            const errorMessage = "Terjadi kesalahan pada sistem saat pendaftaran. Mohon coba lagi nanti.";
-            await sendTelegramMessage(botToken, stringChatId, errorMessage);
-        }
-        return;
-    }
-
-    // Handle any other message
-    const defaultReply = "ℹ️ Perintah tidak dikenali.\n\nJika Anda ingin mendaftar, silakan kirimkan NISN putra/putri Anda. Jika Anda ingin memulai dari awal, gunakan perintah /start.";
-    await sendTelegramMessage(botToken, String(chatId), defaultReply);
+export async function processWhatsappRegistration(payload: any) {
+    console.log("Received WhatsApp payload:", payload);
+    // This is where you would handle incoming messages from parents,
+    // for example, a "DAFTAR <NISN>" message to link their number.
+    // For now, we do nothing.
+    return;
 }
 
 /**
- * Formats and sends a daily attendance notification to a parent.
+ * Formats and sends a daily attendance notification to a parent via WhatsApp.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyParentOnAttendance(record: SerializableAttendanceRecord) {
-    const botToken = getBotToken();
-    if (!botToken) return;
-
-    const config = await getTelegramConfig();
+    const config = await getWhatsappConfig();
     if (!config) return;
 
     const status = record.status;
@@ -227,8 +113,13 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     
     const studentDocRef = doc(db, "students", record.studentId);
     const studentSnap = await getDoc(studentDocRef);
-    const parentChatId = studentSnap.data()?.parentChatId;
-    if (!parentChatId) return;
+    const studentData = studentSnap.data() as Student;
+    const parentWaNumber = studentData?.parentWaNumber;
+
+    if (!parentWaNumber) {
+        console.log(`No WhatsApp number for parent of ${record.studentName}. Skipping notification.`);
+        return;
+    }
 
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     const classInfo = classSnap.data() as Class;
@@ -249,25 +140,25 @@ export async function notifyParentOnAttendance(record: SerializableAttendanceRec
     }
 
     const messageLines = [
-        "🏫 SMAS PGRI Naringgul",
-        title,
+        "🏫 *SMAS PGRI Naringgul*",
+        `*${title}*`,
         "",
-        `👤 Nama      : ${record.studentName}`,
-        `🆔 NISN      : ${record.nisn}`,
-        `📚 Kelas     : ${classInfo.name}`,
-        `⏰ Jam       : ${format(timestamp, "HH:mm:ss")}`,
-        `👋 Status    : ${finalStatus}`,
+        `👤 *Nama*      : ${record.studentName}`,
+        `🆔 *NISN*      : ${record.nisn}`,
+        `📚 *Kelas*     : ${classInfo.name}`,
+        `⏰ *Jam*       : ${format(timestamp, "HH:mm:ss")}`,
+        `👋 *Status*    : *${finalStatus}*`,
         "",
         "--",
-        "Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas."
+        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
     ];
     
     const message = messageLines.join("\n");
-    await sendTelegramMessage(botToken, parentChatId, message);
+    await sendWhatsappMessage(parentWaNumber, message);
 }
 
 /**
- * Sends a monthly recap notification to a parent.
+ * Sends a monthly recap notification to a parent via WhatsApp.
  * @param studentData The student's full summary data for the month.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
@@ -277,16 +168,13 @@ export async function sendMonthlyRecapToParent(
     month: number,
     year: number
 ) {
-    const botToken = getBotToken();
-    if (!botToken) return;
-
     const student = studentData.studentInfo;
     const summary = studentData.summary;
 
     const studentDocRef = doc(db, "students", student.id);
     const studentSnap = await getDoc(studentDocRef);
-    const parentChatId = studentSnap.data()?.parentChatId;
-    if (!parentChatId) return; // Skip if parent is not registered
+    const parentWaNumber = (studentSnap.data() as Student)?.parentWaNumber;
+    if (!parentWaNumber) return; // Skip if parent WA is not registered
 
     const classSnap = await getDoc(doc(db, "classes", student.classId));
     const classInfo = classSnap.data() as Class;
@@ -295,34 +183,34 @@ export async function sendMonthlyRecapToParent(
     const totalHadir = summary.H + summary.T; // Hadir + Terlambat
 
     const messageLines = [
-        "🏫 SMAS PGRI Naringgul",
-        `Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
+        "🏫 *SMAS PGRI Naringgul*",
+        `*Laporan Bulanan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}*`,
         "",
         "Yth. Orang Tua/Wali dari:",
-        `👤 Nama      : ${student.nama}`,
-        `🆔 NISN      : ${student.nisn}`,
-        `📚 Kelas     : ${classInfo.name}`,
+        `👤 *Nama*      : ${student.nama}`,
+        `🆔 *NISN*      : ${student.nisn}`,
+        `📚 *Kelas*     : ${classInfo.name}`,
         "",
         "Berikut adalah rekapitulasi kehadiran putra/putri Anda:",
-        `✅ Total Hadir      : ${totalHadir} hari`,
-        `⏰ Terlambat      : ${summary.T} kali`,
-        `🤒 Sakit         : ${summary.S} hari`,
-        `✉️ Izin          : ${summary.I} hari`,
-        `✈️ Dispen        : ${summary.D} hari`,
-        `❌ Alfa           : ${summary.A} hari`,
+        `✅ *Total Hadir*      : ${totalHadir} hari`,
+        `⏰ *Terlambat*      : ${summary.T} kali`,
+        `🤒 *Sakit*         : ${summary.S} hari`,
+        `✉️ *Izin*          : ${summary.I} hari`,
+        `✈️ *Dispen*        : ${summary.D} hari`,
+        `❌ *Alfa*           : ${summary.A} hari`,
         "",
         `Dari total ${totalSchoolDays} hari sekolah efektif pada bulan ini.`,
         "",
         "--",
-        "Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas."
+        "_Pesan ini dikirim otomatis oleh sistem. Mohon tidak membalas._"
     ];
 
-    await sendTelegramMessage(botToken, parentChatId, messageLines.join("\n"));
+    await sendWhatsappMessage(parentWaNumber, messageLines.join("\n"));
 }
 
 
 /**
- * Sends a monthly recap for a class to the designated advisors' group chat.
+ * Sends a monthly recap for a class to the designated advisors' group chat via WhatsApp.
  * @param className The name of the class being reported.
  * @param grade The grade of the class.
  * @param month The month of the recap (0-11).
@@ -336,10 +224,7 @@ export async function sendClassMonthlyRecap(
     year: number,
     summary: { [studentId: string]: MonthlySummaryData }
 ) {
-    const botToken = getBotToken();
-    if (!botToken) return;
-
-    const config = await getTelegramConfig();
+    const config = await getWhatsappConfig();
     if (!config?.groupChatId) return;
 
     let totalPresent = 0;
@@ -362,13 +247,13 @@ export async function sendClassMonthlyRecap(
     const totalKehadiran = totalPresent + totalLate;
 
     const messageLines = [
-        "🏫 Laporan Bulanan untuk Wali Kelas",
-        `Kelas: ${className} (${grade})`,
-        `Periode: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
+        "🏫 *Laporan Bulanan untuk Wali Kelas*",
+        `*Kelas:* ${className} (${grade})`,
+        `*Periode:* ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
         "",
         `Berikut adalah rekapitulasi absensi kolektif untuk ${totalStudents} siswa di kelas Anda:`,
         "",
-        "📈 STATISTIK KELAS:",
+        "📈 *STATISTIK KELAS:*",
         `Total Kehadiran (Hadir+Terlambat): ${totalKehadiran}`,
         `Total Terlambat: ${totalLate}`,
         `Total Sakit: ${totalSick}`,
@@ -377,94 +262,10 @@ export async function sendClassMonthlyRecap(
         `Total Tanpa Keterangan (Alfa): ${totalAlfa}`,
         "",
         "--",
-        "Pesan ini dikirim otomatis oleh sistem."
+        "_Pesan ini dikirim otomatis oleh sistem._"
     ];
 
-    await sendTelegramMessage(botToken, config.groupChatId, messageLines.join("\n"));
-}
-
-
-/**
- * Fetches new messages from Telegram, processes them, and updates the last processed ID.
- * This is an alternative to using webhooks, triggered manually by the user.
- * @returns An object indicating success or failure, with a message.
- */
-export async function syncTelegramMessages(): Promise<{ success: boolean; message: string }> {
-    const botToken = getBotToken();
-    if (!botToken) {
-        return { success: false, message: "Token bot tidak diatur di file .env server." };
-    }
-
-    // 1. Get last processed update_id
-    const stateDocRef = doc(db, "settings", "telegramState");
-    const stateDocSnap = await getDoc(stateDocRef);
-    const lastUpdateId = stateDocSnap.exists() ? stateDocSnap.data().lastUpdateId || 0 : 0;
-    const offset = lastUpdateId + 1;
-
-    // 2. Fetch updates from Telegram using the getUpdates method
-    const url = `https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=10`;
-    let updates: any[] = [];
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        if (!data.ok) {
-            console.error("Telegram getUpdates API Error:", data.description);
-            return { success: false, message: `Gagal mengambil pesan: ${data.description}` };
-        }
-        updates = data.result;
-    } catch (error) {
-        console.error("Failed to fetch Telegram updates:", error);
-        return { success: false, message: "Gagal terhubung ke server Telegram. Periksa koneksi jaringan server." };
-    }
-
-    if (updates.length === 0) {
-        return { success: true, message: "Tidak ada pesan baru untuk diproses." };
-    }
-
-    // 3. Process each update sequentially
-    let highestUpdateId = lastUpdateId;
-    for (const update of updates) {
-        try {
-            // processTelegramWebhook is designed to handle one update object at a time
-            await processTelegramWebhook(update); 
-        } catch (e) {
-            console.error(`Error processing update ID ${update.update_id}:`, e);
-            // Continue to the next update even if one fails
-        }
-        highestUpdateId = Math.max(highestUpdateId, update.update_id);
-    }
-
-    // 4. Save the new highest update_id to prevent re-processing
-    if (highestUpdateId > lastUpdateId) {
-        await setDoc(stateDocRef, { lastUpdateId: highestUpdateId }, { merge: true });
-    }
-
-    return { success: true, message: `Berhasil memproses ${updates.length} pesan baru.` };
-}
-
-/**
- * Deletes the bot's webhook, allowing getUpdates to be used.
- * @returns An object indicating success or failure.
- */
-export async function deleteTelegramWebhook(): Promise<{ success: boolean; message: string }> {
-    const botToken = getBotToken();
-    if (!botToken) {
-        return { success: false, message: "Token bot tidak diatur di file .env server." };
-    }
-
-    const url = `https://api.telegram.org/bot${botToken}/deleteWebhook`;
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
-        if (data.ok) {
-            return { success: true, message: "Webhook berhasil dihapus. Anda sekarang dapat menggunakan sinkronisasi manual." };
-        } else {
-            return { success: false, message: `Gagal menghapus webhook: ${data.description}` };
-        }
-    } catch (error) {
-        console.error("Failed to delete webhook:", error);
-        return { success: false, message: "Gagal terhubung ke server Telegram." };
-    }
+    await sendWhatsappMessage(config.groupChatId, messageLines.join("\n"));
 }
 
 /**
@@ -577,7 +378,7 @@ export async function runMonthlyRecapAutomation() {
     for (const studentData of Object.values(summary)) {
         await sendMonthlyRecapToParent(studentData, targetMonth, targetYear);
         // Add a small delay to avoid hitting rate limits
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased delay for WhatsApp
     }
     console.log("Finished sending recaps to parents.");
 
@@ -596,9 +397,21 @@ export async function runMonthlyRecapAutomation() {
         const classInfo = classes.find(c => c.id === classId);
         if (classInfo) {
             await sendClassMonthlyRecap(classInfo.name, classInfo.grade, targetMonth, targetYear, classSummaries[classId]);
-            await new Promise(resolve => setTimeout(resolve, 300));
+            await new Promise(resolve => setTimeout(resolve, 3000));
         }
     }
     console.log("Finished sending recaps to advisors.");
     console.log("Monthly recap automation process completed.");
+}
+
+// These functions below are now deprecated as we are not using a public webhook or manual polling for WhatsApp.
+export async function syncTelegramMessages(): Promise<{ success: boolean; message: string }> {
+    return { success: false, message: "This feature is deprecated for WhatsApp." };
+}
+export async function deleteTelegramWebhook(): Promise<{ success: boolean; message: string }> {
+     return { success: false, message: "This feature is not applicable for WhatsApp." };
+}
+export async function processTelegramWebhook(payload: any) {
+    // Deprecated
+    return;
 }

@@ -76,7 +76,9 @@ const studentSchema = z.object({
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
     required_error: "Jenis kelamin harus dipilih.",
   }),
-  parentChatId: z.string().optional(),
+  parentWaNumber: z.string().optional().refine(val => !val || /^\d{10,15}$/.test(val), {
+    message: "Nomor WhatsApp harus berupa angka 10-15 digit (contoh: 6281234567890)."
+  }),
   status: z.enum(["Aktif", "Lulus", "Pindah"]).optional().default("Aktif"),
 })
 
@@ -123,7 +125,7 @@ export default function SiswaPage() {
       nama: "",
       classId: undefined,
       jenisKelamin: undefined,
-      parentChatId: "",
+      parentWaNumber: "",
       status: "Aktif",
     },
   })
@@ -164,7 +166,6 @@ export default function SiswaPage() {
     fetchData()
   }, [])
   
-  // Effect to clear selection when filters change
   useEffect(() => {
     setSelectedRowIds([]);
   }, [filterName, filterClass]);
@@ -180,7 +181,6 @@ export default function SiswaPage() {
       }
       
       if (editingStudent) {
-        // Editing an existing student
         if (existingStudentId && existingStudentId !== editingStudent.id) {
           toast({ variant: "destructive", title: "Gagal Menyimpan", description: "NISN ini sudah digunakan oleh siswa lain." });
           return;
@@ -189,7 +189,6 @@ export default function SiswaPage() {
         await updateDoc(studentRef, values);
         toast({ title: "Sukses", description: "Data siswa berhasil diperbarui." });
       } else {
-        // Adding a new student
         if (existingStudentId) {
           toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Siswa dengan NISN ini sudah terdaftar." });
           return;
@@ -306,8 +305,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Parent Chat ID", "Status"];
-    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "", "Aktif"];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "No WhatsApp Ortu", "Status"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "6281234567890", "Aktif"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -333,7 +332,7 @@ export default function SiswaPage() {
             "Tingkat": classInfo?.grade || "N/A",
             "Nama Kelas": classInfo?.name || "Kelas Dihapus",
             "Jenis Kelamin": student.jenisKelamin,
-            "Parent Chat ID": student.parentChatId || "",
+            "No WhatsApp Ortu": student.parentWaNumber || "",
             "Status": student.status || "Aktif",
         }
     });
@@ -348,7 +347,7 @@ export default function SiswaPage() {
         { wch: 10 }, // Tingkat
         { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
-        { wch: 15 }, // Parent Chat ID
+        { wch: 20 }, // No WhatsApp Ortu
         { wch: 10 }, // Status
     ];
     worksheet['!cols'] = columnWidths;
@@ -385,7 +384,7 @@ export default function SiswaPage() {
                     nama: String(row[1] || ""),
                     classId: classId,
                     jenisKelamin: String(row[4] || ""),
-                    parentChatId: String(row[5] || "").trim() || undefined,
+                    parentWaNumber: String(row[5] || "").trim() || undefined,
                     status: String(row[6] || "Aktif")
                 };
 
@@ -398,7 +397,7 @@ export default function SiswaPage() {
                         const isIdentical = existingStudent.nama === validStudent.nama &&
                                             existingStudent.classId === validStudent.classId &&
                                             existingStudent.jenisKelamin === validStudent.jenisKelamin &&
-                                            (existingStudent.parentChatId || "") === (validStudent.parentChatId || "") &&
+                                            (existingStudent.parentWaNumber || "") === (validStudent.parentWaNumber || "") &&
                                             (existingStudent.status || "Aktif") === (validStudent.status || "Aktif");
 
                         processedStudents.push({ 
@@ -461,7 +460,7 @@ export default function SiswaPage() {
         
         studentsToProcess.forEach(student => {
             const { id, importStatus, ...studentData } = student;
-            const dataToSave = { ...studentData, parentChatId: studentData.parentChatId || "" };
+            const dataToSave = { ...studentData, parentWaNumber: studentData.parentWaNumber || "" };
             if (importStatus === 'Baru') {
                 const docRef = doc(collection(db, "students"));
                 batch.set(docRef, dataToSave);
@@ -493,7 +492,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentChatId: "", status: "Aktif" })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentWaNumber: "", status: "Aktif" })
     setIsFormDialogOpen(true)
   }
 
@@ -648,15 +647,15 @@ export default function SiswaPage() {
               />
               <FormField
                   control={form.control}
-                  name="parentChatId"
+                  name="parentWaNumber"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Chat ID Orang Tua (Opsional)</FormLabel>
+                      <FormLabel>Nomor WhatsApp Ortu (Opsional)</FormLabel>
                       <FormControl>
-                        <Input placeholder="Akan terisi otomatis via bot" {...field} value={field.value ?? ''} />
+                        <Input placeholder="cth: 6281234567890" {...field} value={field.value ?? ''} />
                       </FormControl>
                       <FormDescription>
-                        ID ini digunakan untuk mengirim notifikasi. Biarkan kosong jika orang tua akan mendaftar via bot.
+                        Gunakan format internasional (62) tanpa spasi atau simbol.
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
