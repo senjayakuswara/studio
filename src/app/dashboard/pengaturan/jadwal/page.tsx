@@ -190,7 +190,7 @@ export default function JadwalPage() {
         <CalendarDays className="h-4 w-4" />
         <AlertTitle>Informasi</AlertTitle>
         <AlertDescription>
-          Hari libur yang ditambahkan di sini akan secara otomatis mengecualikan siswa dari absensi "Alfa" pada tanggal tersebut di laporan rekapitulasi. Hari Minggu juga secara otomatis dianggap sebagai hari libur.
+          Hari libur yang ditambahkan di sini akan secara otomatis mengecualikan siswa dari absensi "Alfa" pada tanggal tersebut di laporan rekapitulasi. Hari Sabtu dan Minggu juga secara otomatis dianggap sebagai hari libur.
         </AlertDescription>
       </Alert>
 

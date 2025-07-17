@@ -6,7 +6,7 @@ import type { DateRange } from "react-day-picker"
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday } from "date-fns"
+import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Download, Loader2, Send, Printer, Search } from "lucide-react"
 import jsPDF from "jspdf"
@@ -255,7 +255,7 @@ export default function RekapitulasiPage() {
                     const currentDate = new Date(selectedYear, selectedMonth, day);
                     const dateString = format(currentDate, 'yyyy-MM-dd');
                     
-                    if (holidayDateStrings.has(dateString) || isSunday(currentDate)) {
+                    if (holidayDateStrings.has(dateString) || isSunday(currentDate) || isSaturday(currentDate)) {
                         summary[student.id].attendance[day] = 'L';
                         summary[student.id].summary.L++;
                         continue;
@@ -431,7 +431,7 @@ export default function RekapitulasiPage() {
                 if(data.section === 'body' && dayIndex >= 0 && dayIndex < daysInMonth) {
                     const currentDate = new Date(selectedYear, selectedMonth, dayIndex + 1);
                     const dateString = format(currentDate, 'yyyy-MM-dd');
-                    if (holidayDateStrings.has(dateString) || isSunday(currentDate)) {
+                    if (holidayDateStrings.has(dateString) || isSunday(currentDate) || isSaturday(currentDate)) {
                         doc.setFillColor(229, 231, 235);
                     }
                 }
@@ -945,5 +945,3 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
-
-    
