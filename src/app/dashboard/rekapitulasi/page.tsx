@@ -11,7 +11,7 @@ import { id as localeID } from "date-fns/locale"
 import { Download, Loader2, Send } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { sendClassMonthlyRecap, sendMonthlyRecapToParent } from "@/ai/flows/telegram-flow"
+import { sendClassMonthlyRecap, sendMonthlyRecapToParent } from "@/ai/flows/notification-flow"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -37,7 +37,7 @@ import { Label } from "@/components/ui/label"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string }
+type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
 type AttendanceRecord = {
@@ -112,7 +112,7 @@ export default function RekapitulasiPage() {
                 const [classesSnapshot, reportConfigSnap, studentsSnapshot, holidaysSnapshot] = await Promise.all([
                     getDocs(collection(db, "classes")),
                     getDoc(doc(db, "settings", "reportConfig")),
-                    getDocs(collection(db, "students")),
+                    getDocs(query(collection(db, "students"), orderBy("nama", "asc"))),
                     getDocs(collection(db, "holidays"))
                 ]);
                 
@@ -125,7 +125,6 @@ export default function RekapitulasiPage() {
                 setClasses(classList);
                 
                 const studentList = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
-                studentList.sort((a,b) => a.nama.localeCompare(b.nama));
                 setAllStudents(studentList);
 
                 const holidayList = holidaysSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Holiday[];
@@ -292,11 +291,18 @@ export default function RekapitulasiPage() {
         
         toast({ title: "Memulai Pengiriman...", description: `Mengirim ${Object.keys(data.summary).length} rekap via WhatsApp...` });
 
+        // Get Group ID for class recap
+        const appConfigDoc = await getDoc(doc(db, "settings", "appConfig"));
+        const groupWaId = appConfigDoc.exists() ? appConfigDoc.data().groupWaId : null;
+
+
+        // Send to parents
         for (const studentData of Object.values(data.summary)) {
             await sendMonthlyRecapToParent(studentData, selectedMonth, selectedYear);
         }
         
-        if (selectedTarget.startsWith("grade-") || classes.some(c => c.id === selectedTarget)) {
+        // Send to class advisor group
+        if ((selectedTarget.startsWith("grade-") || classes.some(c => c.id === selectedTarget)) && groupWaId) {
             let className = "";
             let grade = "";
             if (selectedTarget.startsWith("grade-")) {
@@ -310,11 +316,11 @@ export default function RekapitulasiPage() {
                 }
             }
             if (className) {
-                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary);
+                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary, groupWaId);
             }
         }
         
-        toast({ title: "Pengiriman Selesai", description: "Semua notifikasi rekapitulasi telah dikirim." });
+        toast({ title: "Pengiriman Selesai", description: "Semua perintah notifikasi rekapitulasi telah dikirim ke server lokal." });
     }
 
     const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string, holidayDateStrings: Set<string>) => {
@@ -688,3 +694,5 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
+
+    
