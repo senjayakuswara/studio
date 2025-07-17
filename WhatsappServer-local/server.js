@@ -22,6 +22,10 @@ const client = new Client({
     puppeteer: {
         headless: true, // Jalankan tanpa membuka jendela browser
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    },
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
     }
 });
 
@@ -55,25 +59,34 @@ client.initialize().catch(err => {
     console.error('Gagal menginisialisasi client:', err);
 });
 
-// Endpoint untuk mengirim pesan
+// Endpoint untuk mengirim pesan (METODE BARU YANG LEBIH STABIL)
 app.post('/send', async (req, res) => {
-    const { recipient, message } = req.body;
+    const { recipient, message, isGroup = false } = req.body;
 
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Nomor penerima (recipient) dan pesan (message) diperlukan.' });
     }
     
-    // Cek jika target adalah grup (berisi '@g.us') atau individu
-    const isGroup = recipient.includes('@g.us');
-    const target = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
+    // Format nomor untuk individual, atau gunakan ID grup langsung
+    const sanitized_number = recipient.replace(/\D/g, '');
+    const final_number = isGroup ? recipient : `${sanitized_number}@c.us`;
 
     try {
-        console.log(`Mengirim pesan ke: ${target}`);
-        await client.sendMessage(target, message);
+        if (!isGroup) {
+            const isRegistered = await client.isRegisteredUser(final_number);
+            if (!isRegistered) {
+                console.error(`Gagal mengirim: Nomor ${recipient} tidak terdaftar di WhatsApp.`);
+                return res.status(404).json({ success: false, error: `Nomor ${recipient} tidak terdaftar di WhatsApp.` });
+            }
+        }
+        
+        console.log(`Mengirim pesan ke: ${final_number}`);
+        await client.sendMessage(final_number, message);
         res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
+
     } catch (error) {
-        console.error(`Gagal mengirim pesan ke ${target}:`, error);
-        res.status(500).json({ success: false, error: 'Gagal mengirim pesan WhatsApp.' });
+        console.error(`Gagal mengirim pesan ke ${final_number}:`, error);
+        res.status(500).json({ success: false, error: 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.' });
     }
 });
 
