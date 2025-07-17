@@ -1,0 +1,5 @@
+Anda dapat menghapus file ini.
+
+Letakkan file audio Anda di sini dengan nama:
+- success.wav
+- error.wav
