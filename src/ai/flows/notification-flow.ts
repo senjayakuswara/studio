@@ -9,7 +9,7 @@
 
 import { collection, doc, getDoc, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -115,14 +115,15 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         finalStatus = record.status;
     }
 
-    // When parsing an ISO string, it's interpreted as UTC.
-    // The `format` function, however, will format it to the system's local time.
-    // Since the server is likely in UTC, we use the original client-generated ISO string
-    // which is already in the correct timezone.
-    const timestamp = parseISO(timestampStr);
+    // Create a date object from the ISO string (which is in UTC)
+    const utcDate = new Date(timestampStr);
 
-    const formattedDate = format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID });
-    const formattedTime = format(timestamp, "HH:mm:ss", { locale: localeID });
+    // Manually add 7 hours for WIB (GMT+7)
+    const wibDate = new Date(utcDate.getTime() + (7 * 60 * 60 * 1000));
+    
+    // Format the corrected WIB date
+    const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
