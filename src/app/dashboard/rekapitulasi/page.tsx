@@ -6,9 +6,9 @@ import type { DateRange } from "react-day-picker"
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay } from "date-fns"
+import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Download, Loader2, Send } from "lucide-react"
+import { Download, Loader2, Send, Printer, Search } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { sendClassMonthlyRecap, sendMonthlyRecapToParent } from "@/ai/flows/notification-flow"
@@ -34,6 +34,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ComboBox } from "@/components/ui/combobox"
 import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -65,6 +67,14 @@ type MonthlySummary = {
     [studentId: string]: MonthlySummaryData
 }
 
+type WarningStudent = {
+    studentInfo: Student,
+    alfaCount: number,
+    sakitCount: number,
+    izinCount: number,
+    classInfo: Class
+}
+
 const years = [getYear(new Date()), getYear(new Date()) - 1, getYear(new Date()) - 2];
 const months = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -86,6 +96,14 @@ export default function RekapitulasiPage() {
         to: endOfMonth(new Date()),
     })
 
+    // State for Warning Letters
+    const [warningMonth, setWarningMonth] = useState<number>(getMonth(new Date()));
+    const [warningYear, setWarningYear] = useState<number>(getYear(new Date()));
+    const [warningClass, setWarningClass] = useState<string>("all");
+    const [warningThreshold, setWarningThreshold] = useState<number>(3);
+    const [warningList, setWarningList] = useState<WarningStudent[]>([]);
+    const [isSearchingWarnings, setIsSearchingWarnings] = useState(false);
+
     // Common State
     const [classes, setClasses] = useState<Class[]>([])
     const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -104,6 +122,8 @@ export default function RekapitulasiPage() {
                 label: student.nama,
             }));
     }, [allStudents, individualReportClassId]);
+
+    const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
 
     useEffect(() => {
         async function fetchInitialData() {
@@ -187,10 +207,10 @@ export default function RekapitulasiPage() {
                 return null;
             }
 
-            const classMap = new Map(classes.map(c => [c.id, c]));
+            const studentClassMap = new Map(classes.map(c => [c.id, c]));
             students.sort((a, b) => {
-                const classA = classMap.get(a.classId);
-                const classB = classMap.get(b.classId);
+                const classA = studentClassMap.get(a.classId);
+                const classB = studentClassMap.get(b.classId);
                 const classAKey = classA ? `${classA.grade}-${classA.name}` : '';
                 const classBKey = classB ? `${classB.grade}-${classB.name}` : '';
                 if (classAKey !== classBKey) return classAKey.localeCompare(classBKey);
@@ -234,9 +254,8 @@ export default function RekapitulasiPage() {
                 for(let day = 1; day <= daysInMonth; day++) {
                     const currentDate = new Date(selectedYear, selectedMonth, day);
                     const dateString = format(currentDate, 'yyyy-MM-dd');
-                    const dayOfWeek = getDay(currentDate);
-
-                    if (holidayDateStrings.has(dateString) || dayOfWeek === 0) { // Sunday is a holiday
+                    
+                    if (holidayDateStrings.has(dateString) || isSunday(currentDate)) {
                         summary[student.id].attendance[day] = 'L';
                         summary[student.id].summary.L++;
                         continue;
@@ -295,13 +314,10 @@ export default function RekapitulasiPage() {
         const appConfigDoc = await getDoc(doc(db, "settings", "appConfig"));
         const groupWaId = appConfigDoc.exists() ? appConfigDoc.data().groupWaId : null;
 
-
-        // Send to parents
         for (const studentData of Object.values(data.summary)) {
             await sendMonthlyRecapToParent(studentData, selectedMonth, selectedYear);
         }
         
-        // Send to class advisor group
         if ((selectedTarget.startsWith("grade-") || classes.some(c => c.id === selectedTarget)) && groupWaId) {
             let className = "";
             let grade = "";
@@ -378,11 +394,11 @@ export default function RekapitulasiPage() {
             [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
         ];
         
-        const classMap = new Map(classes.map(c => [c.id, c]));
+        const studentClassMap = new Map(classes.map(c => [c.id, c]));
         const body = students.map((student, index) => {
             const studentSummary = summary[student.id];
             const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '');
-            const studentClass = classMap.get(student.classId);
+            const studentClass = studentClassMap.get(student.classId);
             return [
                 index + 1,
                 student.nama,
@@ -413,9 +429,9 @@ export default function RekapitulasiPage() {
             willDrawCell: (data) => {
                 const dayIndex = data.column.index - 5;
                 if(data.section === 'body' && dayIndex >= 0 && dayIndex < daysInMonth) {
-                    const dateString = format(new Date(selectedYear, selectedMonth, dayIndex + 1), 'yyyy-MM-dd');
-                    const dayOfWeek = getDay(new Date(selectedYear, selectedMonth, dayIndex + 1));
-                    if (holidayDateStrings.has(dateString) || dayOfWeek === 0) {
+                    const currentDate = new Date(selectedYear, selectedMonth, dayIndex + 1);
+                    const dateString = format(currentDate, 'yyyy-MM-dd');
+                    if (holidayDateStrings.has(dateString) || isSunday(currentDate)) {
                         doc.setFillColor(229, 231, 235);
                     }
                 }
@@ -560,6 +576,146 @@ export default function RekapitulasiPage() {
         doc.save(`Laporan_Individual_${student.nama.replace(/ /g, '_')}.pdf`);
     };
 
+    const handleSearchWarnings = async () => {
+        setIsSearchingWarnings(true);
+        setWarningList([]);
+        try {
+            const monthStart = startOfMonth(new Date(warningYear, warningMonth));
+            const monthEnd = endOfMonth(new Date(warningYear, warningMonth));
+            
+            let studentsToScan = allStudents;
+            if (warningClass !== "all") {
+                studentsToScan = allStudents.filter(s => s.classId === warningClass);
+            }
+
+            if (studentsToScan.length === 0) {
+                toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa pada kelas yang dipilih." });
+                return;
+            }
+            
+            const studentIds = studentsToScan.map(s => s.id);
+            const attendanceRecords: AttendanceRecord[] = [];
+            const studentIdChunks = [];
+            for (let i = 0; i < studentIds.length; i += 30) {
+                studentIdChunks.push(studentIds.slice(i, i + 30));
+            }
+            for (const chunk of studentIdChunks) {
+                if (chunk.length === 0) continue;
+                const attendanceQuery = query(collection(db, "attendance"), where("studentId", "in", chunk), where("recordDate", ">=", monthStart), where("recordDate", "<=", monthEnd));
+                const attendanceSnapshot = await getDocs(attendanceQuery);
+                attendanceSnapshot.forEach(doc => attendanceRecords.push(doc.data() as AttendanceRecord));
+            }
+
+            const warnings: WarningStudent[] = [];
+            studentsToScan.forEach(student => {
+                const studentRecords = attendanceRecords.filter(r => r.studentId === student.id);
+                const alfaCount = studentRecords.filter(r => r.status === 'Alfa').length;
+                
+                if (alfaCount >= warningThreshold) {
+                    warnings.push({
+                        studentInfo: student,
+                        alfaCount,
+                        sakitCount: studentRecords.filter(r => r.status === 'Sakit').length,
+                        izinCount: studentRecords.filter(r => r.status === 'Izin').length,
+                        classInfo: classMap.get(student.classId)!
+                    });
+                }
+            });
+            
+            setWarningList(warnings.sort((a,b) => b.alfaCount - a.alfaCount));
+             toast({ title: "Pencarian Selesai", description: `Ditemukan ${warnings.length} siswa yang memenuhi kriteria.` });
+
+        } catch (e) {
+            console.error("Error searching for warnings:", e);
+            toast({ variant: "destructive", title: "Gagal Mencari Data", description: "Terjadi kesalahan saat memproses data absensi." });
+        } finally {
+            setIsSearchingWarnings(false);
+        }
+    }
+
+    const generateWarningLetterPdf = (studentData: WarningStudent) => {
+        if (!reportConfig) {
+            toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
+            return;
+        }
+
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageMargin = 20;
+        let lastY = 15;
+
+        if (reportConfig.headerImageUrl) {
+            try {
+                const imgWidth = pageWidth - pageMargin * 2;
+                const imgHeight = imgWidth * (150 / 950);
+                doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, lastY, imgWidth, imgHeight);
+                lastY += imgHeight + 10;
+            } catch (e) { lastY = 50; }
+        }
+
+        doc.setFontSize(11);
+        doc.setFont('times', 'normal');
+        doc.text(`Nomor: ...../...../...../.....`, pageMargin, lastY);
+        doc.text(
+            `${reportConfig.reportLocation}, ${format(new Date(), 'd MMMM yyyy', { locale: localeID })}`,
+            pageWidth - pageMargin,
+            lastY,
+            { align: 'right' }
+        );
+        lastY += 8;
+        doc.text(`Perihal: Surat Panggilan Orang Tua/Wali`, pageMargin, lastY);
+        lastY += 15;
+
+        doc.text(`Yth. Bapak/Ibu Orang Tua/Wali dari:`, pageMargin, lastY);
+        lastY += 8;
+        doc.text(`Nama: ${studentData.studentInfo.nama}`, pageMargin + 10, lastY);
+        lastY += 6;
+        doc.text(`Kelas: ${studentData.classInfo.name}`, pageMargin + 10, lastY);
+        lastY += 8;
+        doc.text(`Di`, pageMargin, lastY);
+        lastY += 6;
+        doc.text(`Tempat`, pageMargin + 10, lastY);
+        lastY += 15;
+
+        doc.text(`Dengan hormat,`, pageMargin, lastY);
+        lastY += 8;
+
+        const bodyText = `Sehubungan dengan kegiatan belajar mengajar di sekolah kami, dengan ini kami memberitahukan bahwa putra/i Bapak/Ibu berdasarkan rekapitulasi absensi bulan ${format(new Date(warningYear, warningMonth), 'MMMM yyyy', { locale: localeID })} telah melakukan pelanggaran berupa tidak masuk sekolah tanpa keterangan (Alfa) sebanyak ${studentData.alfaCount} kali.`;
+        const splitBody = doc.splitTextToSize(bodyText, pageWidth - (pageMargin * 2));
+        doc.text(splitBody, pageMargin, lastY);
+        lastY += splitBody.length * 5 + 8;
+
+        const bodyText2 = `Oleh karena itu, kami mengharap kehadiran Bapak/Ibu Orang Tua/Wali siswa untuk dapat hadir ke sekolah pada:`;
+        const splitBody2 = doc.splitTextToSize(bodyText2, pageWidth - (pageMargin * 2));
+        doc.text(splitBody2, pageMargin, lastY);
+        lastY += splitBody2.length * 5 + 8;
+        
+        doc.text(`Hari, Tanggal: ...........................................`, pageMargin + 10, lastY);
+        lastY += 6;
+        doc.text(`Waktu: ...........................................`, pageMargin + 10, lastY);
+        lastY += 6;
+        doc.text(`Tempat: ...........................................`, pageMargin + 10, lastY);
+        lastY += 6;
+        doc.text(`Keperluan: Pembinaan Kesiswaan`, pageMargin + 10, lastY);
+        lastY += 15;
+        
+        const closingText = `Demikian surat panggilan ini kami sampaikan. Atas perhatian dan kerja sama Bapak/Ibu, kami ucapkan terima kasih.`;
+        const splitClosing = doc.splitTextToSize(closingText, pageWidth - (pageMargin * 2));
+        doc.text(splitClosing, pageMargin, lastY);
+        lastY += splitClosing.length * 5 + 20;
+
+        const rightX = (pageWidth / 4) * 3;
+        doc.text(`Kepala Sekolah,`, rightX, lastY, { align: 'center' });
+        lastY += 25;
+        doc.setFont('times', 'bold');
+        doc.text(reportConfig.principalName, rightX, lastY, { align: 'center' });
+        lastY += 6;
+        doc.setFont('times', 'normal');
+        doc.text(reportConfig.principalNpa, rightX, lastY, { align: 'center' });
+        
+        doc.save(`SP_${studentData.studentInfo.nama.replace(/ /g, '_')}_${warningMonth+1}_${warningYear}.pdf`);
+    }
+
     return (
         <div className="flex flex-col gap-6">
             <div>
@@ -568,9 +724,10 @@ export default function RekapitulasiPage() {
             </div>
             
             <Tabs defaultValue="monthly">
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full grid-cols-3">
                     <TabsTrigger value="monthly">Laporan Bulanan</TabsTrigger>
                     <TabsTrigger value="individual">Laporan Individual</TabsTrigger>
+                    <TabsTrigger value="warnings">Surat Peringatan</TabsTrigger>
                 </TabsList>
                 
                 <TabsContent value="monthly">
@@ -689,6 +846,100 @@ export default function RekapitulasiPage() {
                              </div>
                         </CardContent>
                      </Card>
+                </TabsContent>
+
+                 <TabsContent value="warnings">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Laporan Surat Peringatan (SP)</CardTitle>
+                            <CardDescription>Cari siswa yang melebihi batas ketidakhadiran (Alfa) dalam satu bulan dan cetak surat panggilan orang tua.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Bulan</Label>
+                                    <Select value={warningMonth.toString()} onValueChange={(v) => setWarningMonth(Number(v))} disabled={isLoading}>
+                                        <SelectTrigger><SelectValue placeholder="Pilih Bulan" /></SelectTrigger>
+                                        <SelectContent>{months.map(month => (<SelectItem key={month.value} value={month.value.toString()}>{month.label}</SelectItem>))}</SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Tahun</Label>
+                                    <Select value={warningYear.toString()} onValueChange={(v) => setWarningYear(Number(v))} disabled={isLoading}>
+                                        <SelectTrigger><SelectValue placeholder="Pilih Tahun" /></SelectTrigger>
+                                        <SelectContent>{years.map(year => (<SelectItem key={year} value={year.toString()}>{year}</SelectItem>))}</SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Kelas</Label>
+                                    <Select value={warningClass} onValueChange={setWarningClass} disabled={isLoading || classes.length === 0}>
+                                        <SelectTrigger><SelectValue placeholder="Pilih Kelas" /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">Semua Kelas</SelectItem>
+                                            {["X", "XI", "XII"].map(grade => (
+                                                <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
+                                                    {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                                                </SelectGroup>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="warning-threshold">Batas Alfa</Label>
+                                    <Input
+                                        id="warning-threshold"
+                                        type="number"
+                                        value={warningThreshold}
+                                        onChange={(e) => setWarningThreshold(Number(e.target.value))}
+                                        min="1"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end">
+                                <Button onClick={handleSearchWarnings} disabled={isSearchingWarnings || isLoading}>
+                                    {isSearchingWarnings ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
+                                    {isSearchingWarnings ? 'Mencari...' : 'Cari Siswa'}
+                                </Button>
+                            </div>
+                            
+                            {warningList.length > 0 && (
+                                <div className="pt-4">
+                                <h3 className="text-lg font-medium mb-2">Hasil Pencarian</h3>
+                                 <div className="border rounded-md">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Nama Siswa</TableHead>
+                                                <TableHead>Kelas</TableHead>
+                                                <TableHead>Jumlah Alfa</TableHead>
+                                                <TableHead>Jumlah Sakit</TableHead>
+                                                <TableHead>Jumlah Izin</TableHead>
+                                                <TableHead className="text-right">Aksi</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                        {warningList.map(item => (
+                                            <TableRow key={item.studentInfo.id}>
+                                                <TableCell className="font-medium">{item.studentInfo.nama}</TableCell>
+                                                <TableCell>{item.classInfo.name}</TableCell>
+                                                <TableCell>{item.alfaCount}</TableCell>
+                                                <TableCell>{item.sakitCount}</TableCell>
+                                                <TableCell>{item.izinCount}</TableCell>
+                                                <TableCell className="text-right">
+                                                    <Button variant="outline" size="sm" onClick={() => generateWarningLetterPdf(item)}>
+                                                        <Printer className="mr-2 h-4 w-4" />
+                                                        Cetak SP
+                                                    </Button>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        </TableBody>
+                                    </Table>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 </TabsContent>
             </Tabs>
         </div>
