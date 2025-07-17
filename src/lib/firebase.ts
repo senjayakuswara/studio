@@ -4,15 +4,15 @@ import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
-// These values will be filled in by Firebase Studio
 const firebaseConfig = {
-  apiKey: "### GCloud API Key ###",
-  authDomain: "### Auth Domain ###",
-  projectId: "### Project ID ###",
-  storageBucket: "### Storage Bucket ###",
-  messagingSenderId: "### Messaging Sender ID ###",
-  appId: "### App ID ###"
+  apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
+  authDomain: "sekolah-ccec3.firebaseapp.com",
+  projectId: "sekolah-ccec3",
+  storageBucket: "sekolah-ccec3.appspot.com",
+  messagingSenderId: "430648491716",
+  appId: "1:430648491716:web:1c3d389337adfd80d49391"
 };
+
 
 // Initialize Firebase
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
