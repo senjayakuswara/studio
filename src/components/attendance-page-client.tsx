@@ -276,6 +276,17 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
     }, [scannerContainerId]);
 
+    const prevIsProcessing = useRef(isProcessing);
+    useEffect(() => {
+        // This effect runs when isProcessing changes.
+        // We only want to re-focus the input when processing has *just* finished.
+        if (prevIsProcessing.current && !isProcessing && !isCameraActive) {
+            scannerInputRef.current?.focus();
+        }
+        // Update the ref to the current value for the next render.
+        prevIsProcessing.current = isProcessing;
+    }, [isProcessing, isCameraActive]);
+
 
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
@@ -402,12 +413,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             playSound('error');
         } finally {
             setTimeout(() => setHighlightedNisn(null), 1500);
-            setTimeout(() => {
-              processingLock.current = false;
-              setIsProcessing(false);
-              // Re-focus the input element for the next scan
-              scannerInputRef.current?.focus();
-            }, 500); // A short delay to prevent race conditions
+            processingLock.current = false;
+            setIsProcessing(false);
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
