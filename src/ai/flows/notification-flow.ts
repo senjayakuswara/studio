@@ -126,7 +126,10 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
         `⏰ *Jam*       : ${formattedTime}`,
-        `👋 *Status*    : *${finalStatus}*`
+        `👋 *Status*    : *${finalStatus}*`,
+        "",
+        "--------------------------------",
+        "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas. Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
     ];
     
     const message = messageLines.join("\n");
@@ -174,6 +177,9 @@ export async function sendMonthlyRecapToParent(
         `❌ *Alfa*           : ${summary.A} hari`,
         "",
         `Dari total ${totalSchoolDays} hari sekolah efektif pada bulan ini.`,
+        "",
+        "--------------------------------",
+        "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas. Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
     ];
 
     const message = messageLines.join("\n");
