@@ -6,107 +6,76 @@
 
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
-import {-next-line:no-console} from 'node:console';
 
 // --- Singleton Pattern for WhatsApp Client ---
 // This ensures we only have one instance of the client running.
 let clientInstance: Client | null = null;
-let isInitializing = false;
-let isReady = false;
+let clientPromise: Promise<Client> | null = null;
 
 // Helper function for random delay
 const randomDelay = (min: number, max: number) => {
     return new Promise(resolve => setTimeout(resolve, Math.random() * (max - min) + min));
 }
 
-export const getWhatsappClient = (): Promise<Client> => {
-    return new Promise((resolve, reject) => {
-        if (clientInstance && isReady) {
-            console.log("WhatsApp client already initialized and ready.");
-            return resolve(clientInstance);
+async function initializeClient(): Promise<Client> {
+    console.log("Initializing WhatsApp client...");
+    
+    const client = new Client({
+        authStrategy: new LocalAuth({
+            clientId: 'school-attendance-bot'
+        }),
+        puppeteer: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        },
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
         }
-
-        if (isInitializing) {
-            // If initialization is already in progress, wait for it to complete.
-            const interval = setInterval(() => {
-                if (isReady) {
-                    clearInterval(interval);
-                    if (clientInstance) {
-                        resolve(clientInstance);
-                    } else {
-                        reject(new Error("Initialization finished, but client is null."));
-                    }
-                }
-                 if (!isInitializing) {
-                    clearInterval(interval);
-                    reject(new Error("Initialization was aborted."));
-                }
-            }, 1000);
-            return;
-        }
-
-        console.log("Initializing WhatsApp client...");
-        isInitializing = true;
-        
-        const client = new Client({
-            authStrategy: new LocalAuth({
-                // This will create a .wwebjs_auth folder to store session data.
-                // You should add this folder to your .gitignore file.
-                clientId: 'school-attendance-bot'
-            }),
-            puppeteer: {
-                // These args are often necessary for running in server environments
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
-            },
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-            }
-        });
-
-        client.on('qr', (qr) => {
-            console.log("--- SCAN WHATSAPP QR CODE ---");
-            console.log("Scan the QR code below with your phone to log in.");
-            qrcode.generate(qr, { small: true });
-            console.log("-----------------------------");
-        });
-
-        client.on('ready', () => {
-            console.log('✅ WhatsApp client is ready!');
-            clientInstance = client;
-            isInitializing = false;
-            isReady = true;
-            resolve(client);
-        });
-        
-        client.on('authenticated', () => {
-            console.log('WhatsApp client authenticated successfully.');
-        });
-
-        client.on('auth_failure', (msg) => {
-            console.error('--- WHATSAPP AUTHENTICATION FAILURE ---');
-            console.error(msg);
-            console.error('Please delete the .wwebjs_auth folder and restart the server to generate a new QR code.');
-            isInitializing = false;
-            isReady = false;
-            clientInstance = null;
-            reject(new Error(msg));
-        });
-        
-        client.on('disconnected', (reason) => {
-            console.warn('WhatsApp client was disconnected.', reason);
-            isReady = false;
-            clientInstance = null;
-            isInitializing = false; // Allow re-initialization
-        });
-
-        client.initialize().catch(err => {
-            console.error('Failed to initialize WhatsApp client:', err);
-            isInitializing = false;
-            reject(err);
-        });
     });
+
+    client.on('qr', (qr) => {
+        console.log("--- SCAN WHATSAPP QR CODE ---");
+        qrcode.generate(qr, { small: true });
+        console.log("-----------------------------");
+    });
+
+    client.on('ready', () => {
+        console.log('✅ WhatsApp client is ready!');
+        clientInstance = client;
+    });
+    
+    client.on('authenticated', () => {
+        console.log('WhatsApp client authenticated successfully.');
+    });
+
+    client.on('auth_failure', (msg) => {
+        console.error('--- WHATSAPP AUTHENTICATION FAILURE ---', msg);
+        clientInstance = null;
+        clientPromise = null; // Reset promise on failure
+    });
+    
+    client.on('disconnected', (reason) => {
+        console.warn('WhatsApp client was disconnected.', reason);
+        clientInstance = null;
+        clientPromise = null; // Reset promise on disconnect
+    });
+
+    await client.initialize();
+    return client;
+}
+
+export async function getWhatsappClient(): Promise<Client> {
+    if (clientInstance) {
+        console.log("WhatsApp client already initialized and ready.");
+        return clientInstance;
+    }
+    
+    if (!clientPromise) {
+        clientPromise = initializeClient();
+    }
+
+    return clientPromise;
 };
 
 /**
