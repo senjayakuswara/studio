@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Loader2, Info, Bot, TestTube, ChevronsRight } from "lucide-react"
-import { useForm, FormProvider, useFormContext } from "react-hook-form"
+import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import Link from "next/link"
@@ -13,6 +13,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { doc, getDoc } from "firebase/firestore"
+import { db } from "@/lib/firebase"
 
 const testSchema = z.object({
   recipient: z.string().refine(val => /^\d{10,15}$/.test(val), {
@@ -23,7 +25,7 @@ const testSchema = z.object({
 
 type TestFormValues = z.infer<typeof testSchema>;
 
-function TestNotificationForm({ webhookUrl }: { webhookUrl?: string }) {
+function TestNotificationForm() {
   const [isTesting, setIsTesting] = useState(false);
   const { toast } = useToast();
   const form = useForm<TestFormValues>({
@@ -35,38 +37,45 @@ function TestNotificationForm({ webhookUrl }: { webhookUrl?: string }) {
   });
 
   async function onTestSubmit(values: TestFormValues) {
-    if (!webhookUrl) {
-      toast({
-        variant: "destructive",
-        title: "URL Webhook Belum Diatur",
-        description: "Harap simpan URL webhook di tab Pengaturan Aplikasi terlebih dahulu.",
-      });
-      return;
-    }
-    
     setIsTesting(true);
+    let webhookUrl = "";
     try {
+        const docRef = doc(db, "settings", "appConfig");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data().notificationWebhookUrl) {
+            webhookUrl = docSnap.data().notificationWebhookUrl;
+        } else {
+             toast({
+                variant: "destructive",
+                title: "URL Webhook Belum Diatur",
+                description: "Harap simpan URL webhook di tab Pengaturan Aplikasi terlebih dahulu.",
+            });
+            setIsTesting(false);
+            return;
+        }
+
+      // Kita akan mengirim payload ini ke server lokal kita
       const payload = {
-        recipient: values.recipient.endsWith('@c.us') ? values.recipient : `${values.recipient}@c.us`,
+        recipient: values.recipient, // server.js akan menambahkan @c.us
         message: values.message,
       };
       
-      const response = await fetch(webhookUrl, {
+      const response = await fetch(`${webhookUrl}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (response.ok) {
-        toast({ title: "Sukses", description: "Pesan tes berhasil dikirim ke server lokal Anda." });
+        toast({ title: "Sukses", description: "Perintah kirim pesan berhasil dikirim ke server lokal Anda." });
       } else {
         const errorText = await response.text();
-        toast({ variant: "destructive", title: "Gagal Mengirim", description: `Server merespons dengan kesalahan: ${errorText}` });
+        toast({ variant: "destructive", title: "Gagal Mengirim", description: `Server lokal merespons dengan kesalahan: ${errorText}` });
       }
 
     } catch (error) {
       console.error("Error testing webhook:", error);
-      toast({ variant: "destructive", title: "Gagal Terhubung", description: "Tidak dapat terhubung ke URL webhook. Pastikan server lokal dan Ngrok berjalan." });
+      toast({ variant: "destructive", title: "Gagal Terhubung", description: "Tidak dapat terhubung ke URL webhook. Pastikan server lokal dan Ngrok berjalan dengan benar." });
     } finally {
       setIsTesting(false);
     }
@@ -136,7 +145,7 @@ export default function NotifikasiPage() {
                 <Bot className="h-4 w-4" />
                 <AlertTitle>Penting: Metode Notifikasi Eksternal</AlertTitle>
                 <AlertDescription>
-                 Sistem ini sekarang menggunakan "Webhook" untuk mengirim notifikasi. Anda perlu menjalankan server notifikasi WhatsApp di komputer lokal Anda.
+                 Sistem ini sekarang menggunakan "Webhook" untuk mengirim notifikasi. Anda perlu menjalankan server notifikasi WhatsApp di komputer lokal Anda menggunakan file `start_server.bat` dan `start_ngrok.bat`.
                  <Button asChild variant="link" className="px-1 h-auto py-0">
                     <Link href="/dashboard/pengaturan/aplikasi">
                         Buka Pengaturan Aplikasi untuk mengatur URL Webhook <ChevronsRight className="h-4 w-4" />
@@ -146,27 +155,6 @@ export default function NotifikasiPage() {
             </Alert>
             
             <TestNotificationForm />
-
-            <Card>
-                <CardHeader>
-                    <CardTitle>Solusi Alternatif: Telegram</CardTitle>
-                    <CardDescription>
-                        Jika Anda mengalami kendala atau membutuhkan solusi yang lebih stabil tanpa bergantung pada komputer lokal, pertimbangkan untuk menggunakan Telegram.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                     <Alert variant="destructive">
-                        <Info className="h-4 w-4" />
-                        <AlertTitle>Informasi Penting</AlertTitle>
-                        <AlertDescription>
-                           Solusi server lokal `whatsapp-web.js` tidak resmi dan memiliki risiko nomor Anda diblokir. Gunakan dengan nomor WhatsApp yang siap Anda relakan. Solusi Telegram 100% gratis, resmi, dan tanpa risiko pemblokiran.
-                        </AlertDescription>
-                    </Alert>
-                    <p className="mt-4 text-sm text-muted-foreground">
-                       Integrasi Telegram sangat cepat, andal, dan tidak memerlukan server lokal. Anda hanya perlu membuat Bot di Telegram dan memasukkan tokennya.
-                    </p>
-                </CardContent>
-            </Card>
         </div>
     )
 }
