@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Handles all student and parent notifications via an external webhook.
@@ -16,6 +17,7 @@ type AppConfig = {
     appName?: string;
     logoUrl?: string;
     notificationWebhookUrl?: string;
+    groupWaId?: string;
 };
 type Class = { id: string; name: string; grade: string };
 export type SerializableAttendanceRecord = {
@@ -61,7 +63,8 @@ async function sendToWebhook(payload: object) {
     }
 
     try {
-        const response = await fetch(webhookUrl, {
+        // We now expect the full endpoint to be just '/send' on the local server
+        const response = await fetch(`${webhookUrl}/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -115,7 +118,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     ];
     
     const message = messageLines.join("\n");
-    await sendToWebhook({ recipient: studentWaNumber, message });
+    await sendToWebhook({ recipient: studentWaNumber, message, isGroup: false });
 }
 
 /**
@@ -162,7 +165,7 @@ export async function sendMonthlyRecapToParent(
     ];
 
     const message = messageLines.join("\n");
-    await sendToWebhook({ recipient: studentWaNumber, message });
+    await sendToWebhook({ recipient: studentWaNumber, message, isGroup: false });
 }
 
 /**
@@ -180,6 +183,14 @@ export async function sendClassMonthlyRecap(
     year: number,
     summary: { [studentId: string]: MonthlySummaryData }
 ) {
+    const config = await getAppConfig();
+    const groupWaId = config?.groupWaId;
+
+    if (!groupWaId) {
+        console.warn("Group WhatsApp ID is not set. Skipping class recap notification.");
+        return;
+    }
+
     let totalPresent = 0;
     let totalLate = 0;
     let totalSick = 0;
@@ -201,10 +212,10 @@ export async function sendClassMonthlyRecap(
 
     const messageLines = [
         "🏫 *Laporan Bulanan untuk Wali Kelas*",
-        `*Kelas:* ${className} (${grade})`,
+        `*Target:* ${className} (${grade})`,
         `*Periode:* ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`,
         "",
-        `Berikut adalah rekapitulasi absensi kolektif untuk ${totalStudents} siswa di kelas Anda:`,
+        `Berikut adalah rekapitulasi absensi kolektif untuk ${totalStudents} siswa:`,
         "",
         "📈 *STATISTIK KELAS:*",
         `Total Kehadiran (Hadir+Terlambat): ${totalKehadiran}`,
@@ -216,6 +227,6 @@ export async function sendClassMonthlyRecap(
     ];
     
     const message = messageLines.join("\n");
-    // 'GROUP' is a special recipient keyword for the local server
-    await sendToWebhook({ recipient: 'GROUP', message });
+    
+    await sendToWebhook({ recipient: groupWaId, message, isGroup: true });
 }

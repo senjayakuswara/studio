@@ -316,7 +316,7 @@ export default function RekapitulasiPage() {
                 }
             }
             if (className) {
-                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary, groupWaId);
+                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary);
             }
         }
         
