@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
@@ -31,7 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, Woman, XCircle } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -42,7 +43,7 @@ import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string, grade: string, parentWaNumber?: string }
+type Student = { id: string; nisn: string; nama: string; classId: string, grade: string, jenisKelamin: "Laki-laki" | "Perempuan", parentWaNumber?: string }
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
@@ -62,6 +63,11 @@ type LogMessage = {
     timestamp: string
     message: string
     type: 'success' | 'error' | 'info'
+}
+type FeedbackOverlayState = {
+    show: boolean;
+    type: 'loading' | 'success' | 'error';
+    student?: Student;
 }
 
 type AttendancePageClientProps = {
@@ -90,6 +96,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" } | null>(null);
+    const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
     
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null)
@@ -276,15 +283,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
     }, [scannerContainerId]);
 
-    const prevIsProcessing = useRef(isProcessing);
     useEffect(() => {
-        // This effect runs when isProcessing changes.
-        // We only want to re-focus the input when processing has *just* finished.
-        if (prevIsProcessing.current && !isProcessing && !isCameraActive) {
+        if (!isProcessing && !isCameraActive) {
             scannerInputRef.current?.focus();
         }
-        // Update the ref to the current value for the next render.
-        prevIsProcessing.current = isProcessing;
     }, [isProcessing, isCameraActive]);
 
 
@@ -294,13 +296,25 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         processingLock.current = true;
         setIsProcessing(true);
+        setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
+
+        const cleanup = (type: 'success' | 'error', student?: Student) => {
+            setFeedbackOverlay({ show: true, type, student });
+            setTimeout(() => {
+                setHighlightedNisn(null);
+                setFeedbackOverlay({ show: false, type: 'loading' });
+                processingLock.current = false;
+                setIsProcessing(false);
+            }, 1500);
+        };
 
         try {
             if (!schoolHours) {
                 addLog("Error: Pengaturan jam belum dimuat.", "error");
                 toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
                 playSound('error');
+                cleanup('error');
                 return;
             }
     
@@ -311,6 +325,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
                 toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
                 playSound('error');
+                cleanup('error');
                 return;
             }
             
@@ -320,6 +335,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
                 playSound('error');
+                cleanup('error', student);
                 return;
             }
     
@@ -331,6 +347,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
                 playSound('error');
+                cleanup('error', student);
                 return;
             }
     
@@ -344,6 +361,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
                     playSound('error');
+                    cleanup('error', student);
                     return;
                 }
     
@@ -377,8 +395,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
                 playSound('success');
-                
                 notifyOnAttendance(serializableRecordForNotification(newRecord));
+                cleanup('success', student);
             } 
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
@@ -386,6 +404,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
                     playSound('error');
+                    cleanup('error', student);
                     return;
                 }
                  const payload = { timestampPulang: Timestamp.fromDate(now) };
@@ -397,13 +416,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  setHighlightedNisn({ nisn: student.nisn, type: 'success' });
                  toast({ title: "Absen Pulang Berhasil" });
                  playSound('success');
-                
                  notifyOnAttendance(serializableRecordForNotification(updatedRecord as AttendanceRecord));
+                 cleanup('success', student);
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
                 playSound('error');
+                cleanup('error', student);
             }
         } catch (error) {
             console.error("Error handling scan:", error);
@@ -411,10 +431,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
             playSound('error');
-        } finally {
-            setTimeout(() => setHighlightedNisn(null), 1500);
-            processingLock.current = false;
-            setIsProcessing(false);
+            cleanup('error');
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
@@ -511,8 +528,35 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }
 
+    const renderFeedbackIcon = () => {
+        if (feedbackOverlay.type === 'loading') {
+            return <Loader2 className="h-32 w-32 animate-spin text-white" />;
+        }
+        if (feedbackOverlay.type === 'error') {
+            return <XCircle className="h-32 w-32 text-red-400" />;
+        }
+        if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
+            if (feedbackOverlay.student.jenisKelamin === 'Perempuan') {
+                return <Woman className="h-32 w-32 text-green-300" />;
+            }
+            return <User className="h-32 w-32 text-green-300" />;
+        }
+        return null;
+    };
+
 
     return (
+    <>
+    {feedbackOverlay.show && (
+            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
+                <div className="p-8 rounded-full bg-white/10">
+                    {renderFeedbackIcon()}
+                </div>
+                {feedbackOverlay.student && (
+                     <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
+                )}
+            </div>
+    )}
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
             <div>
@@ -708,5 +752,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             </CardContent>
         </Card>
     </div>
+    </>
   )
 }
