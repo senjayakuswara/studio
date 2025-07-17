@@ -32,7 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, Woman, XCircle } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -123,6 +123,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || {};
     }, [attendanceData]);
+
+    useEffect(() => {
+        if (!isProcessing) {
+            scannerInputRef.current?.focus();
+        }
+    }, [isProcessing]);
 
     useEffect(() => {
         const initAudio = () => {
@@ -282,13 +288,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
         };
     }, [scannerContainerId]);
-
-    useEffect(() => {
-        if (!isProcessing && !isCameraActive) {
-            scannerInputRef.current?.focus();
-        }
-    }, [isProcessing, isCameraActive]);
-
 
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
@@ -536,9 +535,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             return <XCircle className="h-32 w-32 text-red-400" />;
         }
         if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
-            if (feedbackOverlay.student.jenisKelamin === 'Perempuan') {
-                return <Woman className="h-32 w-32 text-green-300" />;
-            }
             return <User className="h-32 w-32 text-green-300" />;
         }
         return null;
