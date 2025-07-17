@@ -93,27 +93,39 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     
     let timestamp: Date;
     let title: string;
-    const finalStatus = record.timestampPulang ? 'Pulang' : record.status;
+    let finalStatus: string;
 
     if (record.timestampPulang) {
         timestamp = new Date(record.timestampPulang);
-        title = `Absensi Pulang: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
+        title = `Absensi Pulang`;
+        finalStatus = 'Pulang';
     } else if (record.timestampMasuk) {
         timestamp = new Date(record.timestampMasuk);
-        title = `Absensi Masuk: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
+        title = `Absensi Masuk`;
+        if(record.status === 'Hadir') {
+            finalStatus = 'Hadir (Tepat Waktu)';
+        } else if (record.status === 'Terlambat') {
+            finalStatus = 'Hadir (Terlambat)';
+        } else {
+            finalStatus = record.status;
+        }
     } else {
-        timestamp = new Date(); 
-        title = `Informasi Absensi: ${format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID })}`;
+        timestamp = new Date(record.recordDate); 
+        title = `Informasi Absensi`;
+        finalStatus = record.status;
     }
+
+    const formattedDate = format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = format(timestamp, "HH:mm:ss", { locale: localeID });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
-        `*${title}*`,
+        `*${title}: ${formattedDate}*`,
         "",
         `👤 *Nama*      : ${record.studentName}`,
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
-        `⏰ *Jam*       : ${format(timestamp, "HH:mm:ss")}`,
+        `⏰ *Jam*       : ${formattedTime}`,
         `👋 *Status*    : *${finalStatus}*`
     ];
     
