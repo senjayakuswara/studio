@@ -3,7 +3,10 @@
 import { useState, useEffect, type ChangeEvent } from "react"
 import { doc, getDoc, setDoc } from "firebase/firestore"
 import Image from "next/image"
-import { UploadCloud, Loader2 } from "lucide-react"
+import { UploadCloud, Loader2, TestTube } from "lucide-react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import * as z from "zod"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -18,7 +21,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 
+// Types & Schemas
 type AppSettings = {
     appName: string
     logoUrl: string | null
@@ -33,7 +38,16 @@ type ThemeSettings = {
     accent: string;
 }
 
-// --- Color Conversion Utilities ---
+const testSchema = z.object({
+  recipient: z.string().refine(val => /^\d{10,15}$/.test(val), {
+    message: "Nomor WhatsApp harus berupa angka 10-15 digit (contoh: 6281234567890)."
+  }),
+  message: z.string().min(1, "Pesan tidak boleh kosong."),
+});
+
+type TestFormValues = z.infer<typeof testSchema>;
+
+// Color Conversion Utilities
 function hslStringToHex(hslString: string): string {
     const [h, s, l] = hslString.split(" ").map(val => parseFloat(val.replace('%', '')));
     const s_norm = s / 100;
@@ -90,6 +104,107 @@ function hexToHslString(hex: string): string {
     l = Math.round(l * 100);
 
     return `${h} ${s}% ${l}%`;
+}
+
+// Test Form Component
+function TestNotificationForm({ webhookUrl }: { webhookUrl: string }) {
+  const [isTesting, setIsTesting] = useState(false);
+  const { toast } = useToast();
+  const form = useForm<TestFormValues>({
+    resolver: zodResolver(testSchema),
+    defaultValues: {
+      recipient: "",
+      message: "Ini adalah pesan tes dari aplikasi E-Absensi Anda. Konfigurasi berhasil!",
+    }
+  });
+
+  async function onTestSubmit(values: TestFormValues) {
+    setIsTesting(true);
+    if (!webhookUrl) {
+      toast({
+          variant: "destructive",
+          title: "URL Webhook Belum Diatur",
+          description: "Harap isi dan simpan URL webhook di atas terlebih dahulu.",
+      });
+      setIsTesting(false);
+      return;
+    }
+
+    try {
+      const payload = {
+        recipient: values.recipient,
+        message: values.message,
+      };
+      
+      const response = await fetch(`${webhookUrl}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.ok) {
+        toast({ title: "Sukses", description: "Perintah kirim pesan berhasil dikirim ke server lokal Anda." });
+      } else {
+        const errorText = await response.text();
+        toast({ variant: "destructive", title: "Gagal Mengirim", description: `Server lokal merespons dengan kesalahan: ${errorText}` });
+      }
+
+    } catch (error) {
+      console.error("Error testing webhook:", error);
+      toast({ variant: "destructive", title: "Gagal Terhubung", description: "Tidak dapat terhubung ke URL webhook. Pastikan server lokal dan Ngrok berjalan dengan benar." });
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><TestTube />Uji Coba Notifikasi</CardTitle>
+        <CardDescription>
+          Setelah menyimpan URL Webhook, kirim pesan tes untuk memastikan semuanya berfungsi.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onTestSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="recipient"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nomor WhatsApp Tujuan</FormLabel>
+                  <FormControl>
+                    <Input placeholder="cth: 6281234567890" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="message"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Isi Pesan</FormLabel>
+                  <FormControl>
+                    <Input {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <div className="flex justify-end">
+              <Button type="submit" disabled={isTesting}>
+                {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Kirim Pesan Tes
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </CardContent>
+    </Card>
+  )
 }
 
 
@@ -182,7 +297,6 @@ export default function AppSettingsPage() {
             const docRef = doc(db, "settings", "appConfig");
             await setDoc(docRef, dataToSave, { merge: true });
 
-            // Apply theme immediately
             document.documentElement.style.setProperty('--primary', themeToSave.primary);
             document.documentElement.style.setProperty('--background', themeToSave.background);
             document.documentElement.style.setProperty('--accent', themeToSave.accent);
@@ -208,14 +322,18 @@ export default function AppSettingsPage() {
        <div className="flex items-center justify-between">
             <div>
                 <h1 className="font-headline text-3xl font-bold tracking-tight">Pengaturan Aplikasi</h1>
-                <p className="text-muted-foreground">Sesuaikan identitas dan fungsionalitas aplikasi.</p>
+                <p className="text-muted-foreground">Sesuaikan identitas, tampilan, dan koneksi notifikasi aplikasi.</p>
             </div>
+             <Button onClick={handleSave} disabled={isSaving || isLoading}>
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Simpan Semua Pengaturan
+            </Button>
         </div>
       <Card>
         <CardHeader>
-          <CardTitle>Informasi & Notifikasi</CardTitle>
+          <CardTitle>Identitas & Logo</CardTitle>
           <CardDescription>
-            Atur nama, logo, dan koneksi ke server notifikasi WhatsApp lokal Anda.
+            Atur nama dan logo aplikasi Anda.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -230,16 +348,6 @@ export default function AppSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="appName">Nama Aplikasi</Label>
                         <Input id="appName" value={settings.appName} onChange={handleSettingsChange} />
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="notificationWebhookUrl">URL Webhook Notifikasi</Label>
-                        <Input id="notificationWebhookUrl" value={settings.notificationWebhookUrl} onChange={handleSettingsChange} placeholder="Contoh: https://xxxx-xxxx.ngrok-free.app" />
-                        <p className="text-xs text-muted-foreground">URL ini didapatkan dari Ngrok yang berjalan di komputer lokal Anda.</p>
-                    </div>
-                     <div className="space-y-2">
-                        <Label htmlFor="groupWaId">Group WhatsApp ID (untuk Wali Kelas)</Label>
-                        <Input id="groupWaId" value={settings.groupWaId} onChange={handleSettingsChange} placeholder="Contoh: 12036304@g.us" />
-                        <p className="text-xs text-muted-foreground">ID grup untuk mengirim rekapitulasi bulanan. Dapatkan dari log server lokal.</p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="app-logo">Logo Aplikasi</Label>
@@ -262,6 +370,39 @@ export default function AppSettingsPage() {
             )}
         </CardContent>
       </Card>
+      
+       <Card>
+        <CardHeader>
+          <CardTitle>Koneksi & Notifikasi</CardTitle>
+          <CardDescription>
+            Atur koneksi ke server notifikasi WhatsApp lokal Anda.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+             {isLoading ? (
+                <div className="space-y-6">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-10 w-full" />
+                </div>
+             ) : (
+                <>
+                 <div className="space-y-2">
+                    <Label htmlFor="notificationWebhookUrl">URL Webhook Notifikasi</Label>
+                    <Input id="notificationWebhookUrl" value={settings.notificationWebhookUrl} onChange={handleSettingsChange} placeholder="Contoh: https://xxxx-xxxx.ngrok-free.app" />
+                    <p className="text-xs text-muted-foreground">URL ini didapatkan dari Ngrok yang berjalan di komputer lokal Anda.</p>
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="groupWaId">Group WhatsApp ID (untuk Wali Kelas)</Label>
+                    <Input id="groupWaId" value={settings.groupWaId} onChange={handleSettingsChange} placeholder="Contoh: 12036304@g.us" />
+                    <p className="text-xs text-muted-foreground">ID grup untuk mengirim rekapitulasi bulanan. Dapatkan dari log server lokal.</p>
+                </div>
+                </>
+             )}
+        </CardContent>
+       </Card>
+       
+       <TestNotificationForm webhookUrl={settings.notificationWebhookUrl} />
+       
        <Card>
         <CardHeader>
           <CardTitle>Tema & Tampilan</CardTitle>
@@ -313,13 +454,6 @@ export default function AppSettingsPage() {
             )}
         </CardContent>
       </Card>
-
-      <div className="flex justify-end">
-          <Button onClick={handleSave} disabled={isSaving || isLoading}>
-            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Simpan Pengaturan
-          </Button>
-      </div>
     </div>
   )
 }
