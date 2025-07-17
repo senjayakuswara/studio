@@ -14,6 +14,11 @@ let clientInstance: Client | null = null;
 let isInitializing = false;
 let isReady = false;
 
+// Helper function for random delay
+const randomDelay = (min: number, max: number) => {
+    return new Promise(resolve => setTimeout(resolve, Math.random() * (max - min) + min));
+}
+
 export const getWhatsappClient = (): Promise<Client> => {
     return new Promise((resolve, reject) => {
         if (clientInstance && isReady) {
@@ -105,7 +110,7 @@ export const getWhatsappClient = (): Promise<Client> => {
 };
 
 /**
- * Sends a message to a specific WhatsApp number.
+ * Sends a message to a specific WhatsApp number with a random delay.
  * @param number The phone number in international format (e.g., '6281234567890').
  * @param message The text message to send.
  */
@@ -116,8 +121,13 @@ export async function sendWhatsappMessage(number: string, message: string): Prom
 
     try {
         const client = await getWhatsappClient();
-        // WhatsApp IDs are in the format `[number]@c.us`
-        const chatId = `${number}@c.us`; 
+        
+        // ** ADDED RANDOM DELAY **
+        // Wait for a random time between 1 to 5 seconds before sending
+        await randomDelay(1000, 5000); 
+
+        // WhatsApp IDs are in the format `[number]@c.us` or `[number]@g.us` for groups
+        const chatId = number.includes('@g.us') ? number : `${number}@c.us`;
         await client.sendMessage(chatId, message);
         console.log(`Message sent successfully to ${number}`);
         return { success: true, message: `Message sent to ${number}` };

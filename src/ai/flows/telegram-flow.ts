@@ -373,12 +373,10 @@ export async function runMonthlyRecapAutomation() {
     });
 
     // 5. Send notifications
-    // Send to individual parents
+    // NOTE: The random delay is now handled inside sendWhatsappMessage, so we can remove the explicit delay here.
     console.log(`Sending recaps to ${students.length} parents...`);
     for (const studentData of Object.values(summary)) {
         await sendMonthlyRecapToParent(studentData, targetMonth, targetYear);
-        // Add a small delay to avoid hitting rate limits
-        await new Promise(resolve => setTimeout(resolve, 3000)); // Increased delay for WhatsApp
     }
     console.log("Finished sending recaps to parents.");
 
@@ -397,7 +395,6 @@ export async function runMonthlyRecapAutomation() {
         const classInfo = classes.find(c => c.id === classId);
         if (classInfo) {
             await sendClassMonthlyRecap(classInfo.name, classInfo.grade, targetMonth, targetYear, classSummaries[classId]);
-            await new Promise(resolve => setTimeout(resolve, 3000));
         }
     }
     console.log("Finished sending recaps to advisors.");
