@@ -9,7 +9,7 @@
 
 import { collection, doc, getDoc, getDocs, query, where, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -91,16 +91,16 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     const classInfo = classSnap.data() as Class;
     
-    let timestamp: Date;
+    let timestampStr: string | null = null;
     let title: string;
     let finalStatus: string;
 
     if (record.timestampPulang) {
-        timestamp = new Date(record.timestampPulang);
+        timestampStr = record.timestampPulang;
         title = `Absensi Pulang`;
         finalStatus = 'Pulang';
     } else if (record.timestampMasuk) {
-        timestamp = new Date(record.timestampMasuk);
+        timestampStr = record.timestampMasuk;
         title = `Absensi Masuk`;
         if(record.status === 'Hadir') {
             finalStatus = 'Hadir (Tepat Waktu)';
@@ -110,10 +110,16 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
             finalStatus = record.status;
         }
     } else {
-        timestamp = new Date(record.recordDate); 
+        timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
     }
+
+    // When parsing an ISO string, it's interpreted as UTC.
+    // The `format` function, however, will format it to the system's local time.
+    // Since the server is likely in UTC, we use the original client-generated ISO string
+    // which is already in the correct timezone.
+    const timestamp = parseISO(timestampStr);
 
     const formattedDate = format(timestamp, "eeee, dd MMMM yyyy", { locale: localeID });
     const formattedTime = format(timestamp, "HH:mm:ss", { locale: localeID });
