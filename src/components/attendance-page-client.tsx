@@ -102,7 +102,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const scannerInputRef = useRef<HTMLInputElement>(null)
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
-    const audioContextRef = useRef<AudioContext | null>(null);
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -125,57 +124,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [attendanceData]);
 
     useEffect(() => {
+        // This effect ensures the input is focused whenever processing is finished
         if (!isProcessing) {
             scannerInputRef.current?.focus();
         }
     }, [isProcessing]);
 
-    useEffect(() => {
-        const initAudio = () => {
-            if (!audioContextRef.current) {
-                try {
-                    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-                } catch(e) { console.error("Web Audio API is not supported in this browser"); }
-            }
-            document.removeEventListener('click', initAudio);
-            document.removeEventListener('keydown', initAudio);
-        };
-        document.addEventListener('click', initAudio);
-        document.addEventListener('keydown', initAudio);
-
-        return () => {
-            document.removeEventListener('click', initAudio);
-            document.removeEventListener('keydown', initAudio);
-        }
-    }, []);
-
     const playSound = useCallback((type: 'success' | 'error') => {
-        const audioCtx = audioContextRef.current;
-        if (!audioCtx) return;
-
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume();
-        }
-
-        const oscillator = audioCtx.createOscillator();
-        const gainNode = audioCtx.createGain();
-        oscillator.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-
-        if (type === 'success') {
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(1046.50, audioCtx.currentTime); 
-            gainNode.gain.setValueAtTime(0.8, audioCtx.currentTime); 
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5); 
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 1.5);
-        } else { // error
-            oscillator.type = 'sawtooth';
-            oscillator.frequency.setValueAtTime(164.81, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime); 
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1.5);
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + 1.5);
+        try {
+            const audio = new Audio(type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav');
+            audio.play().catch(e => console.error("Error playing sound:", e));
+        } catch(e) {
+            console.error("Could not play sound:", e);
         }
     }, []);
 
@@ -454,10 +414,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setIsCameraInitializing(true);
         setCameraError(null);
         
-        if (audioContextRef.current?.state === 'suspended') {
-            audioContextRef.current.resume();
-        }
-        
         try {
             await html5QrCodeRef.current.start(
                 { facingMode: "user" },
@@ -535,7 +491,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             return <XCircle className="h-32 w-32 text-red-400" />;
         }
         if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
-            return <User className="h-32 w-32 text-green-300" />;
+             return <User className="h-32 w-32 text-green-300" />;
         }
         return null;
     };
