@@ -5,7 +5,7 @@ import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, upda
 import { Html5Qrcode } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { notifyParentOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/telegram-flow"
+import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 import {
   Card,
   CardContent,
@@ -42,7 +42,7 @@ import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string, grade: string }
+type Student = { id: string; nisn: string; nama: string; classId: string, grade: string, parentWaNumber?: string }
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
@@ -56,6 +56,7 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
   recordDate: Timestamp
   notes?: string
+  parentWaNumber?: string
 }
 type LogMessage = {
     timestamp: string
@@ -165,13 +166,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, []);
 
-    const serializableRecordForWa = (record: AttendanceRecord): SerializableAttendanceRecord => {
+    const serializableRecordForNotification = (record: AttendanceRecord): SerializableAttendanceRecord => {
         return {
-            ...record,
             id: record.id ?? undefined,
+            studentId: record.studentId,
+            nisn: record.nisn,
+            studentName: record.studentName,
+            classId: record.classId,
+            status: record.status as any, // Cast because AttendanceStatus includes "Belum Absen"
             timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
             timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
             recordDate: record.recordDate.toDate().toISOString(),
+            parentWaNumber: record.parentWaNumber
         }
     }
 
@@ -229,10 +235,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             );
                             const attendanceSnapshot = await getDocs(attendanceQuery);
                             attendanceSnapshot.forEach(doc => {
-                                const data = doc.data();
+                                const data = doc.data() as Omit<AttendanceRecord, 'id'>;
+                                const studentInfo = studentList.find(s => s.id === data.studentId);
                                 initialAttendanceData[data.studentId] = {
                                     id: doc.id,
                                     ...data,
+                                    parentWaNumber: studentInfo?.parentWaNumber
                                 } as AttendanceRecord;
                             });
                         }
@@ -334,6 +342,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 
                 const payload = {
                     studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
+                    parentWaNumber: student.parentWaNumber,
                     status,
                     timestampMasuk: Timestamp.fromDate(now),
                     timestampPulang: null,
@@ -357,7 +366,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
                 playSound('success');
                 
-                notifyParentOnAttendance(serializableRecordForWa(newRecord));
+                notifyOnAttendance(serializableRecordForNotification(newRecord));
             } 
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
@@ -377,7 +386,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  toast({ title: "Absen Pulang Berhasil" });
                  playSound('success');
                 
-                 notifyParentOnAttendance(serializableRecordForWa(updatedRecord as AttendanceRecord));
+                 notifyOnAttendance(serializableRecordForNotification(updatedRecord as AttendanceRecord));
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
@@ -457,6 +466,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         const payload: Omit<AttendanceRecord, 'id' | 'timestampPulang'> & { timestampPulang: Timestamp | null } = {
             studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
+            parentWaNumber: student.parentWaNumber,
             status,
             timestampMasuk: null,
             timestampPulang: null,
@@ -483,7 +493,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
             
-            notifyParentOnAttendance(serializableRecordForWa(newRecord));
+            notifyOnAttendance(serializableRecordForNotification(newRecord));
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');

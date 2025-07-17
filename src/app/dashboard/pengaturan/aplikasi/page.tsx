@@ -19,6 +19,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 
+type AppSettings = {
+    appName: string
+    logoUrl: string | null
+    notificationWebhookUrl: string
+    groupWaId: string
+    theme: ThemeSettings
+}
+
 type ThemeSettings = {
     primary: string;
     background: string;
@@ -86,8 +94,12 @@ function hexToHslString(hex: string): string {
 
 
 export default function AppSettingsPage() {
-    const [appName, setAppName] = useState("")
-    const [logoUrl, setLogoUrl] = useState<string | null>(null)
+    const [settings, setSettings] = useState<Omit<AppSettings, 'theme'>>({
+        appName: "AbTrack",
+        logoUrl: null,
+        notificationWebhookUrl: "",
+        groupWaId: ""
+    });
     const [theme, setTheme] = useState<ThemeSettings>({
         primary: "#0f172a",
         background: "#fafafa",
@@ -104,9 +116,13 @@ export default function AppSettingsPage() {
                 const docRef = doc(db, "settings", "appConfig")
                 const docSnap = await getDoc(docRef)
                 if (docSnap.exists()) {
-                    const data = docSnap.data()
-                    setAppName(data.appName || "AbTrack")
-                    setLogoUrl(data.logoUrl || null)
+                    const data = docSnap.data() as Partial<AppSettings>;
+                    setSettings({
+                        appName: data.appName || "AbTrack",
+                        logoUrl: data.logoUrl || null,
+                        notificationWebhookUrl: data.notificationWebhookUrl || "",
+                        groupWaId: data.groupWaId || "",
+                    });
                     if (data.theme) {
                          setTheme({
                             primary: hslStringToHex(data.theme.primary),
@@ -114,8 +130,6 @@ export default function AppSettingsPage() {
                             accent: hslStringToHex(data.theme.accent),
                         });
                     }
-                } else {
-                    setAppName("AbTrack")
                 }
             } catch (error) {
                 console.error("Error fetching settings:", error)
@@ -136,7 +150,7 @@ export default function AppSettingsPage() {
         if (file) {
             const reader = new FileReader()
             reader.onloadend = () => {
-                setLogoUrl(reader.result as string)
+                setSettings(prev => ({ ...prev, logoUrl: reader.result as string }));
             }
             reader.readAsDataURL(file)
         }
@@ -144,6 +158,11 @@ export default function AppSettingsPage() {
 
     const handleThemeChange = (id: keyof ThemeSettings, value: string) => {
         setTheme(prev => ({ ...prev, [id]: value }))
+    }
+
+    const handleSettingsChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const { id, value } = e.target;
+        setSettings(prev => ({ ...prev, [id]: value }));
     }
 
     const handleSave = async () => {
@@ -155,8 +174,13 @@ export default function AppSettingsPage() {
                 accent: hexToHslString(theme.accent),
             };
 
+            const dataToSave: AppSettings = {
+                ...settings,
+                theme: themeToSave,
+            };
+
             const docRef = doc(db, "settings", "appConfig");
-            await setDoc(docRef, { appName, logoUrl, theme: themeToSave }, { merge: true });
+            await setDoc(docRef, dataToSave, { merge: true });
 
             // Apply theme immediately
             document.documentElement.style.setProperty('--primary', themeToSave.primary);
@@ -184,40 +208,45 @@ export default function AppSettingsPage() {
        <div className="flex items-center justify-between">
             <div>
                 <h1 className="font-headline text-3xl font-bold tracking-tight">Pengaturan Aplikasi</h1>
-                <p className="text-muted-foreground">Sesuaikan identitas dan tampilan aplikasi.</p>
+                <p className="text-muted-foreground">Sesuaikan identitas dan fungsionalitas aplikasi.</p>
             </div>
         </div>
       <Card>
         <CardHeader>
-          <CardTitle>Informasi Aplikasi</CardTitle>
+          <CardTitle>Informasi & Notifikasi</CardTitle>
           <CardDescription>
-            Pengaturan ini akan mengubah bagaimana aplikasi ditampilkan kepada pengguna, termasuk di halaman login.
+            Atur nama, logo, dan koneksi ke server notifikasi WhatsApp lokal Anda.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
             {isLoading ? (
                 <div className="space-y-6">
-                    <div className="space-y-2">
-                        <Skeleton className="h-4 w-24" />
-                        <Skeleton className="h-10 w-full" />
-                    </div>
-                    <div className="space-y-2">
-                         <Skeleton className="h-4 w-24" />
-                         <Skeleton className="h-32 w-full" />
-                    </div>
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-32 w-full" />
                 </div>
             ) : (
                 <>
                     <div className="space-y-2">
-                        <Label htmlFor="app-name">Nama Aplikasi</Label>
-                        <Input id="app-name" value={appName} onChange={(e) => setAppName(e.target.value)} />
+                        <Label htmlFor="appName">Nama Aplikasi</Label>
+                        <Input id="appName" value={settings.appName} onChange={handleSettingsChange} />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="notificationWebhookUrl">URL Webhook Notifikasi</Label>
+                        <Input id="notificationWebhookUrl" value={settings.notificationWebhookUrl} onChange={handleSettingsChange} placeholder="Contoh: https://xxxx-xxxx.ngrok-free.app" />
+                        <p className="text-xs text-muted-foreground">URL ini didapatkan dari Ngrok yang berjalan di komputer lokal Anda.</p>
+                    </div>
+                     <div className="space-y-2">
+                        <Label htmlFor="groupWaId">Group WhatsApp ID (untuk Wali Kelas)</Label>
+                        <Input id="groupWaId" value={settings.groupWaId} onChange={handleSettingsChange} placeholder="Contoh: 12036304@g.us" />
+                        <p className="text-xs text-muted-foreground">ID grup untuk mengirim rekapitulasi bulanan. Dapatkan dari log server lokal.</p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="app-logo">Logo Aplikasi</Label>
                         <div className="flex items-center justify-center w-full">
                             <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative">
-                                {logoUrl ? (
-                                    <Image src={logoUrl} alt="Logo Preview" layout="fill" objectFit="contain" className="rounded-lg p-2" />
+                                {settings.logoUrl ? (
+                                    <Image src={settings.logoUrl} alt="Logo Preview" layout="fill" objectFit="contain" className="rounded-lg p-2" />
                                 ) : (
                                     <div className="flex flex-col items-center justify-center pt-5 pb-6">
                                         <UploadCloud className="w-8 h-8 mb-4 text-muted-foreground" />
