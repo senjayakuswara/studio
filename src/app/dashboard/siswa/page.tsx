@@ -109,7 +109,7 @@ export default function SiswaPage() {
   const { toast } = useToast()
 
   const classObjectMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
-  const classLookupMap = useMemo(() => new Map(classes.map(c => [`${c.grade.toUpperCase()}|${c.name.toUpperCase()}`, c.id])), [classes]);
+  const classLookupMap = useMemo(() => new Map(classes.map(c => [`${c.grade.toUpperCase().replace(/\s/g, '')}|${c.name.toUpperCase().replace(/\s/g, '')}`, c.id])), [classes]);
   const classMapForPreview = useMemo(() => new Map(classes.map(c => [c.id, `${c.name} (${c.grade})`])), [classes]);
   
   const filteredStudents = useMemo(() => {
@@ -375,17 +375,24 @@ export default function SiswaPage() {
             let invalidCount = 0;
 
             json.forEach((row: any[]) => {
-                const grade = String(row[2] || "").toUpperCase();
-                const className = String(row[3] || "").toUpperCase();
+                const grade = String(row[2] || "").toUpperCase().replace(/\s/g, '');
+                const className = String(row[3] || "").toUpperCase().replace(/\s/g, '');
                 const classId = classLookupMap.get(`${grade}|${className}`);
 
+                let jenisKelamin = String(row[4] || "").trim();
+                if (jenisKelamin.match(/^l(aki-?laki)?$/i)) {
+                    jenisKelamin = "Laki-laki";
+                } else if (jenisKelamin.match(/^p(erempuan)?$/i)) {
+                    jenisKelamin = "Perempuan";
+                }
+
                 const studentData = {
-                    nisn: String(row[0] || ""),
-                    nama: String(row[1] || ""),
+                    nisn: String(row[0] || "").trim(),
+                    nama: String(row[1] || "").trim(),
                     classId: classId,
-                    jenisKelamin: String(row[4] || ""),
+                    jenisKelamin: jenisKelamin,
                     parentWaNumber: String(row[5] || "").trim() || undefined,
-                    status: String(row[6] || "Aktif")
+                    status: String(row[6] || "Aktif").trim()
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -416,10 +423,13 @@ export default function SiswaPage() {
             setImportedStudents(processedStudents);
             
             const toImportCount = processedStudents.filter(s => s.importStatus !== 'Identik').length;
-            if (toImportCount > 0) {
+            if (toImportCount > 0 || invalidCount > 0) {
+                let description = [];
+                if (toImportCount > 0) description.push(`Ditemukan ${toImportCount} data untuk diimpor/diperbarui.`);
+                if (invalidCount > 0) description.push(`${invalidCount} baris tidak valid (cek 'Tingkat' & 'Nama Kelas').`);
                 toast({
                     title: "File Diproses",
-                    description: `Ditemukan ${toImportCount} data untuk diimpor/diperbarui. ${invalidCount > 0 ? `${invalidCount} baris tidak valid.` : ''}`,
+                    description: description.join(' '),
                 });
             } else if (processedStudents.length > 0) {
                  toast({
@@ -722,7 +732,7 @@ export default function SiswaPage() {
                                         </TableCell>
                                         <TableCell>{student.nisn}</TableCell>
                                         <TableCell>{student.nama}</TableCell>
-                                        <TableCell>{classMapForPreview.get(student.classId) || "Error"}</TableCell>
+                                        <TableCell>{classMapForPreview.get(student.classId) || "Kelas tidak ditemukan"}</TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
@@ -964,5 +974,3 @@ export default function SiswaPage() {
     </div>
   )
 }
-
-    
