@@ -278,7 +278,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
 
     const handleScan = useCallback(async (nisn: string) => {
-        if (!nisn.trim() || processingLock.current) return;
+        const trimmedNisn = nisn.trim();
+        if (!trimmedNisn || processingLock.current) return;
         
         processingLock.current = true;
         setIsProcessing(true);
@@ -292,11 +293,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 return;
             }
     
-            const student = allStudents.find(s => s.nisn === nisn.trim());
+            const student = allStudents.find(s => s.nisn === trimmedNisn);
     
             if (!student) {
-                addLog(`NISN ${nisn} tidak ditemukan di tingkat ini.`, 'error');
-                setHighlightedNisn({ nisn: nisn.trim(), type: 'error' });
+                addLog(`NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`, 'error');
+                setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
                 toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
                 playSound('error');
                 return;
@@ -395,8 +396,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
         } catch (error) {
             console.error("Error handling scan:", error);
-            addLog(`Gagal memproses NISN ${nisn}.`, 'error');
-            setHighlightedNisn({ nisn: nisn.trim(), type: 'error' });
+            addLog(`Gagal memproses NISN ${trimmedNisn}.`, 'error');
+            setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
             toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
             playSound('error');
         } finally {
@@ -404,7 +405,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setTimeout(() => {
               processingLock.current = false;
               setIsProcessing(false);
-            }, 2000); 
+              // Re-focus the input element for the next scan
+              scannerInputRef.current?.focus();
+            }, 500); // A short delay to prevent race conditions
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
     
@@ -531,6 +534,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 handleScan(e.currentTarget.value);
                             }
                         }}
+                        autoFocus
                     />
                 </CardContent>
             </Card>
