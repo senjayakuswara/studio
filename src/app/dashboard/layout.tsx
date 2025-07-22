@@ -266,7 +266,7 @@ export default function DashboardLayout({
               <SidebarMenuItem>
                 <Link href="/dashboard/pengaturan/notifikasi">
                   <SidebarMenuButton
-                    tooltip="Notifikasi Telegram"
+                    tooltip="Antrean Notifikasi"
                     isActive={isActive("/dashboard/pengaturan/notifikasi")}
                   >
                     <Send />

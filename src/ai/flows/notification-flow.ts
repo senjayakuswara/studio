@@ -2,12 +2,13 @@
 'use server';
 /**
  * @fileOverview Handles all student and parent notifications via an external webhook.
- * - notifyOnAttendance: Sends daily attendance notifications.
- * - sendMonthlyRecapToParent: Sends a monthly recap to an individual parent.
- * - sendClassMonthlyRecap: Sends a monthly recap for a class to the advisors' group.
+ * - notifyOnAttendance: Creates a notification job in the queue.
+ * - sendMonthlyRecapToParent: Creates a notification job for a monthly parent recap.
+ * - sendClassMonthlyRecap: Creates a notification job for a monthly class recap.
+ * - processNotificationQueue: Processes pending notifications from the queue.
  */
 
-import { collection, doc, getDoc, getDocs, query, where, Timestamp } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where, Timestamp, addDoc, deleteDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
@@ -32,10 +33,27 @@ export type SerializableAttendanceRecord = {
   recordDate: string
   parentWaNumber?: string;
 };
-type MonthlySummaryData = {
+export type MonthlySummaryData = {
     studentInfo: { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; },
     summary: { H: number, T: number, S: number, I: number, A: number, D: number }
 };
+
+type WebhookPayload = {
+    recipient: string;
+    message: string;
+    isGroup: boolean;
+}
+
+export type NotificationJob = {
+    id: string;
+    type: 'attendance' | 'monthly_recap_parent' | 'monthly_recap_class';
+    payload: WebhookPayload;
+    status: 'pending' | 'success' | 'failed';
+    createdAt: Timestamp;
+    lastAttemptAt: Timestamp | null;
+    errorMessage?: string;
+    metadata?: object;
+}
 
 // Internal helper to get app config from Firestore
 async function getAppConfig(): Promise<AppConfig | null> {
@@ -53,35 +71,55 @@ async function getAppConfig(): Promise<AppConfig | null> {
 }
 
 // Internal helper to send a payload to the external webhook
-async function sendToWebhook(payload: object) {
+async function sendToWebhook(payload: WebhookPayload): Promise<{ success: true } | { success: false, error: string }> {
     const config = await getAppConfig();
     const webhookUrl = config?.notificationWebhookUrl;
     
     if (!webhookUrl) {
-        console.warn("Notification webhook URL is not set. Skipping notification.");
-        return;
+        const errorMsg = "Notification webhook URL is not set.";
+        console.warn(errorMsg);
+        return { success: false, error: errorMsg };
     }
 
     try {
-        // We now expect the full endpoint to be just '/send' on the local server
         const response = await fetch(`${webhookUrl}/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`Webhook failed with status ${response.status}:`, errorText);
+            return { success: false, error: `Webhook error (${response.status}): ${errorText}` };
         } else {
              console.log("Successfully sent payload to webhook.");
+             return { success: true };
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error("Failed to send to webhook:", error);
+        return { success: false, error: error.message || 'Failed to connect to webhook.' };
+    }
+}
+
+async function addJobToQueue(type: NotificationJob['type'], payload: WebhookPayload, metadata?: object) {
+    try {
+        await addDoc(collection(db, "notification_queue"), {
+            type,
+            payload,
+            metadata,
+            status: 'pending',
+            createdAt: Timestamp.now(),
+            lastAttemptAt: null,
+            errorMessage: null,
+        });
+    } catch (error) {
+        console.error("Failed to add job to notification queue:", error);
     }
 }
 
 /**
- * Formats and sends a daily attendance notification.
+ * Creates a job in the notification queue for a daily attendance event.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
@@ -140,11 +178,13 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     ];
     
     const message = messageLines.join("\n");
-    await sendToWebhook({ recipient: studentWaNumber, message, isGroup: false });
+    const webhookPayload: WebhookPayload = { recipient: studentWaNumber, message, isGroup: false };
+    
+    await addJobToQueue('attendance', webhookPayload, { studentName: record.studentName });
 }
 
 /**
- * Sends a monthly recap notification to a parent.
+ * Creates a job in the notification queue to send a monthly recap to a parent.
  * @param studentData The student's full summary data for the month.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
@@ -190,11 +230,13 @@ export async function sendMonthlyRecapToParent(
     ];
 
     const message = messageLines.join("\n");
-    await sendToWebhook({ recipient: studentWaNumber, message, isGroup: false });
+    const webhookPayload: WebhookPayload = { recipient: studentWaNumber, message, isGroup: false };
+
+    await addJobToQueue('monthly_recap_parent', webhookPayload, { studentName: student.nama });
 }
 
 /**
- * Sends a monthly recap for a class to a predefined group.
+ * Creates a job in the notification queue to send a monthly class recap.
  * @param className The name of the class being reported.
  * @param grade The grade of the class.
  * @param month The month of the recap (0-11).
@@ -252,6 +294,43 @@ export async function sendClassMonthlyRecap(
     ];
     
     const message = messageLines.join("\n");
+    const webhookPayload: WebhookPayload = { recipient: groupWaId, message, isGroup: true };
     
-    await sendToWebhook({ recipient: groupWaId, message, isGroup: true });
+    await addJobToQueue('monthly_recap_class', webhookPayload, { className, grade });
+}
+
+/**
+ * Processes a single notification job from the queue.
+ */
+export async function processSingleNotification(jobId: string): Promise<{ success: boolean }> {
+    try {
+        const jobRef = doc(db, "notification_queue", jobId);
+        const jobSnap = await getDoc(jobRef);
+        if (!jobSnap.exists()) {
+            console.error(`Job with ID ${jobId} not found.`);
+            return { success: false };
+        }
+        const job = jobSnap.data() as Omit<NotificationJob, 'id'>;
+
+        await updateDoc(jobRef, { lastAttemptAt: Timestamp.now() });
+        const result = await sendToWebhook(job.payload);
+
+        if (result.success) {
+            await updateDoc(jobRef, { status: 'success', errorMessage: null });
+        } else {
+            await updateDoc(jobRef, { status: 'failed', errorMessage: result.error });
+        }
+        return { success: result.success };
+    } catch (error: any) {
+        console.error(`Error processing job ${jobId}:`, error);
+        await updateDoc(doc(db, "notification_queue", jobId), { status: 'failed', errorMessage: error.message });
+        return { success: false };
+    }
+}
+
+/**
+ * Deletes a notification job from the queue.
+ */
+export async function deleteNotificationJob(jobId: string): Promise<void> {
+    await deleteDoc(doc(db, "notification_queue", jobId));
 }
