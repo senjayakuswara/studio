@@ -59,6 +59,13 @@ export default function JadwalPage() {
 
   const form = useForm<z.infer<typeof holidaySchema>>({
     resolver: zodResolver(holidaySchema),
+    defaultValues: {
+      name: "",
+      dateRange: {
+        from: undefined,
+        to: undefined,
+      }
+    }
   })
 
   useEffect(() => {
