@@ -66,7 +66,7 @@ type LogMessage = {
 }
 type FeedbackOverlayState = {
     show: boolean;
-    type: 'loading' | 'success' | 'error';
+    type: 'loading' | 'success' | 'error' | 'notification_failure';
     student?: Student;
 }
 
@@ -258,7 +258,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
-        const cleanup = (type: 'success' | 'error', student?: Student) => {
+        const cleanup = (type: FeedbackOverlayState['type'], student?: Student, isPermanent: boolean = false) => {
+             if (isPermanent) {
+                setFeedbackOverlay({ show: true, type, student });
+                processingLock.current = false;
+                setIsProcessing(false);
+                return;
+            }
+
             setFeedbackOverlay({ show: true, type, student });
             setTimeout(() => {
                 setHighlightedNisn(null);
@@ -314,7 +321,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const jamPulangTime = new Date();
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
     
+            // Define a temporary record for notification check
+            let tempRecordForNotif: Omit<AttendanceRecord, 'id'> & { id?: string };
+            let isAbsenMasuk = false;
+
             if (!existingRecord || !existingRecord.timestampMasuk) {
+                isAbsenMasuk = true;
                  if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
@@ -329,33 +341,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
                 const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
                 
-                const payload = {
+                tempRecordForNotif = {
                     studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
-                    parentWaNumber: student.parentWaNumber,
-                    status,
-                    timestampMasuk: Timestamp.fromDate(now),
-                    timestampPulang: null,
+                    parentWaNumber: student.parentWaNumber, status,
+                    timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
                     recordDate: Timestamp.fromDate(startOfDay(now)),
                 };
-    
-                let docId: string;
-                if (existingRecord?.id) {
-                    docId = existingRecord.id;
-                    const docRef = doc(db, "attendance", docId)
-                    await updateDoc(docRef, payload);
-                } else {
-                    const docRef = await addDoc(collection(db, "attendance"), payload);
-                    docId = docRef.id;
-                }
-                
-                const newRecord = { ...payload, id: docId };
-                setAttendanceData(prev => ({...prev, [student.id]: newRecord }));
-                addLog(`Absen Masuk: ${student.nama} tercatat ${status}.`, 'success');
-                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                toast({ title: "Absen Masuk Berhasil", description: `${student.nama} tercatat ${status}.` });
-                playSound('success');
-                notifyOnAttendance(serializableRecordForNotification(newRecord));
-                cleanup('success', student);
             } 
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
@@ -366,24 +357,48 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     cleanup('error', student);
                     return;
                 }
-                 const payload = { timestampPulang: Timestamp.fromDate(now) };
-                 await updateDoc(doc(db, "attendance", existingRecord.id!), payload);
-                 
-                 const updatedRecord = { ...existingRecord, ...payload };
-                 setAttendanceData(prev => ({...prev, [student.id]: updatedRecord}));
-                 addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
-                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                 toast({ title: "Absen Pulang Berhasil" });
-                 playSound('success');
-                 notifyOnAttendance(serializableRecordForNotification(updatedRecord as AttendanceRecord));
-                 cleanup('success', student);
+                 tempRecordForNotif = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
                 playSound('error');
                 cleanup('error', student);
+                return;
             }
+
+            // --- NOTIFICATION CHECK ---
+            try {
+                // We don't save the result, just check if it throws an error
+                await notifyOnAttendance(serializableRecordForNotification(tempRecordForNotif as AttendanceRecord));
+            } catch (error) {
+                 addLog(`Notifikasi GAGAL untuk ${student.nama}. Absen ditolak.`, 'error');
+                 playSound('error');
+                 cleanup('notification_failure', student, true); // Permanent failure message
+                 return;
+            }
+
+            // --- SAVE TO DATABASE (only if notification check passes) ---
+            let docId = existingRecord?.id;
+            if (isAbsenMasuk) {
+                if(docId) {
+                    await updateDoc(doc(db, "attendance", docId), tempRecordForNotif as any);
+                } else {
+                    const docRef = await addDoc(collection(db, "attendance"), tempRecordForNotif);
+                    docId = docRef.id;
+                }
+            } else {
+                 await updateDoc(doc(db, "attendance", docId!), { timestampPulang: tempRecordForNotif.timestampPulang });
+            }
+
+            const finalRecord = { ...tempRecordForNotif, id: docId };
+            setAttendanceData(prev => ({...prev, [student.id]: finalRecord as AttendanceRecord }));
+            addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
+            setHighlightedNisn({ nisn: student.nisn, type: 'success' });
+            toast({ title: `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} Berhasil` });
+            playSound('success');
+            cleanup('success', student);
+
         } catch (error) {
             console.error("Error handling scan:", error);
             addLog(`Gagal memproses NISN ${trimmedNisn}.`, 'error');
@@ -457,6 +472,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
 
         try {
+            // Check for notification before saving
+            await notifyOnAttendance(serializableRecordForNotification(payload as AttendanceRecord));
+
             let docId = existingRecord?.id;
             if (docId) {
                 await updateDoc(doc(db, "attendance", docId), payload as any);
@@ -466,20 +484,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
 
             const newRecord = { ...payload, id: docId } as AttendanceRecord;
-
-            setAttendanceData(prev => ({
-                ...prev,
-                [student.id]: newRecord
-            }));
-
+            setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
-            
-            notifyOnAttendance(serializableRecordForNotification(newRecord));
+
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
-            addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
-            toast({ variant: "destructive", title: "Gagal Menyimpan" });
+            addLog(`Gagal menyimpan absensi manual untuk ${student.nama}. Cek koneksi server notifikasi.`, 'error');
+            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Notifikasi gagal terkirim. Pastikan server WA aktif." });
         }
     }
 
@@ -487,7 +499,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         if (feedbackOverlay.type === 'loading') {
             return <Loader2 className="h-32 w-32 animate-spin text-white" />;
         }
-        if (feedbackOverlay.type === 'error') {
+        if (feedbackOverlay.type === 'error' || feedbackOverlay.type === 'notification_failure') {
             return <XCircle className="h-32 w-32 text-red-400" />;
         }
         if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
@@ -500,14 +512,47 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     return (
     <>
     {feedbackOverlay.show && (
-            <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
-                <div className="p-8 rounded-full bg-white/10">
-                    {renderFeedbackIcon()}
-                </div>
-                {feedbackOverlay.student && (
-                     <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
-                )}
-            </div>
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
+            {feedbackOverlay.type === 'notification_failure' ? (
+                 <Card className="w-full max-w-lg text-center border-destructive bg-destructive/10">
+                    <CardHeader>
+                        <CardTitle className="text-3xl font-bold text-destructive flex items-center justify-center gap-3">
+                            <ShieldAlert className="h-10 w-10"/> GAGAL MENGIRIM NOTIFIKASI
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <p className="text-lg text-destructive-foreground">
+                           Absensi untuk <span className="font-bold">{feedbackOverlay.student?.nama}</span> DITOLAK.
+                        </p>
+                        <p className="text-xl font-bold text-destructive-foreground">
+                            HARAP SEGERA HUBUNGI ADMIN!
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            Pastikan server WhatsApp lokal berjalan dan link ngrok sudah benar.
+                        </p>
+                        <Button
+                            size="lg"
+                            variant="destructive"
+                            onClick={() => {
+                                setFeedbackOverlay({ show: false, type: 'loading' });
+                                scannerInputRef.current?.focus();
+                            }}
+                        >
+                            Saya Mengerti
+                        </Button>
+                    </CardContent>
+                </Card>
+            ) : (
+                <>
+                    <div className="p-8 rounded-full bg-white/10">
+                        {renderFeedbackIcon()}
+                    </div>
+                    {feedbackOverlay.student && (
+                        <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
+                    )}
+                </>
+            )}
+        </div>
     )}
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
