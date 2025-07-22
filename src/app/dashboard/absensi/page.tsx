@@ -45,6 +45,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -111,6 +112,7 @@ export default function AbsensiPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
+  const [filterName, setFilterName] = useState("")
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<CombinedAttendanceRecord | null>(null)
   const { toast } = useToast()
@@ -175,11 +177,10 @@ export default function AbsensiPage() {
   }, [date, toast])
 
   const filteredRecords = useMemo(() => {
-    if (filterClass === "all") {
-      return attendanceRecords
-    }
-    return attendanceRecords.filter(record => record.classId === filterClass)
-  }, [attendanceRecords, filterClass])
+    return attendanceRecords
+      .filter(record => filterClass === "all" || record.classId === filterClass)
+      .filter(record => record.studentName.toLowerCase().includes(filterName.toLowerCase()))
+  }, [attendanceRecords, filterClass, filterName])
 
   const openEditDialog = (record: CombinedAttendanceRecord) => {
     setEditingRecord(record)
@@ -377,57 +378,67 @@ export default function AbsensiPage() {
       </Dialog>
     
       <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Absensi</h1>
-            <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
-          </div>
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant={"outline"}
-                    className={cn(
-                      "w-full justify-start text-left font-normal md:w-[240px]",
-                      !date && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={date}
-                    onSelect={(d) => d && setDate(d)}
-                    initialFocus
-                    disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
-                  />
-                </PopoverContent>
-              </Popover>
-              <Select value={filterClass} onValueChange={setFilterClass}>
-                <SelectTrigger className="w-full md:w-[280px]">
-                  <SelectValue placeholder="Filter berdasarkan kelas" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Semua Kelas</SelectItem>
-                  {["X", "XI", "XII"].map(grade => (
-                    <SelectGroup key={grade}>
-                      <SelectLabel>Kelas {grade}</SelectLabel>
-                      {classes.filter(c => c.grade === grade).map(c => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
-                  {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                  {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
-              </Button>
-          </div>
-        </div>
+        <Card>
+            <CardHeader>
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Absensi</h1>
+                        <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
+                    </div>
+                    <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
+                        {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                        {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
+                    </Button>
+                </div>
+                <div className="mt-4 flex flex-col md:flex-row gap-4">
+                    <Popover>
+                        <PopoverTrigger asChild>
+                        <Button
+                            variant={"outline"}
+                            className={cn(
+                            "w-full justify-start text-left font-normal md:w-[240px]",
+                            !date && "text-muted-foreground"
+                            )}
+                        >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
+                        </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                            mode="single"
+                            selected={date}
+                            onSelect={(d) => d && setDate(d)}
+                            initialFocus
+                            disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
+                        />
+                        </PopoverContent>
+                    </Popover>
+                    <Select value={filterClass} onValueChange={setFilterClass}>
+                        <SelectTrigger className="w-full md:w-[280px]">
+                        <SelectValue placeholder="Filter berdasarkan kelas" />
+                        </SelectTrigger>
+                        <SelectContent>
+                        <SelectItem value="all">Semua Kelas</SelectItem>
+                        {["X", "XI", "XII"].map(grade => (
+                            <SelectGroup key={grade}>
+                            <SelectLabel>Kelas {grade}</SelectLabel>
+                            {classes.filter(c => c.grade === grade).map(c => (
+                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            ))}
+                            </SelectGroup>
+                        ))}
+                        </SelectContent>
+                    </Select>
+                     <Input
+                        placeholder="Cari berdasarkan nama siswa..."
+                        value={filterName}
+                        onChange={(e) => setFilterName(e.target.value)}
+                        className="w-full md:w-[280px]"
+                    />
+                </div>
+            </CardHeader>
+        </Card>
         <Card>
           <CardHeader>
             <CardTitle>Data Absensi - {format(date, "eeee, dd MMMM yyyy", { locale: localeID })}</CardTitle>
@@ -496,7 +507,7 @@ export default function AbsensiPage() {
                   ) : (
                     <TableRow>
                       <TableCell colSpan={7} className="h-24 text-center">
-                        Tidak ada data absensi untuk tanggal ini.
+                        Tidak ada data absensi untuk tanggal ini atau siswa tidak ditemukan.
                       </TableCell>
                     </TableRow>
                   )}
