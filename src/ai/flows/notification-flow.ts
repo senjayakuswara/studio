@@ -11,7 +11,7 @@
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns";
+import { format, zonedTimeToUtc, utcToZonedTime } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -166,12 +166,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         title = `Informasi Absensi`;
         finalStatus = record.status;
     }
-
-    const utcDate = new Date(timestampStr);
-    const wibDate = new Date(utcDate.getTime()); // Assuming the timestamp is already correct
     
-    const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID });
-    const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID });
+    const wibTimeZone = 'Asia/Jakarta';
+    const dateInWib = utcToZonedTime(new Date(timestampStr), wibTimeZone);
+    
+    const formattedDate = format(dateInWib, "eeee, dd MMMM yyyy", { locale: localeID, timeZone: wibTimeZone });
+    const formattedTime = format(dateInWib, "HH:mm:ss", { locale: localeID, timeZone: wibTimeZone });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
@@ -346,3 +346,5 @@ export async function sendClassMonthlyRecap(className: string, grade: string, mo
         await queueNotification(webhookPayload, 'recap', { className, month, year });
     }
 }
+
+    
