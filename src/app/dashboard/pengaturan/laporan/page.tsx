@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, type ChangeEvent } from "react"
@@ -121,7 +122,7 @@ export default function LaporanPage() {
           <div className="flex items-center justify-center w-full">
               <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative">
                   {settings.headerImageUrl ? (
-                      <Image src={settings.headerImageUrl} alt="Header Preview" layout="fill" objectFit="contain" className="rounded-lg p-2" />
+                      <Image src={settings.headerImageUrl} alt="Header Preview" fill style={{objectFit:"contain"}} className="rounded-lg p-2" />
                   ) : (
                       <div className="flex flex-col items-center justify-center pt-5 pb-6">
                           <UploadCloud className="w-8 h-8 mb-4 text-muted-foreground" />

@@ -488,55 +488,54 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     const startScanner = useCallback(async (mode: ScannerMode) => {
         await stopScanner();
-
+    
         if (isCameraInitializing || isModelsLoading || !selectedCameraId) {
-             if (!selectedCameraId) {
-                 toast({ variant: "destructive", title: "Pilih Kamera", description: "Anda harus memilih kamera terlebih dahulu." });
-             }
+            if (!selectedCameraId) {
+                toast({ variant: "destructive", title: "Pilih Kamera", description: "Anda harus memilih kamera terlebih dahulu." });
+            }
             return;
         }
-
+    
         if (mode === 'face' && labeledFaceDescriptors.length === 0) {
             toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
             return;
         }
-
+    
         setIsCameraInitializing(true);
         setCameraError(null);
         setActiveScanner(mode);
-
+    
         try {
-            const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => ({
-                width: Math.min(viewfinderWidth, viewfinderHeight) * 0.7,
-                height: Math.min(viewfinderWidth, viewfinderHeight) * 0.7,
-            });
-
-            html5QrCodeRef.current = new Html5Qrcode(`video-container-${mode}`, { verbose: false });
+            const videoElementId = `video-container-${mode}`;
+            html5QrCodeRef.current = new Html5Qrcode(videoElementId, { verbose: false });
             await html5QrCodeRef.current.start(
-                selectedCameraId, 
-                { fps: 5, qrbox: qrboxFunction, facingMode: "user" },
+                selectedCameraId,
+                { fps: 5, qrbox: (w, h) => ({ width: w * 0.7, height: h * 0.7 }), facingMode: "user" },
                 (decodedText) => { if (mode === 'qr') handleScan(decodedText); },
                 (errorMessage) => { /* ignore */ }
             );
-            
-            const videoElement = document.getElementById(`video-container-${mode}-video`) as HTMLVideoElement | null;
+    
+            const videoElement = document.getElementById(`${videoElementId}-video`) as HTMLVideoElement | null;
             videoRef.current = videoElement;
-
+    
             if (mode === 'face' && videoRef.current) {
                 const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
-                
+    
                 detectionIntervalRef.current = setInterval(async () => {
                     if (processingLock.current || !videoRef.current || !canvasRef.current) return;
-
+    
                     const canvas = canvasRef.current;
-                    const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
+                    const video = videoRef.current;
+                    const displaySize = { width: video.clientWidth, height: video.clientHeight };
                     faceapi.matchDimensions(canvas, displaySize);
-                    
-                    const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+    
+                    const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                     
                     const context = canvas.getContext('2d');
-                    if(context) context.clearRect(0, 0, canvas.width, canvas.height);
-
+                    if(context) {
+                        context.clearRect(0, 0, canvas.width, canvas.height);
+                    }
+    
                     if (detections) {
                         const resizedDetections = faceapi.resizeResults(detections, displaySize);
                         const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
@@ -562,6 +561,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setIsCameraInitializing(false);
         }
     }, [isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors, selectedCameraId, stopScanner]);
+    
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);

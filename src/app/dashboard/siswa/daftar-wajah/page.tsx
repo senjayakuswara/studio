@@ -7,7 +7,7 @@ import { collection, getDocs, query, where, doc, updateDoc } from "firebase/fire
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import * as faceapi from 'face-api.js';
-
+import Image from "next/image"
 import { Button } from "@/components/ui/button"
 import {
   Card,
