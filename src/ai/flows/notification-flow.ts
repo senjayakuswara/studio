@@ -1,4 +1,3 @@
-
 'use server';
 /**
  * @fileOverview Handles all student and parent notifications via an external webhook.
@@ -34,14 +33,12 @@ export type SerializableAttendanceRecord = {
   timestampPulang: string | null
   recordDate: string
   parentWaNumber?: string;
-  photoDataUri?: string;
 };
 
 type WebhookPayload = {
     recipient: string;
     message: string;
     isGroup: boolean;
-    photoDataUri?: string;
 }
 
 export type NotificationJob = {
@@ -196,7 +193,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         recipient: studentWaNumber, 
         message, 
         isGroup: false,
-        photoDataUri: record.photoDataUri
     };
     
     try {

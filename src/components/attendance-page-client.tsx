@@ -1,4 +1,3 @@
-
 "use client"
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
@@ -36,6 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode, MessageSquareWarning } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
+import { toZonedTime } from "date-fns-tz"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -161,6 +161,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, []);
 
     const serializableRecordForNotification = (record: AttendanceRecord): SerializableAttendanceRecord => {
+        const timeZone = 'Asia/Jakarta';
         return {
             id: record.id ?? undefined,
             studentId: record.studentId,
@@ -168,9 +169,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             studentName: record.studentName,
             classId: record.classId,
             status: record.status as any, 
-            timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
-            timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
-            recordDate: record.recordDate.toDate().toISOString(),
+            timestampMasuk: record.timestampMasuk ? toZonedTime(record.timestampMasuk.toDate(), timeZone).toISOString() : null,
+            timestampPulang: record.timestampPulang ? toZonedTime(record.timestampPulang.toDate(), timeZone).toISOString() : null,
+            recordDate: toZonedTime(record.recordDate.toDate(), timeZone).toISOString(),
             parentWaNumber: record.parentWaNumber,
         }
     }
