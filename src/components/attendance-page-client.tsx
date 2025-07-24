@@ -528,11 +528,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 detectionIntervalRef.current = setInterval(async () => {
                     if (processingLock.current || !videoRef.current || !canvasRef.current) return;
 
-                    const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-                    
                     const canvas = canvasRef.current;
                     const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
                     faceapi.matchDimensions(canvas, displaySize);
+                    
+                    const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                     
                     const context = canvas.getContext('2d');
                     if(context) context.clearRect(0, 0, canvas.width, canvas.height);
@@ -540,6 +540,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     if (detections) {
                         const resizedDetections = faceapi.resizeResults(detections, displaySize);
                         const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
+                        
                         const box = resizedDetections.detection.box;
                         const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.label === 'unknown' ? 'Tidak Dikenal' : bestMatch.toString() });
                         
