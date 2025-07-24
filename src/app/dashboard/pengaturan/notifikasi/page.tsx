@@ -1,19 +1,22 @@
 
 "use client"
 
-import { useState, useEffect, useTransition } from 'react';
-import { collection, query, orderBy, getDocs, limit, startAfter, DocumentData } from "firebase/firestore";
+import { useState, useEffect } from 'react';
+import { collection, query, orderBy, getDocs, limit, startAfter, DocumentData, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { format, formatDistanceToNow } from "date-fns";
 import { id as localeID } from "date-fns/locale";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 import { processSingleNotification, deleteNotificationJob, type NotificationJob } from "@/ai/flows/notification-flow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Bot, Loader2, RefreshCw, Trash2, Send, Clock, CheckCircle2, XCircle } from "lucide-react";
+import { Bot, Loader2, RefreshCw, Trash2, Send, Clock, CheckCircle2, XCircle, Edit } from "lucide-react";
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertDialog,
@@ -26,8 +29,24 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 
 const PAGE_SIZE = 15;
+
+const editRecipientSchema = z.object({
+  newRecipient: z.string().refine(val => /^\d{10,15}$/.test(val), {
+    message: "Nomor WhatsApp harus berupa angka 10-15 digit (cth: 6281234567890)."
+  }),
+});
 
 export default function NotifikasiPage() {
     const [jobs, setJobs] = useState<NotificationJob[]>([]);
@@ -36,7 +55,13 @@ export default function NotifikasiPage() {
     const [lastDoc, setLastDoc] = useState<DocumentData | null>(null);
     const [isPaginating, setIsPaginating] = useState(false);
     const [hasMore, setHasMore] = useState(true);
+    const [editingJob, setEditingJob] = useState<NotificationJob | null>(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const { toast } = useToast();
+
+    const form = useForm<z.infer<typeof editRecipientSchema>>({
+      resolver: zodResolver(editRecipientSchema),
+    });
 
     const fetchJobs = async (loadMore = false) => {
         if (!loadMore) {
@@ -98,10 +123,10 @@ export default function NotifikasiPage() {
         const result = await processSingleNotification(jobId);
         if (result.success) {
             toast({ title: "Sukses", description: "Notifikasi berhasil dikirim." });
-            setJobs(prevJobs => prevJobs.map(job => job.id === jobId ? { ...job, status: 'success' } : job));
+            setJobs(prevJobs => prevJobs.map(job => job.id === jobId ? { ...job, status: 'success', errorMessage: '' } : job));
         } else {
-            toast({ variant: "destructive", title: "Gagal", description: "Gagal mengirim notifikasi. Cek log server lokal." });
-             setJobs(prevJobs => prevJobs.map(job => job.id === jobId ? { ...job, status: 'failed', errorMessage: "Failed on manual retry" } : job));
+            toast({ variant: "destructive", title: "Gagal", description: result.error || "Gagal mengirim notifikasi. Cek log server lokal." });
+             setJobs(prevJobs => prevJobs.map(job => job.id === jobId ? { ...job, status: 'failed', errorMessage: result.error || "Failed on manual retry" } : job));
         }
         setIsProcessing(null);
     };
@@ -136,10 +161,10 @@ export default function NotifikasiPage() {
             const result = await processSingleNotification(job.id);
             if (result.success) {
                 successCount++;
-                setJobs(prev => prev.map(j => j.id === job.id ? {...j, status: 'success'} : j));
+                setJobs(prev => prev.map(j => j.id === job.id ? {...j, status: 'success', errorMessage: ''} : j));
             } else {
                 failCount++;
-                setJobs(prev => prev.map(j => j.id === job.id ? {...j, status: 'failed', errorMessage: 'Failed on bulk retry'} : j));
+                setJobs(prev => prev.map(j => j.id === job.id ? {...j, status: 'failed', errorMessage: result.error || 'Failed on bulk retry'} : j));
             }
         }
 
@@ -148,6 +173,40 @@ export default function NotifikasiPage() {
             description: `${successCount} berhasil terkirim, ${failCount} gagal.`
         });
         setIsProcessing(null);
+    };
+
+    const openEditModal = (job: NotificationJob) => {
+      setEditingJob(job);
+      form.reset({ newRecipient: job.payload.recipient });
+      setIsEditModalOpen(true);
+    };
+    
+    const handleUpdateAndSend = async (values: z.infer<typeof editRecipientSchema>) => {
+      if (!editingJob) return;
+      setIsProcessing(editingJob.id);
+      try {
+        const jobRef = doc(db, "notification_queue", editingJob.id);
+        const newPayload = { ...editingJob.payload, recipient: values.newRecipient };
+        await updateDoc(jobRef, { payload: newPayload });
+        
+        const updatedJob = { ...editingJob, payload: newPayload };
+        
+        const result = await processSingleNotification(editingJob.id);
+        if (result.success) {
+          toast({ title: "Sukses", description: `Nomor diperbarui dan notifikasi berhasil dikirim ke ${values.newRecipient}` });
+          setJobs(prev => prev.map(j => j.id === editingJob.id ? {...updatedJob, status: 'success', errorMessage: ''} : j));
+          setIsEditModalOpen(false);
+          setEditingJob(null);
+        } else {
+          toast({ variant: "destructive", title: "Gagal Mengirim", description: result.error || "Nomor berhasil diperbarui, namun pengiriman tetap gagal." });
+          setJobs(prev => prev.map(j => j.id === editingJob.id ? {...updatedJob, status: 'failed', errorMessage: result.error} : j));
+        }
+
+      } catch (error: any) {
+        toast({ variant: "destructive", title: "Gagal Memperbarui", description: error.message });
+      } finally {
+        setIsProcessing(null);
+      }
     };
     
     const getStatusVariant = (status: NotificationJob['status']): 'default' | 'secondary' | 'destructive' => {
@@ -170,6 +229,40 @@ export default function NotifikasiPage() {
 
     return (
         <div className="flex flex-col gap-6">
+            <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Edit & Kirim Ulang Notifikasi</DialogTitle>
+                        <DialogDescription>
+                            Perbarui nomor tujuan untuk notifikasi kepada <span className="font-semibold">{(editingJob?.metadata as any)?.studentName || 'Siswa'}</span>, lalu coba kirim lagi.
+                        </DialogDescription>
+                    </DialogHeader>
+                     <Form {...form}>
+                        <form onSubmit={form.handleSubmit(handleUpdateAndSend)} className="space-y-4 py-4">
+                        <FormField
+                            control={form.control}
+                            name="newRecipient"
+                            render={({ field }) => (
+                                <FormItem>
+                                <FormLabel>Nomor WhatsApp Baru</FormLabel>
+                                <FormControl>
+                                    <Input placeholder="cth: 6281234567890" {...field} />
+                                </FormControl>
+                                <FormMessage />
+                                </FormItem>
+                            )}
+                            />
+                        <DialogFooter>
+                            <Button type="submit" disabled={isProcessing === editingJob?.id}>
+                                {isProcessing === editingJob?.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Perbarui & Kirim Ulang
+                            </Button>
+                        </DialogFooter>
+                        </form>
+                    </Form>
+                </DialogContent>
+            </Dialog>
+
             <div className="flex items-start justify-between">
                 <div>
                     <h1 className="font-headline text-3xl font-bold tracking-tight">Antrean Notifikasi</h1>
@@ -191,7 +284,7 @@ export default function NotifikasiPage() {
                 <Bot className="h-4 w-4" />
                 <AlertTitle>Cara Kerja Sistem Antrean</AlertTitle>
                 <AlertDescription>
-                    Jika server WhatsApp lokal Anda mati atau URL webhook salah, notifikasi tidak akan hilang. Notifikasi akan masuk ke antrean ini dengan status "pending" atau "failed". Anda bisa mencoba mengirimnya lagi secara manual dari halaman ini setelah koneksi pulih.
+                    Jika server WhatsApp lokal Anda mati, notifikasi tidak akan hilang. Notifikasi akan masuk ke antrean ini dengan status "gagal". Anda bisa mencoba mengirimnya lagi secara manual dari halaman ini setelah koneksi pulih. Jika error disebabkan nomor tidak terdaftar, Anda bisa mengeditnya di sini.
                 </AlertDescription>
             </Alert>
             
@@ -208,7 +301,7 @@ export default function NotifikasiPage() {
                                     <TableHead>Status</TableHead>
                                     <TableHead>Tujuan</TableHead>
                                     <TableHead>Waktu Dibuat</TableHead>
-                                    <TableHead>Pesan</TableHead>
+                                    <TableHead>Pesan / Error</TableHead>
                                     <TableHead className="text-right">Aksi</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -250,14 +343,19 @@ export default function NotifikasiPage() {
                                             <TableCell className="text-right">
                                                 <div className="flex gap-2 justify-end">
                                                     {(job.status === 'pending' || job.status === 'failed') && (
+                                                      <>
+                                                        <Button size="sm" variant="outline" onClick={() => openEditModal(job)} disabled={isProcessing !== null}>
+                                                            <Edit className="h-4 w-4"/>
+                                                        </Button>
                                                         <Button size="sm" variant="outline" onClick={() => handleRetry(job.id)} disabled={isProcessing !== null}>
                                                             {isProcessing === job.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                                         </Button>
+                                                      </>
                                                     )}
                                                      <AlertDialog>
                                                         <AlertDialogTrigger asChild>
                                                             <Button size="sm" variant="destructive" disabled={isProcessing !== null}>
-                                                                 {isProcessing === job.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                                                 {isProcessing === job.id && job.id === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                                                             </Button>
                                                         </AlertDialogTrigger>
                                                         <AlertDialogContent>

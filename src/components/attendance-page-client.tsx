@@ -32,7 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, MessageWarning } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -62,11 +62,11 @@ type AttendanceRecord = {
 type LogMessage = {
     timestamp: string
     message: string
-    type: 'success' | 'error' | 'info'
+    type: 'success' | 'error' | 'info' | 'warning'
 }
 type FeedbackOverlayState = {
     show: boolean;
-    type: 'loading' | 'success' | 'error' | 'notification_failure';
+    type: 'loading' | 'success' | 'error';
     student?: Student;
 }
 
@@ -95,7 +95,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
     const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
-    const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" } | null>(null);
+    const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" | "warning" } | null>(null);
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
     
     const processingLock = useRef(false);
@@ -130,9 +130,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
 
-    const playSound = useCallback((type: 'success' | 'error') => {
+    const playSound = useCallback((type: 'success' | 'error' | 'warning') => {
         try {
-            const audio = new Audio(type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav');
+            const soundFile = type === 'success' ? '/sounds/success.wav' : type === 'warning' ? '/sounds/warning.wav' : '/sounds/error.wav';
+            const audio = new Audio(soundFile);
             audio.play().catch(e => console.error("Error playing sound:", e));
         } catch(e) {
             console.error("Could not play sound:", e);
@@ -258,14 +259,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
-        const cleanup = (type: FeedbackOverlayState['type'], student?: Student, isPermanent: boolean = false) => {
-             if (isPermanent) {
-                setFeedbackOverlay({ show: true, type, student });
-                processingLock.current = false;
-                setIsProcessing(false);
-                return;
-            }
-
+        const cleanup = (type: FeedbackOverlayState['type'], student?: Student) => {
             setFeedbackOverlay({ show: true, type, student });
             setTimeout(() => {
                 setHighlightedNisn(null);
@@ -322,7 +316,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
     
             // Define a temporary record for notification check
-            let tempRecordForNotif: Omit<AttendanceRecord, 'id'> & { id?: string };
+            let tempRecordForDb: Omit<AttendanceRecord, 'id'> & { id?: string };
             let isAbsenMasuk = false;
 
             if (!existingRecord || !existingRecord.timestampMasuk) {
@@ -341,7 +335,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
                 const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
                 
-                tempRecordForNotif = {
+                tempRecordForDb = {
                     studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
                     parentWaNumber: student.parentWaNumber, status,
                     timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
@@ -357,7 +351,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     cleanup('error', student);
                     return;
                 }
-                 tempRecordForNotif = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
+                 tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
@@ -367,37 +361,46 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 return;
             }
 
-            // --- NOTIFICATION CHECK ---
+            let notificationFailed = false;
             try {
-                // We don't save the result, just check if it throws an error
-                await notifyOnAttendance(serializableRecordForNotification(tempRecordForNotif as AttendanceRecord));
+                await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord));
             } catch (error) {
-                 addLog(`Notifikasi GAGAL untuk ${student.nama}. Absen ditolak.`, 'error');
-                 playSound('error');
-                 cleanup('notification_failure', student, true); // Permanent failure message
-                 return;
+                 notificationFailed = true;
             }
 
-            // --- SAVE TO DATABASE (only if notification check passes) ---
             let docId = existingRecord?.id;
             if (isAbsenMasuk) {
                 if(docId) {
-                    await updateDoc(doc(db, "attendance", docId), tempRecordForNotif as any);
+                    await updateDoc(doc(db, "attendance", docId), tempRecordForDb as any);
                 } else {
-                    const docRef = await addDoc(collection(db, "attendance"), tempRecordForNotif);
+                    const docRef = await addDoc(collection(db, "attendance"), tempRecordForDb);
                     docId = docRef.id;
                 }
             } else {
-                 await updateDoc(doc(db, "attendance", docId!), { timestampPulang: tempRecordForNotif.timestampPulang });
+                 await updateDoc(doc(db, "attendance", docId!), { timestampPulang: tempRecordForDb.timestampPulang });
             }
 
-            const finalRecord = { ...tempRecordForNotif, id: docId };
+            const finalRecord = { ...tempRecordForDb, id: docId };
             setAttendanceData(prev => ({...prev, [student.id]: finalRecord as AttendanceRecord }));
-            addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
-            setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-            toast({ title: `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} Berhasil` });
-            playSound('success');
+            
+            if (notificationFailed) {
+                addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} ${student.nama} BERHASIL, tapi notifikasi GAGAL & diantrekan.`, 'warning');
+                setHighlightedNisn({ nisn: student.nisn, type: 'warning' });
+                toast({ 
+                    variant: "destructive",
+                    title: `Absen Sukses, Notifikasi Gagal`,
+                    description: `Notifikasi untuk ${student.nama} telah dimasukkan ke antrean. Periksa di menu Pengaturan.`,
+                });
+                playSound('warning');
+            } else {
+                addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
+                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
+                toast({ title: `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} Berhasil` });
+                playSound('success');
+            }
+            
             cleanup('success', student);
+
 
         } catch (error) {
             console.error("Error handling scan:", error);
@@ -472,9 +475,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
 
         try {
-            // Check for notification before saving
-            await notifyOnAttendance(serializableRecordForNotification(payload as AttendanceRecord));
-
             let docId = existingRecord?.id;
             if (docId) {
                 await updateDoc(doc(db, "attendance", docId), payload as any);
@@ -490,8 +490,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
-            addLog(`Gagal menyimpan absensi manual untuk ${student.nama}. Cek koneksi server notifikasi.`, 'error');
-            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Notifikasi gagal terkirim. Pastikan server WA aktif." });
+            addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
+            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan data." });
         }
     }
 
@@ -499,7 +499,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         if (feedbackOverlay.type === 'loading') {
             return <Loader2 className="h-32 w-32 animate-spin text-white" />;
         }
-        if (feedbackOverlay.type === 'error' || feedbackOverlay.type === 'notification_failure') {
+        if (feedbackOverlay.type === 'error') {
             return <XCircle className="h-32 w-32 text-red-400" />;
         }
         if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
@@ -513,44 +513,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     <>
     {feedbackOverlay.show && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
-            {feedbackOverlay.type === 'notification_failure' ? (
-                 <Card className="w-full max-w-lg text-center border-destructive bg-destructive/10">
-                    <CardHeader>
-                        <CardTitle className="text-3xl font-bold text-destructive flex items-center justify-center gap-3">
-                            <ShieldAlert className="h-10 w-10"/> GAGAL MENGIRIM NOTIFIKASI
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <p className="text-lg text-destructive-foreground">
-                           Absensi untuk <span className="font-bold">{feedbackOverlay.student?.nama}</span> DITOLAK.
-                        </p>
-                        <p className="text-xl font-bold text-destructive-foreground">
-                            HARAP SEGERA HUBUNGI ADMIN!
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                            Pastikan server WhatsApp lokal berjalan dan link ngrok sudah benar.
-                        </p>
-                        <Button
-                            size="lg"
-                            variant="destructive"
-                            onClick={() => {
-                                setFeedbackOverlay({ show: false, type: 'loading' });
-                                scannerInputRef.current?.focus();
-                            }}
-                        >
-                            Saya Mengerti
-                        </Button>
-                    </CardContent>
-                </Card>
-            ) : (
-                <>
-                    <div className="p-8 rounded-full bg-white/10">
-                        {renderFeedbackIcon()}
-                    </div>
-                    {feedbackOverlay.student && (
-                        <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
-                    )}
-                </>
+            <div className="p-8 rounded-full bg-white/10">
+                {renderFeedbackIcon()}
+            </div>
+            {feedbackOverlay.student && (
+                <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
             )}
         </div>
     )}
@@ -644,6 +611,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                     {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
                                     {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
                                     {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                    {log.type === 'warning' && <MessageWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
                                     <span className="flex-1">{log.message}</span>
                                 </div>
                             ))
@@ -702,7 +670,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                       data-status={status}
                                       className={cn({
                                           'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
-                                          'animate-flash-error': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'error',
+                                          'animate-flash-error': highlightedNisn?.nisn === student.nisn && (highlightedNisn?.type === 'error' || highlightedNisn?.type === 'warning'),
                                       })}
                                     >
                                         <TableCell>{student.nisn}</TableCell>
@@ -752,3 +720,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+    

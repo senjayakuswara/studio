@@ -62,26 +62,28 @@ app.post('/send', async (req, res) => {
     const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
 
     try {
-        if (!isGroup) {
-            const isRegistered = await client.isRegisteredUser(final_number);
-            if (!isRegistered) {
-                console.error(`Gagal mengirim: Nomor ${recipient} tidak terdaftar di WhatsApp.`);
-                return res.status(404).json({ success: false, error: `Nomor ${recipient} tidak terdaftar di WhatsApp.` });
-            }
-        }
+        console.log(`Mencoba mengirim pesan ke: ${final_number}`);
         
-        console.log(`Mengirim pesan ke: ${final_number}`);
-        const chat = await client.getChatById(final_number);
-        await chat.sendMessage(message);
+        await client.sendMessage(final_number, message);
 
+        console.log(`Pesan berhasil dikirim ke ${final_number}`);
         res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
 
     } catch (error) {
-        console.error(`Gagal mengirim pesan ke ${final_number}:`, error);
-        res.status(500).json({ success: false, error: 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.' });
+        let errorMessage = 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.';
+        if (error.message && error.message.includes('cannot be null')) {
+            errorMessage = `Nomor ${recipient} tidak terdaftar di WhatsApp.`;
+        } else if (error.message) {
+            errorMessage = error.message;
+        }
+
+        console.error(`Gagal mengirim pesan ke ${final_number}:`, errorMessage);
+        res.status(500).json({ success: false, error: errorMessage });
     }
 });
 
 app.listen(port, () => {
     console.log(`Server notifikasi lokal berjalan di http://localhost:${port}`);
 });
+
+    
