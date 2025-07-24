@@ -11,8 +11,9 @@
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format, toZonedTime } from "date-fns-tz";
+import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
+import { toZonedTime } from 'date-fns-tz';
 
 // Types
 type AppConfig = {
@@ -169,11 +170,10 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         finalStatus = record.status;
     }
     
-    const wibTimeZone = 'Asia/Jakarta';
-    const dateInWib = toZonedTime(new Date(timestampStr), wibTimeZone);
-    
-    const formattedDate = format(dateInWib, "eeee, dd MMMM yyyy", { locale: localeID, timeZone: wibTimeZone });
-    const formattedTime = format(dateInWib, "HH:mm:ss", { locale: localeID, timeZone: wibTimeZone });
+    const dateObj = new Date(timestampStr);
+
+    const formattedDate = format(dateObj, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = format(dateObj, "HH:mm:ss", { locale: localeID });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",

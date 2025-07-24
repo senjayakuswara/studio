@@ -315,9 +315,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setFeedbackOverlay({ show: false, type: 'loading' });
                 processingLock.current = false;
                 setIsProcessing(false);
-            }, 2000);
+            }, 2500); // Increased duration for feedback
         };
-
+        
         try {
             if (!schoolHours) {
                 addLog("Error: Pengaturan jam belum dimuat.", "error");
@@ -336,10 +336,28 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 return;
             }
             
+            const existingRecord = attendanceData[student.id];
+            const now = new Date();
+             const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
+            const jamPulangTime = new Date();
+            jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
+
+            // Corrected check for duplicate scans
+            if (existingRecord && existingRecord.timestampMasuk && now < jamPulangTime) {
+                addLog(`Siswa ${student.nama} sudah absen masuk hari ini.`, 'info');
+                playSound('error');
+                cleanup('info', student, "Sudah Absen Masuk");
+                return;
+            }
+            if (existingRecord && existingRecord.timestampPulang) {
+                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
+                playSound('error');
+                cleanup('info', student, "Sudah Absen Masuk & Pulang");
+                return;
+            }
+
             recentlyScanned.current.add(student.nisn);
-            setTimeout(() => {
-                recentlyScanned.current.delete(student.nisn);
-            }, 10000); // 10 second cooldown
+            setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 10000); // 10 second cooldown
             
             if (student.grade !== grade) {
                 const studentClass = classMap.get(student.classId)
@@ -350,17 +368,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 return;
             }
     
-            const existingRecord = attendanceData[student.id];
-            const now = new Date();
-    
-            if (existingRecord && existingRecord.timestampMasuk && existingRecord.timestampPulang) {
-                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
-                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                playSound('error');
-                cleanup('info', student, "Sudah Absen Masuk & Pulang");
-                return;
-            }
-
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
@@ -368,10 +375,25 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('error', student, `Status: ${existingRecord.status}`);
                 return;
             }
-    
-            const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
-            const jamPulangTime = new Date();
-            jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
+
+            let photoDataUri: string | undefined = undefined;
+            if (activeScanner && videoRef.current && videoRef.current.srcObject) {
+                const video = videoRef.current;
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const context = tempCanvas.getContext('2d');
+                if (context) {
+                    if (activeScanner === 'face') {
+                        // Mirror the snapshot for face scan
+                        context.scale(-1, 1);
+                        context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
+                    } else {
+                        context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    }
+                    photoDataUri = tempCanvas.toDataURL('image/jpeg');
+                }
+            }
     
             let tempRecordForDb: Omit<AttendanceRecord, 'id'> & { id?: string };
             let isAbsenMasuk = false;
@@ -399,38 +421,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 };
             } 
             else if (!existingRecord.timestampPulang) {
-                if (now < jamPulangTime) {
-                    addLog(`Siswa ${student.nama} sudah absen masuk. Belum waktunya pulang.`, 'error');
-                    setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                    playSound('error');
-                    cleanup('info', student, "Sudah Absen Masuk");
-                    return;
-                }
                  tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
-                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
+                 // This case is already handled above, but as a fallback.
+                 addLog(`Siswa ${student.nama} sudah absen penuh.`, 'info');
                 playSound('error');
-                cleanup('info', student, "Sudah Absen Masuk & Pulang");
+                cleanup('info', student, "Sudah Absen Penuh");
                 return;
-            }
-            
-            let photoDataUri: string | undefined = undefined;
-            if (activeScanner && videoRef.current && videoRef.current.srcObject) {
-                const video = videoRef.current;
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = video.videoWidth;
-                tempCanvas.height = video.videoHeight;
-                const context = tempCanvas.getContext('2d');
-                if (context) {
-                    if (activeScanner === 'face') {
-                        context.scale(-1, 1);
-                        context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
-                    } else {
-                        context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-                    }
-                    photoDataUri = tempCanvas.toDataURL('image/jpeg');
-                }
             }
 
             let notificationFailed = false;
@@ -438,6 +435,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord, photoDataUri));
             } catch (error) {
                  notificationFailed = true;
+                 console.error("Notification failed:", error);
+                 addLog(`Notifikasi untuk ${student.nama} gagal: ${(error as Error).message}`, 'warning');
             }
 
             let docId = existingRecord?.id;
@@ -503,13 +502,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         setActiveScanner(null);
         setCameraError(null);
-        videoRef.current = null;
-        html5QrCodeRef.current = null;
+        // Do not nullify videoRef here, let it be managed by the element's lifecycle
     }, []);
 
     const startScanner = useCallback(async (mode: ScannerMode) => {
         await stopScanner();
-
+    
         if (isCameraInitializing || isModelsLoading || !selectedCameraId) {
             toast({ variant: "destructive", title: "Kamera Belum Siap", description: "Pilih kamera atau tunggu model AI selesai dimuat." });
             return;
@@ -518,17 +516,17 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
             return;
         }
-        
+    
         setIsCameraInitializing(true);
         setCameraError(null);
         setActiveScanner(mode);
-        
+    
         const videoElementId = `video-container-${mode}`;
-
+        
         try {
             const qrCode = new Html5Qrcode(videoElementId);
             html5QrCodeRef.current = qrCode;
-
+    
             await qrCode.start(
                 selectedCameraId,
                 { fps: 5, qrbox: (w, h) => ({ width: w * 0.7, height: h * 0.7 }) },
@@ -539,33 +537,33 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const videoElement = document.getElementById(videoElementId)?.querySelector('video');
             if (!videoElement) throw new Error("Elemen video tidak ditemukan.");
             videoRef.current = videoElement;
-
+    
             if (mode === 'face') {
                 const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
                 
                 detectionIntervalRef.current = setInterval(async () => {
                     if (processingLock.current || !videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended) return;
-                    
+    
                     const video = videoRef.current;
                     const canvas = canvasRef.current;
                     const displaySize = { width: video.clientWidth, height: video.clientHeight };
                     faceapi.matchDimensions(canvas, displaySize);
-
+    
                     const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                     
                     const context = canvas.getContext('2d');
-                     if (context) {
+                    if (context) {
                         context.clearRect(0, 0, canvas.width, canvas.height);
-                        if(detections){
+                        if (detections) {
                             const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                            faceapi.draw.drawDetections(canvas, resizedDetections);
+                             faceapi.draw.drawDetections(canvas, resizedDetections);
                             const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
                             if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
                                 handleScan(bestMatch.label);
                             }
                         }
                     }
-                }, 1000);
+                }, 1000); // Scan every second
             }
             addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
