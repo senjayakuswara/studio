@@ -54,7 +54,7 @@ client.initialize().catch(err => {
 
 // Endpoint untuk mengirim pesan
 app.post('/send', async (req, res) => {
-    const { recipient, message, isGroup = false, photoDataUri } = req.body;
+    const { recipient, message, isGroup = false } = req.body;
 
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Nomor penerima (recipient) dan pesan (message) diperlukan.' });
@@ -65,16 +65,8 @@ app.post('/send', async (req, res) => {
     try {
         console.log(`Mencoba mengirim pesan ke: ${final_number}`);
         
-        if (photoDataUri) {
-            // Jika ada foto, kirim sebagai media dengan caption
-            const media = new MessageMedia('image/jpeg', photoDataUri.split(',')[1], 'absen.jpg');
-            await client.sendMessage(final_number, media, { caption: message });
-            console.log(`Pesan dengan foto berhasil dikirim ke ${final_number}`);
-        } else {
-            // Jika tidak ada foto, kirim teks biasa
-            await client.sendMessage(final_number, message);
-            console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
-        }
+        await client.sendMessage(final_number, message);
+        console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
 
         res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
 
