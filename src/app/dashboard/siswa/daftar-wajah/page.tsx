@@ -40,7 +40,7 @@ type Student = {
     faceDescriptor?: number[];
 }
 
-const MODELS_URL = '/models';
+const MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
 export default function DaftarWajahPage() {
     const [classes, setClasses] = useState<Class[]>([]);
@@ -83,7 +83,7 @@ export default function DaftarWajahPage() {
             try {
                 const classesSnapshot = await getDocs(collection(db, "classes"));
                 const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[];
-                classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`));
+                classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`));
                 setClasses(classList);
             } catch (error) {
                 console.error("Error fetching classes:", error);
