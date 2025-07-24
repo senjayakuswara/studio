@@ -307,7 +307,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setIsProcessing(true);
         setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
-
+    
         const cleanup = (type: FeedbackOverlayState['type'], student?: Student, message?: string) => {
             setFeedbackOverlay({ show: true, type, student, message });
             setTimeout(() => {
@@ -335,14 +335,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('error', undefined, "Siswa Tidak Ditemukan");
                 return;
             }
-            
+    
             const existingRecord = attendanceData[student.id];
             const now = new Date();
-             const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
+            const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
             const jamPulangTime = new Date();
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
-
-            if (existingRecord && existingRecord.timestampMasuk && now < jamPulangTime) {
+    
+            if (existingRecord && existingRecord.timestampMasuk && !existingRecord.timestampPulang && now < jamPulangTime) {
                 addLog(`Siswa ${student.nama} sudah absen masuk hari ini.`, 'info');
                 playSound('error');
                 cleanup('info', student, "Sudah Absen Masuk");
@@ -354,10 +354,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('info', student, "Sudah Absen Masuk & Pulang");
                 return;
             }
-
-            recentlyScanned.current.add(student.nisn);
-            setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 10000); // 10 second cooldown
-            
+    
             if (student.grade !== grade) {
                 const studentClass = classMap.get(student.classId)
                 addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
@@ -374,7 +371,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('error', student, `Status: ${existingRecord.status}`);
                 return;
             }
-
+    
+            recentlyScanned.current.add(student.nisn);
+            setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 10000); // 10 second cooldown
+    
             let photoDataUri: string | undefined = undefined;
             if (activeScanner && videoRef.current && videoRef.current.srcObject) {
                 const video = videoRef.current;
@@ -383,12 +383,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    if (activeScanner === 'face') {
-                        context.scale(-1, 1);
-                        context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
-                    } else {
-                        context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-                    }
+                    context.scale(-1, 1);
+                    context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -398,7 +394,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             if (!existingRecord || !existingRecord.timestampMasuk) {
                 isAbsenMasuk = true;
-                 if (now > jamPulangTime) {
+                if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     playSound('error');
@@ -417,16 +413,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
                     recordDate: Timestamp.fromDate(startOfDay(now)),
                 };
-            } 
-            else if (!existingRecord.timestampPulang) {
-                 tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
+            } else if (!existingRecord.timestampPulang) {
+                tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                 addLog(`Siswa ${student.nama} sudah absen penuh.`, 'info');
+                addLog(`Siswa ${student.nama} sudah absen penuh.`, 'info');
                 playSound('error');
                 cleanup('info', student, "Sudah Absen Penuh");
                 return;
             }
-
+    
             let notificationFailed = false;
             try {
                 await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord, photoDataUri));
@@ -483,14 +478,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 await html5QrCodeRef.current.stop();
             } catch (err) {
                  console.log("Gagal menghentikan scanner QR, mungkin sudah berhenti.");
-            } finally {
-                html5QrCodeRef.current = null;
             }
         }
         
-        if (videoRef.current?.srcObject) {
+        if (videoRef.current && videoRef.current.srcObject) {
             const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
+            stream.getTracks().forEach(track => {
+                track.stop();
+            });
             videoRef.current.srcObject = null;
         }
 
@@ -499,6 +494,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         }
         
+        html5QrCodeRef.current = null;
         setActiveScanner(null);
         setCameraError(null);
     }, []);
@@ -538,6 +534,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     
             if (mode === 'face') {
                 videoRef.current.onplay = () => {
+                    if (detectionIntervalRef.current) {
+                        clearInterval(detectionIntervalRef.current);
+                    }
                     const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
                     detectionIntervalRef.current = setInterval(async () => {
                         if (processingLock.current || !videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended) return;
@@ -876,3 +875,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+    
