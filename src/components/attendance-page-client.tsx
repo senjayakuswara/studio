@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
-import { Html5Qrcode } from "html5-qrcode"
+import { Html5Qrcode, type CameraDevice } from "html5-qrcode"
 import * as faceapi from 'face-api.js';
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -33,7 +33,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, MessageSquareWarning } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, QrCode, ScanFace } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -84,6 +85,8 @@ type AttendancePageClientProps = {
   grade: "X" | "XI" | "XII"
 }
 
+type ScannerMode = 'qr' | 'face' | null;
+
 const MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
@@ -106,18 +109,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [isLoading, setIsLoading] = useState(true)
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
-    const [isCameraActive, setIsCameraActive] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" | "warning" } | null>(null);
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
     const [labeledFaceDescriptors, setLabeledFaceDescriptors] = useState<faceapi.LabeledFaceDescriptors[]>([]);
+    const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
+    const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
+    const [activeScanner, setActiveScanner] = useState<ScannerMode>(null);
     
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const detectionIntervalRef = useRef<NodeJS.Timeout>();
-    const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const { toast } = useToast()
 
@@ -127,7 +131,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         return [...allStudents].sort((a, b) => a.nama.localeCompare(b.nama));
     }, [allStudents]);
 
-     useEffect(() => {
+    useEffect(() => {
         const loadModels = async () => {
             try {
                 await Promise.all([
@@ -143,6 +147,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
         loadModels();
     }, [toast]);
+
+    useEffect(() => {
+        Html5Qrcode.getCameras()
+            .then(devices => {
+                if (devices && devices.length) {
+                    setAvailableCameras(devices);
+                }
+            })
+            .catch(err => {
+                console.error("Gagal mendapatkan perangkat kamera.", err);
+            });
+    }, []);
 
     const addLog = useCallback((message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
@@ -231,7 +247,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         addLog(`${descriptors.length} data wajah siswa berhasil dimuat.`, 'info');
                     }
 
-
                     const studentIds = studentList.map(s => s.id);
                     if (studentIds.length > 0) {
                         const todayStart = startOfDay(new Date());
@@ -281,20 +296,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [grade, toast, addLog, isModelsLoading])
     
-    useEffect(() => {
-        const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
-        html5QrCodeRef.current = scanner;
-
-        return () => {
-            if (scanner?.isScanning) {
-                scanner.stop().catch(err => {});
-            }
-            if (detectionIntervalRef.current) {
-                clearInterval(detectionIntervalRef.current);
-            }
-        };
-    }, [scannerContainerId]);
-
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
         if (!trimmedNisn || processingLock.current) return;
@@ -399,15 +400,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
             
             let photoDataUri: string | undefined = undefined;
-            if (isCameraActive && videoRef.current && canvasRef.current) {
+            if (activeScanner && videoRef.current && canvasRef.current) {
                 const video = videoRef.current;
-                const canvas = canvasRef.current;
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const context = canvas.getContext('2d');
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const context = tempCanvas.getContext('2d');
                 if (context) {
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    photoDataUri = canvas.toDataURL('image/jpeg');
+                    context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
 
@@ -452,7 +453,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             playSound('error');
             cleanup('error');
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, isCameraActive]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, activeScanner]);
     
     const stopScanner = useCallback(async () => {
         if (detectionIntervalRef.current) {
@@ -461,7 +462,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         if (html5QrCodeRef.current?.isScanning) {
             try {
                 await html5QrCodeRef.current.stop();
-            } catch (err) {}
+            } catch (err) {
+                 console.log("Gagal menghentikan scanner, mungkin sudah berhenti.");
+            }
         }
         
         if (videoRef.current?.srcObject) {
@@ -474,80 +477,99 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const context = canvasRef.current.getContext('2d');
             context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
         }
-
-        addLog("Kamera dinonaktifkan.", "info");
-        setIsCameraActive(false);
+        
+        setActiveScanner(null);
         setCameraError(null);
-    }, [addLog]);
+    }, []);
 
-    const startScanner = useCallback(async () => {
-        if (isCameraActive || isCameraInitializing || !html5QrCodeRef.current || isModelsLoading || labeledFaceDescriptors.length === 0) {
-             if (labeledFaceDescriptors.length === 0 && !isModelsLoading) {
-                toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada siswa di tingkat ini yang memiliki data wajah terdaftar." });
-            }
+    const startScanner = useCallback(async (mode: ScannerMode) => {
+        if (activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId) {
+             if (!selectedCameraId) {
+                 toast({ variant: "destructive", title: "Pilih Kamera", description: "Anda harus memilih kamera terlebih dahulu." });
+             }
+             if (mode === 'face' && labeledFaceDescriptors.length === 0) {
+                 toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
+             }
             return;
         }
 
         setIsCameraInitializing(true);
         setCameraError(null);
+        setActiveScanner(mode);
+
+        const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const qrboxSize = Math.floor(minEdge * 0.7);
+            return {
+                width: qrboxSize,
+                height: qrboxSize,
+            };
+        };
+
+        const config = {
+            fps: 5,
+            qrbox: qrboxFunction,
+            aspectRatio: 1.0,
+        };
         
-        const startFaceRecognition = (videoElement: HTMLVideoElement) => {
-            if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+        html5QrCodeRef.current = new Html5Qrcode(`video-container`, { verbose: false });
 
-            const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.55);
+        const onScanSuccess = (decodedText: string) => {
+            if (mode === 'qr') {
+                handleScan(decodedText);
+            }
+        };
 
-            detectionIntervalRef.current = setInterval(async () => {
-                if (processingLock.current) return;
-
-                const detections = await faceapi.detectAllFaces(videoElement, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
-                
-                if (canvasRef.current) {
-                    canvasRef.current.innerHTML = "";
-                    const displaySize = { width: videoElement.clientWidth, height: videoElement.clientHeight };
-                    faceapi.matchDimensions(canvasRef.current, displaySize);
-                    
-                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                    const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
-                    
-                    results.forEach((result, i) => {
-                        const box = resizedDetections[i].detection.box;
-                        const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString() });
-                        drawBox.draw(canvasRef.current!);
-                        
-                        if (result.label !== 'unknown' && result.distance < 0.5) {
-                            handleScan(result.label);
-                        }
-                    });
-                }
-            }, 1000);
-        }
+        const onScanFailure = (error: any) => { /* do nothing */ };
 
         try {
-            await html5QrCodeRef.current.start(
-                { facingMode: "user" },
-                { fps: 5, qrbox: { width: 200, height: 200 }, aspectRatio: 1.0 },
-                (decodedText) => handleScan(decodedText),
-                (errorMessage) => {}
-            );
-            
-            const videoElement = document.getElementById(`${scannerContainerId}-video`) as HTMLVideoElement;
-            if (videoElement) {
+            await html5QrCodeRef.current.start(selectedCameraId, config, onScanSuccess, onScanFailure);
+             
+             const videoElement = document.getElementById('video-container-video') as HTMLVideoElement | null;
+             if (videoElement) {
                 videoRef.current = videoElement;
-                startFaceRecognition(videoElement);
+             }
+
+            if (mode === 'face') {
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
+                
+                detectionIntervalRef.current = setInterval(async () => {
+                     if (processingLock.current || !videoRef.current) return;
+
+                     const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
+
+                     if (canvasRef.current && videoRef.current) {
+                        const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
+                        faceapi.matchDimensions(canvasRef.current, displaySize);
+                        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                        
+                        const context = canvasRef.current.getContext('2d');
+                        context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+                        resizedDetections.forEach(d => {
+                             const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                             const box = d.detection.box;
+                             const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.toString() });
+                             drawBox.draw(canvasRef.current!);
+                             
+                             if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
+                                handleScan(bestMatch.label);
+                             }
+                        });
+                     }
+                }, 1500);
             }
 
-            setIsCameraInitializing(false);
-            setIsCameraActive(true);
-            addLog("Kamera berhasil diaktifkan untuk QR & Wajah.", "success");
+            addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
             const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
-            setIsCameraInitializing(false);
-            setIsCameraActive(false);
             addLog(`Error kamera: ${errorMessage}`, "error");
+            setActiveScanner(null);
+        } finally {
+            setIsCameraInitializing(false);
         }
-    }, [isCameraActive, isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors]);
-    
+    }, [activeScanner, isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors, selectedCameraId]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -620,42 +642,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            <Card>
+            <Card className="lg:col-span-2">
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><ScanLine /> Input Manual</CardTitle>
+                     <CardTitle className="flex items-center gap-2"><Camera /> Kontrol Kamera</CardTitle>
                     <CardDescription>
-                        Gunakan barcode scanner atau ketik NISN manual lalu tekan Enter.
+                        Pilih kamera, lalu aktifkan mode pindai QR atau Wajah.
                     </CardDescription>
                 </CardHeader>
-                <CardContent>
-                    <Input
-                        ref={scannerInputRef}
-                        id={`nisn-input-${grade}`}
-                        placeholder={isLoading || isModelsLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                        disabled={isLoading || isProcessing || isModelsLoading}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                                handleScan(e.currentTarget.value);
-                            }
-                        }}
-                        autoFocus
-                    />
-                </CardContent>
-            </Card>
-            <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><Camera /> Kontrol Kamera</CardTitle>
-                        <CardDescription>
-                        Aktifkan kamera untuk memindai QR code dan wajah siswa.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-4">
-                    <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                        <div id={scannerContainerId} className="w-full h-full" />
+                <CardContent className="flex flex-col items-center gap-4">
+                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                        <div id="video-container" className="w-full h-full" />
                          <canvas ref={canvasRef} className="absolute inset-0 z-10" />
                         
-                        {!isCameraActive && (
+                        {!activeScanner && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                             {isCameraInitializing ? (
                                 <>
@@ -663,7 +662,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                     <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
                                 </>
                             ) : cameraError ? (
-                                <Alert variant="destructive">
+                                <Alert variant="destructive" className="text-left">
                                     <ShieldAlert className="h-4 w-4" />
                                     <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
                                     <AlertDescription>{cameraError}</AlertDescription>
@@ -677,48 +676,93 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 <>
                                     <Video className="h-10 w-10 text-muted-foreground" />
                                     <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
-                                    <p className="text-xs text-muted-foreground">Klik "Aktifkan Kamera" untuk memulai.</p>
+                                    <p className="text-xs text-muted-foreground">Pilih kamera lalu aktifkan mode pindai.</p>
                                 </>
                             )}
                         </div>
                         )}
                     </div>
-                    <div className="flex flex-wrap gap-2 justify-center">
-                        <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing || isModelsLoading}>
-                            <Video className="mr-2"/> Aktifkan Kamera
-                        </Button>
-                        <Button size="sm" onClick={stopScanner} variant="destructive" disabled={!isCameraActive || isCameraInitializing}>
+                     <div className="w-full flex flex-col md:flex-row gap-2">
+                        <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={!!activeScanner}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Pilih Perangkat Kamera..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {availableCameras.map(device => (
+                                    <SelectItem key={device.id} value={device.id}>
+                                        {device.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <div className="flex gap-2 justify-center w-full">
+                            <Button className="flex-1" size="sm" onClick={() => startScanner('qr')} disabled={!!activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId}>
+                                <QrCode className="mr-2"/> Pindai QR
+                            </Button>
+                            <Button className="flex-1" size="sm" onClick={() => startScanner('face')} disabled={!!activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId}>
+                                <ScanFace className="mr-2"/> Pindai Wajah
+                            </Button>
+                        </div>
+                    </div>
+                     {activeScanner && (
+                         <Button size="sm" onClick={stopScanner} variant="destructive" disabled={isCameraInitializing}>
                             <VideoOff className="mr-2"/> Matikan Kamera
                         </Button>
-                    </div>
+                     )}
                 </CardContent>
             </Card>
-             <Card>
-                <CardHeader>
-                    <CardTitle>Log Aktivitas</CardTitle>
-                    <CardDescription>Catatan pemindaian absensi hari ini.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="h-80 overflow-y-auto rounded-md border p-2 space-y-2">
-                        {logMessages.length > 0 ? (
-                            logMessages.map((log, i) => (
-                                <div key={i} className="flex items-start gap-2 text-sm">
-                                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
-                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
-                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
-                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                    {log.type === 'warning' && <MessageSquareWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
-                                    <span className="flex-1">{log.message}</span>
+
+            <div className="flex flex-col gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><ScanLine /> Input Manual</CardTitle>
+                        <CardDescription>
+                            Ketik NISN lalu tekan Enter.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Input
+                            ref={scannerInputRef}
+                            id={`nisn-input-${grade}`}
+                            placeholder={isLoading || isModelsLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
+                            disabled={isLoading || isProcessing || isModelsLoading}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                    handleScan(e.currentTarget.value);
+                                }
+                            }}
+                            autoFocus
+                        />
+                    </CardContent>
+                </Card>
+
+                 <Card>
+                    <CardHeader>
+                        <CardTitle>Log Aktivitas</CardTitle>
+                        <CardDescription>Catatan pemindaian hari ini.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="h-60 overflow-y-auto rounded-md border p-2 space-y-2">
+                            {logMessages.length > 0 ? (
+                                logMessages.map((log, i) => (
+                                    <div key={i} className="flex items-start gap-2 text-sm">
+                                        <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
+                                        {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
+                                        {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
+                                        {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                        {log.type === 'warning' && <ShieldAlert className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
+                                        <span className="flex-1">{log.message}</span>
+                                    </div>
+                                ))
+                            ) : (
+                                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                    Belum ada aktivitas.
                                 </div>
-                            ))
-                        ) : (
-                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                                Belum ada aktivitas.
-                            </div>
-                        )}
-                    </div>
-                </CardContent>
-            </Card>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
       
         <Card>
