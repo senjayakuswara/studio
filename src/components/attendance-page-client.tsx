@@ -407,7 +407,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    if (activeScanner === 'face') {
+                        context.scale(-1, 1);
+                        context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
+                    } else {
+                         context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    }
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -489,6 +494,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
              }
              if (mode === 'face' && labeledFaceDescriptors.length === 0) {
                  toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
+                 return;
              }
             return;
         }
@@ -544,18 +550,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         const resizedDetections = faceapi.resizeResults(detections, displaySize);
                         
                         const context = canvasRef.current.getContext('2d');
-                        context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-
-                        resizedDetections.forEach(d => {
-                             const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                             const box = d.detection.box;
-                             const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.toString() });
-                             drawBox.draw(canvasRef.current!);
-                             
-                             if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
-                                handleScan(bestMatch.label);
-                             }
-                        });
+                        if (context) {
+                            context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                            resizedDetections.forEach(d => {
+                                const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                                if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
+                                    handleScan(bestMatch.label);
+                                }
+                            });
+                        }
                      }
                 }, 1500);
             }
@@ -651,8 +654,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 </CardHeader>
                 <CardContent className="flex flex-col items-center gap-4">
                      <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                        <div id="video-container" className="w-full h-full" />
-                         <canvas ref={canvasRef} className="absolute inset-0 z-10" />
+                        <div id="video-container" className="w-full h-full transform -scale-x-100" />
+                         <canvas ref={canvasRef} className="absolute inset-0 z-10 transform -scale-x-100" />
                         
                         {!activeScanner && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
