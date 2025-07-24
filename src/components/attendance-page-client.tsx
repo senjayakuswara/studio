@@ -32,7 +32,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, MessageWarning } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, MessageSquareWarning } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -636,7 +636,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                     {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
                                     {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
                                     {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                    {log.type === 'warning' && <MessageWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
+                                    {log.type === 'warning' && <MessageSquareWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
                                     <span className="flex-1">{log.message}</span>
                                 </div>
                             ))
