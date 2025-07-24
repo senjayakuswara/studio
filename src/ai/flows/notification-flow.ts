@@ -13,7 +13,6 @@ import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
-import { toZonedTime } from 'date-fns-tz';
 
 // Types
 type AppConfig = {

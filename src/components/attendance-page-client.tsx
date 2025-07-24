@@ -284,7 +284,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 }
 
             } catch (error) {
-                console.error("Error fetching data:", error)
+                console.error("Error fetching data:", error);
                 addLog("Gagal memuat data dari server.", "error")
                 toast({
                     variant: "destructive",
@@ -315,7 +315,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setFeedbackOverlay({ show: false, type: 'loading' });
                 processingLock.current = false;
                 setIsProcessing(false);
-            }, 2500); // Increased duration for feedback
+            }, 2500);
         };
         
         try {
@@ -342,7 +342,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const jamPulangTime = new Date();
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
 
-            // Corrected check for duplicate scans
             if (existingRecord && existingRecord.timestampMasuk && now < jamPulangTime) {
                 addLog(`Siswa ${student.nama} sudah absen masuk hari ini.`, 'info');
                 playSound('error');
@@ -385,7 +384,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 const context = tempCanvas.getContext('2d');
                 if (context) {
                     if (activeScanner === 'face') {
-                        // Mirror the snapshot for face scan
                         context.scale(-1, 1);
                         context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
                     } else {
@@ -423,7 +421,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             else if (!existingRecord.timestampPulang) {
                  tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                 // This case is already handled above, but as a fallback.
                  addLog(`Siswa ${student.nama} sudah absen penuh.`, 'info');
                 playSound('error');
                 cleanup('info', student, "Sudah Absen Penuh");
@@ -486,6 +483,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 await html5QrCodeRef.current.stop();
             } catch (err) {
                  console.log("Gagal menghentikan scanner QR, mungkin sudah berhenti.");
+            } finally {
+                html5QrCodeRef.current = null;
             }
         }
         
@@ -502,7 +501,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         setActiveScanner(null);
         setCameraError(null);
-        // Do not nullify videoRef here, let it be managed by the element's lifecycle
     }, []);
 
     const startScanner = useCallback(async (mode: ScannerMode) => {
@@ -539,31 +537,32 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             videoRef.current = videoElement;
     
             if (mode === 'face') {
-                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
-                
-                detectionIntervalRef.current = setInterval(async () => {
-                    if (processingLock.current || !videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended) return;
-    
-                    const video = videoRef.current;
-                    const canvas = canvasRef.current;
-                    const displaySize = { width: video.clientWidth, height: video.clientHeight };
-                    faceapi.matchDimensions(canvas, displaySize);
-    
-                    const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-                    
-                    const context = canvas.getContext('2d');
-                    if (context) {
-                        context.clearRect(0, 0, canvas.width, canvas.height);
-                        if (detections) {
-                            const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                             faceapi.draw.drawDetections(canvas, resizedDetections);
-                            const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
-                            if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
-                                handleScan(bestMatch.label);
+                videoRef.current.onplay = () => {
+                    const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
+                    detectionIntervalRef.current = setInterval(async () => {
+                        if (processingLock.current || !videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended) return;
+        
+                        const video = videoRef.current;
+                        const canvas = canvasRef.current;
+                        const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                        faceapi.matchDimensions(canvas, displaySize);
+        
+                        const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                        
+                        const context = canvas.getContext('2d');
+                        if (context) {
+                            context.clearRect(0, 0, canvas.width, canvas.height);
+                            if (detections) {
+                                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                                 faceapi.draw.drawDetections(canvas, resizedDetections);
+                                const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
+                                if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
+                                    handleScan(bestMatch.label);
+                                }
                             }
                         }
-                    }
-                }, 1000); // Scan every second
+                    }, 1000);
+                }
             }
             addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
