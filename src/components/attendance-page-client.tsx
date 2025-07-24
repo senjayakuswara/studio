@@ -99,7 +99,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
     
     const processingLock = useRef(false);
-    const scannerInputRef = useRef<HTMLInputElement>(null)
+    const scannerInputRef = useRef<HTMLInputElement>(null);
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const { toast } = useToast()
@@ -140,7 +142,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, []);
 
-    const serializableRecordForNotification = (record: AttendanceRecord): SerializableAttendanceRecord => {
+    const serializableRecordForNotification = (record: AttendanceRecord, photoDataUri?: string): SerializableAttendanceRecord => {
         return {
             id: record.id ?? undefined,
             studentId: record.studentId,
@@ -151,7 +153,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
             timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
             recordDate: record.recordDate.toDate().toISOString(),
-            parentWaNumber: record.parentWaNumber
+            parentWaNumber: record.parentWaNumber,
+            photoDataUri: photoDataUri
         }
     }
 
@@ -315,7 +318,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const jamPulangTime = new Date();
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
     
-            // Define a temporary record for notification check
             let tempRecordForDb: Omit<AttendanceRecord, 'id'> & { id?: string };
             let isAbsenMasuk = false;
 
@@ -360,10 +362,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('error', student);
                 return;
             }
+            
+            let photoDataUri: string | undefined = undefined;
+            if (isCameraActive && videoRef.current && canvasRef.current) {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const context = canvas.getContext('2d');
+                if (context) {
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    photoDataUri = canvas.toDataURL('image/jpeg');
+                }
+            }
 
             let notificationFailed = false;
             try {
-                await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord));
+                await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord, photoDataUri));
             } catch (error) {
                  notificationFailed = true;
             }
@@ -410,7 +425,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             playSound('error');
             cleanup('error');
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound, isCameraActive]);
     
     const stopScanner = useCallback(async () => {
         if (!html5QrCodeRef.current?.isScanning) return;
@@ -420,6 +435,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog("Kamera dinonaktifkan.", "info");
             setIsCameraActive(false);
             setCameraError(null);
+            if (videoRef.current) videoRef.current.srcObject = null;
         } catch (err) {
             console.warn("Gagal menghentikan pemindai dengan bersih.", err);
             setIsCameraActive(false);
@@ -439,6 +455,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 (decodedText) => handleScan(decodedText),
                 (errorMessage) => { /* ignore scan failure */ }
             );
+
+            // Assign the video stream to our visible video element for photo capture
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+            }
+
             setIsCameraInitializing(false);
             setIsCameraActive(true);
             addLog("Kamera berhasil diaktifkan.", "success");
@@ -511,6 +534,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     return (
     <>
+    <canvas ref={canvasRef} className="hidden"></canvas>
     {feedbackOverlay.show && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
             <div className="p-8 rounded-full bg-white/10">
@@ -563,6 +587,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardContent className="flex flex-col gap-4">
                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
                         <div id={scannerContainerId} className="w-full h-full" />
+                        <video ref={videoRef} autoPlay playsInline muted className="hidden" />
                         
                         {!isCameraActive && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
@@ -720,5 +745,3 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-    
