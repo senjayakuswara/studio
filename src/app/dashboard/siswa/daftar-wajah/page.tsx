@@ -3,7 +3,7 @@
 
 import * as React from "react"
 import { useState, useEffect, useRef, useCallback } from "react"
-import { collection, getDocs, query, where, doc, updateDoc, getDoc } from "firebase/firestore"
+import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import * as faceapi from 'face-api.js';
@@ -28,7 +28,6 @@ import {
 import { Loader2, Camera, UserCheck, UserX, ScanFace, CheckCircle2 } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
-import { Skeleton } from "@/components/ui/skeleton"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -141,11 +140,14 @@ export default function DaftarWajahPage() {
             stream.getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
             if (intervalRef.current) clearInterval(intervalRef.current);
+             if(canvasRef.current) {
+                const context = canvasRef.current.getContext('2d');
+                context?.clearRect(0,0, canvasRef.current.width, canvasRef.current.height);
+            }
         }
     }, []);
 
     useEffect(() => {
-        // Stop camera when component unmounts
         return () => {
             stopCamera();
         };
@@ -153,7 +155,10 @@ export default function DaftarWajahPage() {
 
 
     const handleRegistration = async () => {
-        if (!selectedStudent || !videoRef.current) return;
+        if (!selectedStudent || !videoRef.current?.srcObject) {
+            toast({variant: "destructive", title: "Kamera Belum Aktif", description: "Harap nyalakan kamera terlebih dahulu."});
+            return;
+        }
         
         setIsRegistering(true);
         setRegistrationProgress(0);
@@ -161,22 +166,23 @@ export default function DaftarWajahPage() {
 
         const descriptors: Float32Array[] = [];
         let captureCount = 0;
+        const requiredCaptures = 5;
 
         const captureInterval = setInterval(async () => {
-            if (videoRef.current) {
+            if (videoRef.current && captureCount < requiredCaptures) {
                 const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                 if (detections) {
                     descriptors.push(detections.descriptor);
                     captureCount++;
-                    const progress = (captureCount / 5) * 100;
+                    const progress = (captureCount / requiredCaptures) * 100;
                     setRegistrationProgress(progress);
-                    setFeedbackMessage(`Pengambilan sampel ${captureCount} dari 5 berhasil...`);
+                    setFeedbackMessage(`Pengambilan sampel ${captureCount} dari ${requiredCaptures} berhasil...`);
                 }
             }
 
-            if (captureCount >= 5) {
+            if (captureCount >= requiredCaptures) {
                 clearInterval(captureInterval);
-                if (descriptors.length < 5) {
+                if (descriptors.length < requiredCaptures) {
                      setFeedbackMessage("Pendaftaran gagal, wajah tidak terdeteksi dengan jelas. Coba lagi.");
                      setIsRegistering(false);
                      return;
@@ -184,7 +190,6 @@ export default function DaftarWajahPage() {
 
                 setFeedbackMessage("Memproses data wajah...");
                 
-                // Average the descriptors
                 const avgDescriptor = descriptors.reduce((acc, val) => {
                     val.forEach((v, i) => acc[i] = (acc[i] || 0) + v);
                     return acc;
@@ -194,12 +199,12 @@ export default function DaftarWajahPage() {
                     const studentRef = doc(db, "students", selectedStudent.id);
                     await updateDoc(studentRef, { faceDescriptor: avgDescriptor });
                     
-                    // Update local state
                     setSelectedStudent(prev => prev ? { ...prev, faceDescriptor: avgDescriptor } : null);
                     setStudents(prev => prev.map(s => s.id === selectedStudent.id ? { ...s, faceDescriptor: avgDescriptor } : s));
 
                     setFeedbackMessage("Pendaftaran wajah berhasil!");
                     toast({ title: "Sukses", description: `Data wajah untuk ${selectedStudent.nama} berhasil disimpan.` });
+                    stopCamera();
 
                 } catch (error) {
                     console.error("Error saving descriptor:", error);
@@ -213,7 +218,7 @@ export default function DaftarWajahPage() {
                     }, 2000);
                 }
             }
-        }, 1000); // Capture every second
+        }, 800); 
     };
 
     return (
@@ -289,19 +294,20 @@ export default function DaftarWajahPage() {
                                 playsInline 
                                 muted 
                                 className="w-full h-full object-cover"
-                                onLoadedData={async () => {
+                                onPlay={async () => {
                                     if(canvasRef.current && videoRef.current){
                                         const video = videoRef.current;
                                         const canvas = canvasRef.current;
-                                        canvas.width = video.videoWidth;
-                                        canvas.height = video.videoHeight;
+                                        const displaySize = { width: video.clientWidth, height: video.clientHeight };
+                                        faceapi.matchDimensions(canvas, displaySize);
                                         
                                         intervalRef.current = setInterval(async () => {
-                                             const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+                                             const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions());
+                                             const resizedDetections = faceapi.resizeResults(detections, displaySize);
                                              const context = canvas.getContext('2d');
                                              if(context) {
                                                 context.clearRect(0,0, canvas.width, canvas.height);
-                                                faceapi.draw.drawDetections(canvas, detections);
+                                                faceapi.draw.drawDetections(canvas, resizedDetections);
                                              }
                                         }, 100);
                                     }

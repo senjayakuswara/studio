@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
 import { Html5Qrcode } from "html5-qrcode"
+import * as faceapi from 'face-api.js';
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
@@ -43,7 +44,16 @@ import { cn } from "@/lib/utils"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string, grade: string, jenisKelamin: "Laki-laki" | "Perempuan", parentWaNumber?: string }
+type Student = { 
+    id: string; 
+    nisn: string; 
+    nama: string; 
+    classId: string, 
+    grade: string, 
+    jenisKelamin: "Laki-laki" | "Perempuan", 
+    parentWaNumber?: string,
+    faceDescriptor?: number[] 
+}
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
@@ -74,6 +84,8 @@ type AttendancePageClientProps = {
   grade: "X" | "XI" | "XII"
 }
 
+const MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
     "Hadir": "default",
     "Terlambat": "destructive",
@@ -90,6 +102,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null)
     const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord>>({})
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
+    const [isModelsLoading, setIsModelsLoading] = useState(true);
     const [isLoading, setIsLoading] = useState(true)
     const [isProcessing, setIsProcessing] = useState(false);
     const [isCameraInitializing, setIsCameraInitializing] = useState(false);
@@ -97,11 +110,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [cameraError, setCameraError] = useState<string | null>(null);
     const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" | "warning" } | null>(null);
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
+    const [labeledFaceDescriptors, setLabeledFaceDescriptors] = useState<faceapi.LabeledFaceDescriptors[]>([]);
     
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const detectionIntervalRef = useRef<NodeJS.Timeout>();
     const scannerContainerId = `qr-reader-${grade.toLowerCase()}`;
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const { toast } = useToast()
@@ -111,6 +126,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const sortedStudents = useMemo(() => {
         return [...allStudents].sort((a, b) => a.nama.localeCompare(b.nama));
     }, [allStudents]);
+
+     useEffect(() => {
+        const loadModels = async () => {
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_URL),
+                    faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_URL),
+                    faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_URL),
+                ]);
+                setIsModelsLoading(false);
+            } catch (error) {
+                console.error("Error loading models:", error);
+                toast({ variant: "destructive", title: "Gagal Memuat Model AI" });
+            }
+        };
+        loadModels();
+    }, [toast]);
 
     const addLog = useCallback((message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
@@ -126,7 +158,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [attendanceData]);
 
     useEffect(() => {
-        // This effect ensures the input is focused whenever processing is finished
         if (!isProcessing) {
             scannerInputRef.current?.focus();
         }
@@ -149,7 +180,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             nisn: record.nisn,
             studentName: record.studentName,
             classId: record.classId,
-            status: record.status as any, // Cast because AttendanceStatus includes "Belum Absen"
+            status: record.status as any, 
             timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
             timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
             recordDate: record.recordDate.toDate().toISOString(),
@@ -176,7 +207,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     setSchoolHours(hoursDocSnap.data() as SchoolHoursSettings);
                 } else {
                     addLog("Pengaturan jam sekolah belum diatur.", "error")
-                    toast({ variant: "destructive", title: "Pengaturan Jam Tidak Ditemukan", description: "Harap atur jam sekolah terlebih dahulu di menu pengaturan." });
+                    toast({ variant: "destructive", title: "Pengaturan Jam Tidak Ditemukan" });
                 }
                 
                 if (classList.length > 0) {
@@ -191,6 +222,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         } as Student;
                     });
                     setAllStudents(studentList);
+
+                    const descriptors = studentList
+                        .filter(s => s.faceDescriptor && s.faceDescriptor.length > 0)
+                        .map(s => new faceapi.LabeledFaceDescriptors(s.nisn, [new Float32Array(s.faceDescriptor!)]));
+                    setLabeledFaceDescriptors(descriptors);
+                    if (descriptors.length > 0) {
+                        addLog(`${descriptors.length} data wajah siswa berhasil dimuat.`, 'info');
+                    }
+
 
                     const studentIds = studentList.map(s => s.id);
                     if (studentIds.length > 0) {
@@ -231,14 +271,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 toast({
                     variant: "destructive",
                     title: "Gagal Memuat Data",
-                    description: "Gagal mengambil data dari server. Periksa koneksi dan coba lagi.",
                 })
             } finally {
                 setIsLoading(false)
             }
         }
-        fetchData()
-    }, [grade, toast, addLog])
+        if (!isModelsLoading) {
+            fetchData();
+        }
+    }, [grade, toast, addLog, isModelsLoading])
     
     useEffect(() => {
         const scanner = new Html5Qrcode(scannerContainerId, { verbose: false });
@@ -246,9 +287,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         return () => {
             if (scanner?.isScanning) {
-                scanner.stop().catch(err => {
-                    console.error("Failed to stop QR scanner on component unmount.", err);
-                });
+                scanner.stop().catch(err => {});
+            }
+            if (detectionIntervalRef.current) {
+                clearInterval(detectionIntervalRef.current);
             }
         };
     }, [scannerContainerId]);
@@ -269,13 +311,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setFeedbackOverlay({ show: false, type: 'loading' });
                 processingLock.current = false;
                 setIsProcessing(false);
-            }, 1500);
+            }, 2000);
         };
 
         try {
             if (!schoolHours) {
                 addLog("Error: Pengaturan jam belum dimuat.", "error");
-                toast({ variant: "destructive", title: "Pengaturan Jam Belum Siap" });
                 playSound('error');
                 cleanup('error');
                 return;
@@ -286,7 +327,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!student) {
                 addLog(`NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`, 'error');
                 setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-                toast({ variant: "destructive", title: "Siswa Tidak Ditemukan" });
                 playSound('error');
                 cleanup('error');
                 return;
@@ -296,7 +336,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 const studentClass = classMap.get(student.classId)
                 addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                toast({ variant: "destructive", title: "Salah Ruang Absen!", description: `Siswa ini dari Kelas ${student.grade}.` });
                 playSound('error');
                 cleanup('error', student);
                 return;
@@ -308,7 +347,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                toast({ variant: "destructive", title: "Aksi Diblokir", description: `Status siswa adalah ${existingRecord.status}.` });
                 playSound('error');
                 cleanup('error', student);
                 return;
@@ -326,7 +364,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  if (now > jamPulangTime) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                    toast({ variant: "destructive", title: "Absen Masuk Gagal", description: "Sudah melewati jam pulang sekolah." });
                     playSound('error');
                     cleanup('error', student);
                     return;
@@ -348,7 +385,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 if (now < jamPulangTime) {
                     addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                    toast({ variant: "destructive", title: "Absen Pulang Gagal", description: `Jam pulang adalah pukul ${schoolHours.jamPulang}.` });
                     playSound('error');
                     cleanup('error', student);
                     return;
@@ -357,7 +393,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             } else {
                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                toast({ title: "Sudah Lengkap", description: "Siswa sudah tercatat absen masuk dan pulang hari ini." });
                 playSound('error');
                 cleanup('error', student);
                 return;
@@ -401,83 +436,117 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (notificationFailed) {
                 addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} ${student.nama} BERHASIL, tapi notifikasi GAGAL & diantrekan.`, 'warning');
                 setHighlightedNisn({ nisn: student.nisn, type: 'warning' });
-                toast({ 
-                    variant: "destructive",
-                    title: `Absen Sukses, Notifikasi Gagal`,
-                    description: `Notifikasi untuk ${student.nama} telah dimasukkan ke antrean. Periksa di menu Pengaturan.`,
-                });
                 playSound('warning');
             } else {
                 addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                toast({ title: `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} Berhasil` });
                 playSound('success');
             }
             
             cleanup('success', student);
 
-
         } catch (error) {
             console.error("Error handling scan:", error);
             addLog(`Gagal memproses NISN ${trimmedNisn}.`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-            toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan saat memproses absensi." });
             playSound('error');
             cleanup('error');
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, toast, playSound, isCameraActive]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, isCameraActive]);
     
     const stopScanner = useCallback(async () => {
-        if (!html5QrCodeRef.current?.isScanning) return;
-
-        try {
-            await html5QrCodeRef.current.stop();
-            addLog("Kamera dinonaktifkan.", "info");
-            setIsCameraActive(false);
-            setCameraError(null);
-            if (videoRef.current) videoRef.current.srcObject = null;
-        } catch (err) {
-            console.warn("Gagal menghentikan pemindai dengan bersih.", err);
-            setIsCameraActive(false);
+        if (detectionIntervalRef.current) {
+            clearInterval(detectionIntervalRef.current);
         }
+        if (html5QrCodeRef.current?.isScanning) {
+            try {
+                await html5QrCodeRef.current.stop();
+            } catch (err) {}
+        }
+        
+        if (videoRef.current?.srcObject) {
+            const stream = videoRef.current.srcObject as MediaStream;
+            stream.getTracks().forEach(track => track.stop());
+            videoRef.current.srcObject = null;
+        }
+
+        if (canvasRef.current) {
+            const context = canvasRef.current.getContext('2d');
+            context?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
+
+        addLog("Kamera dinonaktifkan.", "info");
+        setIsCameraActive(false);
+        setCameraError(null);
     }, [addLog]);
 
     const startScanner = useCallback(async () => {
-        if (isCameraActive || isCameraInitializing || !html5QrCodeRef.current) return;
+        if (isCameraActive || isCameraInitializing || !html5QrCodeRef.current || isModelsLoading || labeledFaceDescriptors.length === 0) {
+             if (labeledFaceDescriptors.length === 0 && !isModelsLoading) {
+                toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada siswa di tingkat ini yang memiliki data wajah terdaftar." });
+            }
+            return;
+        }
 
         setIsCameraInitializing(true);
         setCameraError(null);
         
+        const startFaceRecognition = (videoElement: HTMLVideoElement) => {
+            if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+
+            const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.55);
+
+            detectionIntervalRef.current = setInterval(async () => {
+                if (processingLock.current) return;
+
+                const detections = await faceapi.detectAllFaces(videoElement, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
+                
+                if (canvasRef.current) {
+                    canvasRef.current.innerHTML = "";
+                    const displaySize = { width: videoElement.clientWidth, height: videoElement.clientHeight };
+                    faceapi.matchDimensions(canvasRef.current, displaySize);
+                    
+                    const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                    const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
+                    
+                    results.forEach((result, i) => {
+                        const box = resizedDetections[i].detection.box;
+                        const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString() });
+                        drawBox.draw(canvasRef.current!);
+                        
+                        if (result.label !== 'unknown' && result.distance < 0.5) {
+                            handleScan(result.label);
+                        }
+                    });
+                }
+            }, 1000);
+        }
+
         try {
             await html5QrCodeRef.current.start(
                 { facingMode: "user" },
-                { fps: 5, qrbox: { width: 250, height: 250 } },
+                { fps: 5, qrbox: { width: 200, height: 200 }, aspectRatio: 1.0 },
                 (decodedText) => handleScan(decodedText),
-                (errorMessage) => { /* ignore scan failure */ }
+                (errorMessage) => {}
             );
-
-            // Assign the video stream to our visible video element for photo capture
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
+            
+            const videoElement = document.getElementById(`${scannerContainerId}-video`) as HTMLVideoElement;
+            if (videoElement) {
+                videoRef.current = videoElement;
+                startFaceRecognition(videoElement);
             }
 
             setIsCameraInitializing(false);
             setIsCameraActive(true);
-            addLog("Kamera berhasil diaktifkan.", "success");
+            addLog("Kamera berhasil diaktifkan untuk QR & Wajah.", "success");
         } catch (err: any) {
             const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
             setIsCameraInitializing(false);
             setIsCameraActive(false);
             addLog(`Error kamera: ${errorMessage}`, "error");
-            toast({
-                variant: 'destructive',
-                title: 'Gagal Mengakses Kamera',
-                description: 'Harap izinkan akses kamera di pengaturan browser Anda dan coba lagi.'
-            });
         }
-    }, [isCameraActive, isCameraInitializing, addLog, handleScan, toast]);
+    }, [isCameraActive, isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors]);
     
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
@@ -509,12 +578,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const newRecord = { ...payload, id: docId } as AttendanceRecord;
             setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
-            toast({ title: "Status Diperbarui", description: `${student.nama} ditandai sebagai ${status}.` });
 
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
-            toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan data." });
         }
     }
 
@@ -534,7 +601,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     return (
     <>
-    <canvas ref={canvasRef} className="hidden"></canvas>
     {feedbackOverlay.show && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm">
             <div className="p-8 rounded-full bg-white/10">
@@ -549,7 +615,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Pindai barcode untuk absen masuk &amp; pulang.</p>
+            <p className="text-muted-foreground">Pindai barcode/wajah untuk absen masuk &amp; pulang.</p>
             </div>
         </div>
 
@@ -566,8 +632,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     <Input
                         ref={scannerInputRef}
                         id={`nisn-input-${grade}`}
-                        placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                        disabled={isLoading || isProcessing}
+                        placeholder={isLoading || isModelsLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
+                        disabled={isLoading || isProcessing || isModelsLoading}
                         onKeyDown={(e) => {
                             if (e.key === "Enter") {
                                 handleScan(e.currentTarget.value);
@@ -581,13 +647,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Camera /> Kontrol Kamera</CardTitle>
                         <CardDescription>
-                        Aktifkan kamera untuk memindai QR code atau barcode dari siswa.
+                        Aktifkan kamera untuk memindai QR code dan wajah siswa.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
                         <div id={scannerContainerId} className="w-full h-full" />
-                        <video ref={videoRef} autoPlay playsInline muted className="hidden" />
+                         <canvas ref={canvasRef} className="absolute inset-0 z-10" />
                         
                         {!isCameraActive && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
@@ -602,6 +668,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                     <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
                                     <AlertDescription>{cameraError}</AlertDescription>
                                 </Alert>
+                            ) : isModelsLoading ? (
+                                <>
+                                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                    <p className="mt-2 text-muted-foreground">Memuat Model AI...</p>
+                                </>
                             ) : (
                                 <>
                                     <Video className="h-10 w-10 text-muted-foreground" />
@@ -613,7 +684,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         )}
                     </div>
                     <div className="flex flex-wrap gap-2 justify-center">
-                        <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing}>
+                        <Button size="sm" onClick={startScanner} disabled={isCameraActive || isCameraInitializing || isModelsLoading}>
                             <Video className="mr-2"/> Aktifkan Kamera
                         </Button>
                         <Button size="sm" onClick={stopScanner} variant="destructive" disabled={!isCameraActive || isCameraInitializing}>
