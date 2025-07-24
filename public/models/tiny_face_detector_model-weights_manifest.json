@@ -1,0 +1,163 @@
+
+[
+    {
+        "paths": [
+            "tiny_face_detector_model-shard1"
+        ],
+        "weights": [
+            {
+                "name": "tiny_face_detector_model/conv0/filters",
+                "shape": [
+                    3,
+                    3,
+                    3,
+                    16
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv0/biases",
+                "shape": [
+                    16
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv1/filters",
+                "shape": [
+                    3,
+                    3,
+                    16,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv1/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    32,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv2/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv3/filters",
+                "shape": [
+                    3,
+                    3,
+                    64,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv3/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv4/filters",
+                "shape": [
+                    3,
+                    3,
+                    128,
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv4/biases",
+                "shape": [
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv5/filters",
+                "shape": [
+                    3,
+                    3,
+                    256,
+                    512
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv5/biases",
+                "shape": [
+                    512
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv6/filters",
+                "shape": [
+                    3,
+                    3,
+                    512,
+                    1024
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv6/biases",
+                "shape": [
+                    1024
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv7/filters",
+                "shape": [
+                    3,
+                    3,
+                    1024,
+                    1024
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv7/biases",
+                "shape": [
+                    1024
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv8/filters",
+                "shape": [
+                    1,
+                    1,
+                    1024,
+                    25
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "tiny_face_detector_model/conv8/biases",
+                "shape": [
+                    25
+                ],
+                "dtype": "float32"
+            }
+        ]
+    }
+]

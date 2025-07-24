@@ -1,0 +1,723 @@
+
+[
+    {
+        "paths": [
+            "face_recognition_model-shard1",
+            "face_recognition_model-shard2"
+        ],
+        "weights": [
+            {
+                "name": "face_recognition_model/conv1/filters",
+                "shape": [
+                    7,
+                    7,
+                    3,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/conv1/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/conv2/filters",
+                "shape": [
+                    1,
+                    1,
+                    64,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/conv2/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/conv3/filters",
+                "shape": [
+                    3,
+                    3,
+                    64,
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/conv3/biases",
+                "shape": [
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_1x1_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    192,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_1x1_conv/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    192,
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_3x3_conv1/biases",
+                "shape": [
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    96,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_3x3_conv2/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    192,
+                    16
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_5x5_conv1/biases",
+                "shape": [
+                    16
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    16,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_5x5_conv2/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_pool_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    192,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3a_pool_conv/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_1x1_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    256,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_1x1_conv/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    256,
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_3x3_conv1/biases",
+                "shape": [
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    96,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_3x3_conv2/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    256,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_5x5_conv1/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    32,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_5x5_conv2/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_pool_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    256,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3b_pool_conv/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    320,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_3x3_conv1/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    128,
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_3x3_conv2/biases",
+                "shape": [
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    320,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_5x5_conv1/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    32,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_3c_5x5_conv2/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_1x1_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_1x1_conv/biases",
+                "shape": [
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_3x3_conv1/biases",
+                "shape": [
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    96,
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_3x3_conv2/biases",
+                "shape": [
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_5x5_conv1/biases",
+                "shape": [
+                    32
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    32,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_5x5_conv2/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_pool_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4a_pool_conv/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    160
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_3x3_conv1/biases",
+                "shape": [
+                    160
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    160,
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_3x3_conv2/biases",
+                "shape": [
+                    256
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    640,
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_5x5_conv1/biases",
+                "shape": [
+                    64
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    64,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_4e_5x5_conv2/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_1x1_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    1024,
+                    384
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_1x1_conv/biases",
+                "shape": [
+                    384
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    1024,
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_3x3_conv1/biases",
+                "shape": [
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    96,
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_3x3_conv2/biases",
+                "shape": [
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    1024,
+                    48
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_5x5_conv1/biases",
+                "shape": [
+                    48
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    48,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_5x5_conv2/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_pool_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    1024,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5a_pool_conv/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_1x1_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    832,
+                    384
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_1x1_conv/biases",
+                "shape": [
+                    384
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_3x3_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    832,
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_3x3_conv1/biases",
+                "shape": [
+                    96
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_3x3_conv2/filters",
+                "shape": [
+                    3,
+                    3,
+                    96,
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_3x3_conv2/biases",
+                "shape": [
+                    192
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_5x5_conv1/filters",
+                "shape": [
+                    1,
+                    1,
+                    832,
+                    48
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_5x5_conv1/biases",
+                "shape": [
+                    48
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_5x5_conv2/filters",
+                "shape": [
+                    5,
+                    5,
+                    48,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_5x5_conv2/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_pool_conv/filters",
+                "shape": [
+                    1,
+                    1,
+                    832,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/inception_5b_pool_conv/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/dense/weights",
+                "shape": [
+                    704,
+                    128
+                ],
+                "dtype": "float32"
+            },
+            {
+                "name": "face_recognition_model/dense/biases",
+                "shape": [
+                    128
+                ],
+                "dtype": "float32"
+            }
+        ]
+    }
+]
