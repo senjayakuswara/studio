@@ -407,12 +407,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    if (activeScanner === 'face') {
-                        context.scale(-1, 1);
-                        context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
-                    } else {
-                         context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-                    }
+                    context.scale(-1, 1);
+                    context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -488,14 +484,17 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, []);
 
     const startScanner = useCallback(async (mode: ScannerMode) => {
-        if (activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId) {
+        await stopScanner();
+
+        if (isCameraInitializing || isModelsLoading || !selectedCameraId) {
              if (!selectedCameraId) {
                  toast({ variant: "destructive", title: "Pilih Kamera", description: "Anda harus memilih kamera terlebih dahulu." });
              }
-             if (mode === 'face' && labeledFaceDescriptors.length === 0) {
-                 toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
-                 return;
-             }
+            return;
+        }
+
+        if (mode === 'face' && labeledFaceDescriptors.length === 0) {
+            toast({ variant: "destructive", title: "Tidak Ada Data Wajah", description: "Tidak ada data wajah siswa untuk dipindai di tingkat ini." });
             return;
         }
 
@@ -503,76 +502,62 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setCameraError(null);
         setActiveScanner(mode);
 
-        const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => {
-            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-            const qrboxSize = Math.floor(minEdge * 0.7);
-            return {
-                width: qrboxSize,
-                height: qrboxSize,
-            };
-        };
-
-        const config = {
-            fps: 5,
-            qrbox: qrboxFunction,
-            aspectRatio: 1.0,
-        };
-        
-        html5QrCodeRef.current = new Html5Qrcode(`video-container`, { verbose: false });
-
-        const onScanSuccess = (decodedText: string) => {
-            if (mode === 'qr') {
-                handleScan(decodedText);
-            }
-        };
-
-        const onScanFailure = (error: any) => { /* do nothing */ };
-
         try {
-            await html5QrCodeRef.current.start(selectedCameraId, config, onScanSuccess, onScanFailure);
-             
-             const videoElement = document.getElementById('video-container-video') as HTMLVideoElement | null;
-             if (videoElement) {
-                videoRef.current = videoElement;
-             }
+            const qrboxFunction = (viewfinderWidth: number, viewfinderHeight: number) => ({
+                width: Math.min(viewfinderWidth, viewfinderHeight) * 0.7,
+                height: Math.min(viewfinderWidth, viewfinderHeight) * 0.7,
+            });
 
-            if (mode === 'face') {
+            html5QrCodeRef.current = new Html5Qrcode(`video-container-${mode}`, { verbose: false });
+            await html5QrCodeRef.current.start(
+                selectedCameraId, 
+                { fps: 5, qrbox: qrboxFunction },
+                (decodedText) => { if (mode === 'qr') handleScan(decodedText); },
+                (errorMessage) => { /* ignore */ }
+            );
+            
+            const videoElement = document.getElementById(`video-container-${mode}-video`) as HTMLVideoElement | null;
+            videoRef.current = videoElement;
+
+            if (mode === 'face' && videoRef.current) {
                 const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
                 
                 detectionIntervalRef.current = setInterval(async () => {
-                     if (processingLock.current || !videoRef.current) return;
+                    if (processingLock.current || !videoRef.current || !canvasRef.current) return;
 
-                     const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptors();
+                    const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+                    
+                    const canvas = canvasRef.current;
+                    const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
+                    faceapi.matchDimensions(canvas, displaySize);
+                    
+                    const context = canvas.getContext('2d');
+                    if(context) context.clearRect(0, 0, canvas.width, canvas.height);
 
-                     if (canvasRef.current && videoRef.current) {
-                        const displaySize = { width: videoRef.current.clientWidth, height: videoRef.current.clientHeight };
-                        faceapi.matchDimensions(canvasRef.current, displaySize);
+                    if (detections) {
                         const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                        const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
+                        const box = resizedDetections.detection.box;
+                        const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.toString() });
                         
-                        const context = canvasRef.current.getContext('2d');
-                        if (context) {
-                            context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-                            resizedDetections.forEach(d => {
-                                const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                                if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
-                                    handleScan(bestMatch.label);
-                                }
-                            });
-                        }
-                     }
-                }, 1500);
-            }
+                        if(context) drawBox.draw(canvas);
 
+                        if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
+                            handleScan(bestMatch.label);
+                        }
+                    }
+                }, 1000);
+            }
             addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
             const errorMessage = err?.message || 'Gagal memulai kamera.';
             setCameraError(errorMessage);
             addLog(`Error kamera: ${errorMessage}`, "error");
-            setActiveScanner(null);
+            stopScanner();
         } finally {
             setIsCameraInitializing(false);
         }
-    }, [activeScanner, isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors, selectedCameraId]);
+    }, [isCameraInitializing, addLog, handleScan, toast, isModelsLoading, labeledFaceDescriptors, selectedCameraId, stopScanner]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -623,7 +608,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         return null;
     };
 
-
     return (
     <>
     {feedbackOverlay.show && (
@@ -644,84 +628,71 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <Card>
                 <CardHeader>
-                     <CardTitle className="flex items-center gap-2"><Camera /> Kontrol Kamera</CardTitle>
-                    <CardDescription>
-                        Pilih kamera, lalu aktifkan mode pindai QR atau Wajah.
-                    </CardDescription>
+                    <CardTitle className="flex items-center gap-2"><ScanFace /> Pindai Wajah</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col items-center gap-4">
-                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                        <div id="video-container" className="w-full h-full transform -scale-x-100" />
-                         <canvas ref={canvasRef} className="absolute inset-0 z-10 transform -scale-x-100" />
-                        
-                        {!activeScanner && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
-                            {isCameraInitializing ? (
-                                <>
+                    <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                        <div id="video-container-face" className="w-full h-full transform -scale-x-100" />
+                        <canvas ref={canvasRef} className="absolute inset-0 z-10 transform -scale-x-100" />
+                        {activeScanner !== 'face' && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
+                                {isCameraInitializing && activeScanner === 'face' ? (
                                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                    <p className="mt-2 text-muted-foreground">Memulai kamera...</p>
-                                </>
-                            ) : cameraError ? (
-                                <Alert variant="destructive" className="text-left">
-                                    <ShieldAlert className="h-4 w-4" />
-                                    <AlertTitle>Gagal Mengakses Kamera</AlertTitle>
-                                    <AlertDescription>{cameraError}</AlertDescription>
-                                </Alert>
-                            ) : isModelsLoading ? (
-                                <>
-                                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                    <p className="mt-2 text-muted-foreground">Memuat Model AI...</p>
-                                </>
-                            ) : (
-                                <>
-                                    <Video className="h-10 w-10 text-muted-foreground" />
-                                    <p className="mt-2 text-sm text-muted-foreground">Kamera tidak aktif.</p>
-                                    <p className="text-xs text-muted-foreground">Pilih kamera lalu aktifkan mode pindai.</p>
-                                </>
-                            )}
-                        </div>
+                                ) : (
+                                    <>
+                                        <Video className="h-10 w-10 text-muted-foreground" />
+                                        <p className="mt-2 text-sm text-muted-foreground">Kamera wajah tidak aktif.</p>
+                                    </>
+                                )}
+                            </div>
                         )}
                     </div>
-                     <div className="w-full flex flex-col md:flex-row gap-2">
+                     <div className="w-full flex gap-2">
                         <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={!!activeScanner}>
-                            <SelectTrigger>
+                            <SelectTrigger className="w-full">
                                 <SelectValue placeholder="Pilih Perangkat Kamera..." />
                             </SelectTrigger>
                             <SelectContent>
                                 {availableCameras.map(device => (
-                                    <SelectItem key={device.id} value={device.id}>
-                                        {device.label}
-                                    </SelectItem>
+                                    <SelectItem key={device.id} value={device.id}>{device.label}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
-                        <div className="flex gap-2 justify-center w-full">
-                            <Button className="flex-1" size="sm" onClick={() => startScanner('qr')} disabled={!!activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId}>
-                                <QrCode className="mr-2"/> Pindai QR
-                            </Button>
-                            <Button className="flex-1" size="sm" onClick={() => startScanner('face')} disabled={!!activeScanner || isCameraInitializing || isModelsLoading || !selectedCameraId}>
-                                <ScanFace className="mr-2"/> Pindai Wajah
-                            </Button>
-                        </div>
-                    </div>
-                     {activeScanner && (
-                         <Button size="sm" onClick={stopScanner} variant="destructive" disabled={isCameraInitializing}>
-                            <VideoOff className="mr-2"/> Matikan Kamera
+                        <Button className="w-full" onClick={() => activeScanner === 'face' ? stopScanner() : startScanner('face')} disabled={isCameraInitializing || isModelsLoading || !selectedCameraId} variant={activeScanner === 'face' ? 'destructive' : 'default'}>
+                            {activeScanner === 'face' ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
+                            {activeScanner === 'face' ? 'Matikan Kamera' : 'Nyalakan Kamera'}
                         </Button>
-                     )}
+                    </div>
                 </CardContent>
             </Card>
 
             <div className="flex flex-col gap-6">
                 <Card>
                     <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><QrCode /> Pindai QR Code</CardTitle>
+                    </CardHeader>
+                    <CardContent className="flex flex-col items-center gap-4">
+                         <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
+                            <div id="video-container-qr" className="w-full h-full transform -scale-x-100" />
+                             {activeScanner !== 'qr' && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
+                                    <QrCode className="h-10 w-10 text-muted-foreground" />
+                                    <p className="mt-2 text-sm text-muted-foreground">Scanner QR tidak aktif.</p>
+                                </div>
+                            )}
+                        </div>
+                         <Button className="w-full" onClick={() => activeScanner === 'qr' ? stopScanner() : startScanner('qr')} disabled={isCameraInitializing || isModelsLoading || !selectedCameraId} variant={activeScanner === 'qr' ? 'destructive' : 'default'}>
+                            {activeScanner === 'qr' ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
+                            {activeScanner === 'qr' ? 'Matikan Scanner' : 'Nyalakan Scanner'}
+                        </Button>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader>
                         <CardTitle className="flex items-center gap-2"><ScanLine /> Input Manual</CardTitle>
-                        <CardDescription>
-                            Ketik NISN lalu tekan Enter.
-                        </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <Input
@@ -738,127 +709,123 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         />
                     </CardContent>
                 </Card>
-
-                 <Card>
-                    <CardHeader>
-                        <CardTitle>Log Aktivitas</CardTitle>
-                        <CardDescription>Catatan pemindaian hari ini.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="h-60 overflow-y-auto rounded-md border p-2 space-y-2">
-                            {logMessages.length > 0 ? (
-                                logMessages.map((log, i) => (
-                                    <div key={i} className="flex items-start gap-2 text-sm">
-                                        <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
-                                        {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
-                                        {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
-                                        {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                        {log.type === 'warning' && <ShieldAlert className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
-                                        <span className="flex-1">{log.message}</span>
-                                    </div>
-                                ))
-                            ) : (
-                                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                                    Belum ada aktivitas.
-                                </div>
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
             </div>
         </div>
-      
-        <Card>
-            <CardHeader>
-            <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
-            <CardDescription>
-                Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
-            </CardDescription>
-            </CardHeader>
-            <CardContent>
-            <div className="border rounded-md">
-                    <Table>
-                    <TableHeader>
-                        <TableRow>
-                        <TableHead className="w-[120px]">NISN</TableHead>
-                        <TableHead>Nama Siswa</TableHead>
-                        <TableHead>Kelas</TableHead>
-                        <TableHead className="w-[120px] text-center">Status</TableHead>
-                        <TableHead className="w-[120px] text-center">Jam Masuk</TableHead>
-                        <TableHead className="w-[120px] text-center">Jam Pulang</TableHead>
-                        <TableHead className="w-[50px] text-right">Aksi</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {isLoading ? (
-                        [...Array(5)].map((_, i) => (
-                            <TableRow key={i}>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                                <TableCell><Skeleton className="h-5 w-full" /></TableCell>
-                            </TableRow>
-                        ))
-                        ) : sortedStudents.length > 0 ? (
-                            sortedStudents.map((student) => {
-                                const record = getAttendanceRecord(student.id);
-                                const studentClass = classMap.get(student.classId);
-                                const status = record.status || 'Belum Absen';
-                                return (
-                                    <TableRow 
-                                      key={student.id} 
-                                      data-status={status}
-                                      className={cn({
-                                          'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
-                                          'animate-flash-error': highlightedNisn?.nisn === student.nisn && (highlightedNisn?.type === 'error' || highlightedNisn?.type === 'warning'),
-                                      })}
-                                    >
-                                        <TableCell>{student.nisn}</TableCell>
-                                        <TableCell className="font-medium">{student.nama}</TableCell>
-                                        <TableCell>{studentClass?.name || 'N/A'}</TableCell>
-                                        <TableCell className="text-center">
-                                            <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
-                                        </TableCell>
-                                        <TableCell className="text-center font-mono">
-                                            {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
-                                        </TableCell>
-                                        <TableCell className="text-center font-mono">
-                                            {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <DropdownMenu>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                                                        <span className="sr-only">Aksi Manual</span>
-                                                        <MoreHorizontal className="h-4 w-4" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Sakit')}>Tandai Sakit</DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Izin')}>Tandai Izin</DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Dispen')}>Tandai Dispen</DropdownMenuItem>
-                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive focus:text-destructive">Tandai Alfa</DropdownMenuItem>
-                                                </DropdownMenuContent>
-                                            </DropdownMenu>
-                                        </TableCell>
-                                    </TableRow>
-                                )
-                            })
-                        ) : (
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2">
+                <CardHeader>
+                <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
+                <CardDescription>
+                    Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
+                </CardDescription>
+                </CardHeader>
+                <CardContent>
+                <div className="border rounded-md max-h-[600px] overflow-y-auto">
+                        <Table>
+                        <TableHeader className="sticky top-0 bg-background">
                             <TableRow>
-                                <TableCell colSpan={7} className="h-24 text-center">
-                                    Tidak ada siswa terdaftar untuk Kelas {grade}.
-                                </TableCell>
+                            <TableHead className="w-[120px]">NISN</TableHead>
+                            <TableHead>Nama Siswa</TableHead>
+                            <TableHead>Kelas</TableHead>
+                            <TableHead className="w-[120px] text-center">Status</TableHead>
+                            <TableHead className="w-[120px] text-center">Jam Masuk</TableHead>
+                            <TableHead className="w-[120px] text-center">Jam Pulang</TableHead>
+                            <TableHead className="w-[50px] text-right">Aksi</TableHead>
                             </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isLoading ? (
+                            [...Array(10)].map((_, i) => (
+                                <TableRow key={i}>
+                                    <TableCell colSpan={7}><Skeleton className="h-5 w-full" /></TableCell>
+                                </TableRow>
+                            ))
+                            ) : sortedStudents.length > 0 ? (
+                                sortedStudents.map((student) => {
+                                    const record = getAttendanceRecord(student.id);
+                                    const studentClass = classMap.get(student.classId);
+                                    const status = record.status || 'Belum Absen';
+                                    return (
+                                        <TableRow 
+                                          key={student.id} 
+                                          data-status={status}
+                                          className={cn({
+                                              'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
+                                              'animate-flash-error': highlightedNisn?.nisn === student.nisn && (highlightedNisn?.type === 'error' || highlightedNisn?.type === 'warning'),
+                                          })}
+                                        >
+                                            <TableCell>{student.nisn}</TableCell>
+                                            <TableCell className="font-medium">{student.nama}</TableCell>
+                                            <TableCell>{studentClass?.name || 'N/A'}</TableCell>
+                                            <TableCell className="text-center">
+                                                <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
+                                            </TableCell>
+                                            <TableCell className="text-center font-mono">
+                                                {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
+                                            </TableCell>
+                                            <TableCell className="text-center font-mono">
+                                                {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                            <span className="sr-only">Aksi Manual</span>
+                                                            <MoreHorizontal className="h-4 w-4" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end">
+                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Sakit')}>Tandai Sakit</DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Izin')}>Tandai Izin</DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Dispen')}>Tandai Dispen</DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive focus:text-destructive">Tandai Alfa</DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })
+                            ) : (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="h-24 text-center">
+                                        Tidak ada siswa terdaftar untuk Kelas {grade}.
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </TableBody>
+                        </Table>
+                    </div>
+                </CardContent>
+            </Card>
+            
+            <Card>
+                <CardHeader>
+                    <CardTitle>Log Aktivitas</CardTitle>
+                    <CardDescription>Catatan pemindaian hari ini.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="h-[550px] overflow-y-auto rounded-md border p-2 space-y-2">
+                        {logMessages.length > 0 ? (
+                            logMessages.map((log, i) => (
+                                <div key={i} className="flex items-start gap-2 text-sm">
+                                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
+                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
+                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
+                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                    {log.type === 'warning' && <ShieldAlert className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
+                                    <span className="flex-1">{log.message}</span>
+                                </div>
+                            ))
+                        ) : (
+                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                Belum ada aktivitas.
+                            </div>
                         )}
-                    </TableBody>
-                    </Table>
-                </div>
-            </CardContent>
-        </Card>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
     </div>
     </>
   )
