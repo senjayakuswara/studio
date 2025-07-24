@@ -117,6 +117,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
     const [activeScanner, setActiveScanner] = useState<ScannerMode>(null);
     
+    const recentlyScanned = useRef(new Set<string>());
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -299,7 +300,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
-        if (!trimmedNisn || processingLock.current) return;
+        if (!trimmedNisn || processingLock.current || recentlyScanned.current.has(trimmedNisn)) return;
         
         processingLock.current = true;
         setIsProcessing(true);
@@ -333,6 +334,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 cleanup('error');
                 return;
             }
+            
+            recentlyScanned.current.add(student.nisn);
+            setTimeout(() => {
+                recentlyScanned.current.delete(student.nisn);
+            }, 10000); // 10 second cooldown
             
             if (student.grade !== grade) {
                 const studentClass = classMap.get(student.classId)
@@ -401,14 +407,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
             
             let photoDataUri: string | undefined = undefined;
-            if (activeScanner && videoRef.current) {
+            if (activeScanner && videoRef.current && videoRef.current.srcObject) {
                 const video = videoRef.current;
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = video.videoWidth;
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    // Mirror the canvas context if the video is mirrored
                     context.scale(-1, 1);
                     context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
@@ -430,8 +435,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     const docRef = await addDoc(collection(db, "attendance"), tempRecordForDb);
                     docId = docRef.id;
                 }
-            } else {
-                 await updateDoc(doc(db, "attendance", docId!), { timestampPulang: tempRecordForDb.timestampPulang });
+            } else if (docId) {
+                 await updateDoc(doc(db, "attendance", docId), { timestampPulang: tempRecordForDb.timestampPulang });
             }
 
             const finalRecord = { ...tempRecordForDb, id: docId };
@@ -464,17 +469,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             detectionIntervalRef.current = undefined;
         }
 
-        if (html5QrCodeRef.current && html5QrCodeRef.current.isScanning) {
+        if (html5QrCodeRef.current?.isScanning) {
             try {
                 await html5QrCodeRef.current.stop();
             } catch (err) {
                  console.log("Gagal menghentikan scanner QR, mungkin sudah berhenti.");
-            } finally {
-                html5QrCodeRef.current = null;
             }
         }
         
-        if (videoRef.current && videoRef.current.srcObject) {
+        if (videoRef.current?.srcObject) {
             const stream = videoRef.current.srcObject as MediaStream;
             stream.getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
@@ -504,10 +507,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         setIsCameraInitializing(true);
         setCameraError(null);
+        setActiveScanner(mode);
         
+        const videoElementId = `video-container-${mode}`;
+
         try {
-            const videoElementId = `video-container-${mode}`;
-            const qrCode = new Html5Qrcode(videoElementId, { verbose: false });
+            const qrCode = new Html5Qrcode(videoElementId);
             html5QrCodeRef.current = qrCode;
 
             await qrCode.start(
@@ -520,8 +525,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const videoElement = document.getElementById(videoElementId)?.querySelector('video');
             if (!videoElement) throw new Error("Elemen video tidak ditemukan.");
             videoRef.current = videoElement;
-
-            setActiveScanner(mode);
 
             if (mode === 'face') {
                 const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
@@ -539,20 +542,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     const context = canvas.getContext('2d');
                     if (context) {
                         context.clearRect(0, 0, canvas.width, canvas.height);
-                    }
-
-                    if (detections) {
-                        const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                        const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
-                        
-                        if(context) {
-                            const box = resizedDetections.detection.box;
-                            const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.label === 'unknown' ? 'Tidak Dikenal' : bestMatch.toString() });
-                            drawBox.draw(canvas);
-                        }
-
-                        if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
-                            handleScan(bestMatch.label);
+                        if(detections){
+                            const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                            faceapi.draw.drawDetections(canvas, resizedDetections);
+                            const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
+                            if (bestMatch.label !== 'unknown' && bestMatch.distance < 0.5) {
+                                handleScan(bestMatch.label);
+                            }
                         }
                     }
                 }, 1000);
