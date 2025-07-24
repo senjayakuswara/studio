@@ -206,46 +206,15 @@ export default function DashboardLayout({
               </Collapsible>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <Collapsible
-                className="w-full"
-                defaultOpen={pathname.startsWith("/dashboard/siswa")}
-              >
-                <CollapsibleTrigger className="w-full" asChild>
-                  <SidebarMenuButton
-                    tooltip="Manajemen Siswa"
-                    isActive={pathname.startsWith("/dashboard/siswa")}
-                    className="group w-full justify-between"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Users />
-                      <span>Manajemen Siswa</span>
-                    </div>
-                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                  </SidebarMenuButton>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down overflow-hidden">
-                  <SidebarMenuSub>
-                    <SidebarMenuSubItem>
-                      <Link href="/dashboard/siswa">
-                        <SidebarMenuSubButton
-                          isActive={pathname === "/dashboard/siswa"}
-                        >
-                          Daftar Siswa
-                        </SidebarMenuSubButton>
-                      </Link>
-                    </SidebarMenuSubItem>
-                    <SidebarMenuSubItem>
-                      <Link href="/dashboard/siswa/daftar-wajah">
-                        <SidebarMenuSubButton
-                          isActive={pathname === "/dashboard/siswa/daftar-wajah"}
-                        >
-                          Pendaftaran Wajah
-                        </SidebarMenuSubButton>
-                      </Link>
-                    </SidebarMenuSubItem>
-                  </SidebarMenuSub>
-                </CollapsibleContent>
-              </Collapsible>
+              <Link href="/dashboard/siswa">
+                <SidebarMenuButton
+                  tooltip="Manajemen Siswa"
+                  isActive={pathname.startsWith("/dashboard/siswa")}
+                >
+                  <Users />
+                  <span>Manajemen Siswa</span>
+                </SidebarMenuButton>
+              </Link>
             </SidebarMenuItem>
             <SidebarMenuItem>
               <Link href="/dashboard/absensi">
