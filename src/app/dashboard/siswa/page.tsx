@@ -158,7 +158,7 @@ export default function SiswaPage() {
         id: doc.id,
         ...doc.data(),
       })) as Class[]
-      setClasses(classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`)));
+      setClasses(classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`)));
 
     } catch (error) {
       console.error("Error fetching data: ", error)
