@@ -12,6 +12,7 @@
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -169,10 +170,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         finalStatus = record.status;
     }
     
+    const timeZone = 'Asia/Jakarta';
     const dateObj = new Date(timestampStr);
+    const zonedDate = toZonedTime(dateObj, timeZone);
 
-    const formattedDate = format(dateObj, "eeee, dd MMMM yyyy", { locale: localeID });
-    const formattedTime = format(dateObj, "HH:mm:ss", { locale: localeID });
+    const formattedDate = format(zonedDate, "eeee, dd MMMM yyyy", { locale: localeID, timeZone });
+    const formattedTime = format(zonedDate, "HH:mm:ss", { locale: localeID, timeZone });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
@@ -181,7 +184,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `👤 *Nama*      : ${record.studentName}`,
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
-        `⏰ *Jam*       : ${formattedTime}`,
+        `⏰ *Jam*       : ${formattedTime} WIB`,
         `👋 *Status*    : *${finalStatus}*`,
         "",
         "--------------------------------",
