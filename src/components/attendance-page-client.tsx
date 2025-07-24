@@ -77,8 +77,9 @@ type LogMessage = {
 }
 type FeedbackOverlayState = {
     show: boolean;
-    type: 'loading' | 'success' | 'error';
+    type: 'loading' | 'success' | 'error' | 'info';
     student?: Student;
+    message?: string;
 }
 
 type AttendancePageClientProps = {
@@ -307,8 +308,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
 
-        const cleanup = (type: FeedbackOverlayState['type'], student?: Student) => {
-            setFeedbackOverlay({ show: true, type, student });
+        const cleanup = (type: FeedbackOverlayState['type'], student?: Student, message?: string) => {
+            setFeedbackOverlay({ show: true, type, student, message });
             setTimeout(() => {
                 setHighlightedNisn(null);
                 setFeedbackOverlay({ show: false, type: 'loading' });
@@ -321,7 +322,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!schoolHours) {
                 addLog("Error: Pengaturan jam belum dimuat.", "error");
                 playSound('error');
-                cleanup('error');
+                cleanup('error', undefined, "Pengaturan Jam Belum Dimuat");
                 return;
             }
     
@@ -331,7 +332,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 addLog(`NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`, 'error');
                 setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
                 playSound('error');
-                cleanup('error');
+                cleanup('error', undefined, "Siswa Tidak Ditemukan");
                 return;
             }
             
@@ -345,18 +346,26 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 playSound('error');
-                cleanup('error', student);
+                cleanup('error', student, "Salah Ruang Absen");
                 return;
             }
     
             const existingRecord = attendanceData[student.id];
             const now = new Date();
     
+            if (existingRecord && existingRecord.timestampMasuk && existingRecord.timestampPulang) {
+                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
+                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
+                playSound('error');
+                cleanup('info', student, "Sudah Absen Masuk & Pulang");
+                return;
+            }
+
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 playSound('error');
-                cleanup('error', student);
+                cleanup('error', student, `Status: ${existingRecord.status}`);
                 return;
             }
     
@@ -373,7 +382,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     playSound('error');
-                    cleanup('error', student);
+                    cleanup('error', student, "Waktu Masuk Berakhir");
                     return;
                 }
     
@@ -391,18 +400,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             } 
             else if (!existingRecord.timestampPulang) {
                 if (now < jamPulangTime) {
-                    addLog(`Belum waktunya absen pulang untuk ${student.nama}.`, 'error');
+                    addLog(`Siswa ${student.nama} sudah absen masuk. Belum waktunya pulang.`, 'error');
                     setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                     playSound('error');
-                    cleanup('error', student);
+                    cleanup('info', student, "Sudah Absen Masuk");
                     return;
                 }
                  tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
+                 addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 playSound('error');
-                cleanup('error', student);
+                cleanup('info', student, "Sudah Absen Masuk & Pulang");
                 return;
             }
             
@@ -414,8 +423,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    context.scale(-1, 1);
-                    context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
+                    if (activeScanner === 'face') {
+                        context.scale(-1, 1);
+                        context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
+                    } else {
+                        context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    }
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -452,14 +465,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 playSound('success');
             }
             
-            cleanup('success', student);
+            cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
 
         } catch (error) {
             console.error("Error handling scan:", error);
             addLog(`Gagal memproses NISN ${trimmedNisn}.`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
             playSound('error');
-            cleanup('error');
+            cleanup('error', undefined, "Terjadi Kesalahan Sistem");
         }
     }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, activeScanner]);
     
@@ -491,6 +504,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         setActiveScanner(null);
         setCameraError(null);
         videoRef.current = null;
+        html5QrCodeRef.current = null;
     }, []);
 
     const startScanner = useCallback(async (mode: ScannerMode) => {
@@ -528,19 +542,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             if (mode === 'face') {
                 const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.5);
-
+                
                 detectionIntervalRef.current = setInterval(async () => {
                     if (processingLock.current || !videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended) return;
-
-                    const canvas = canvasRef.current;
+                    
                     const video = videoRef.current;
+                    const canvas = canvasRef.current;
                     const displaySize = { width: video.clientWidth, height: video.clientHeight };
                     faceapi.matchDimensions(canvas, displaySize);
 
                     const detections = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
                     
                     const context = canvas.getContext('2d');
-                    if (context) {
+                     if (context) {
                         context.clearRect(0, 0, canvas.width, canvas.height);
                         if(detections){
                             const resizedDetections = faceapi.resizeResults(detections, displaySize);
@@ -607,16 +621,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }
 
     const renderFeedbackIcon = () => {
-        if (feedbackOverlay.type === 'loading') {
-            return <Loader2 className="h-32 w-32 animate-spin text-white" />;
+        switch (feedbackOverlay.type) {
+            case 'loading': return <Loader2 className="h-32 w-32 animate-spin text-white" />;
+            case 'error': return <XCircle className="h-32 w-32 text-red-400" />;
+            case 'info': return <Info className="h-32 w-32 text-blue-400" />;
+            case 'success': return <User className="h-32 w-32 text-green-300" />;
+            default: return null;
         }
-        if (feedbackOverlay.type === 'error') {
-            return <XCircle className="h-32 w-32 text-red-400" />;
-        }
-        if (feedbackOverlay.type === 'success' && feedbackOverlay.student) {
-             return <User className="h-32 w-32 text-green-300" />;
-        }
-        return null;
     };
 
     return (
@@ -628,6 +639,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             </div>
             {feedbackOverlay.student && (
                 <h2 className="mt-4 text-4xl font-bold text-white drop-shadow-lg">{feedbackOverlay.student.nama}</h2>
+            )}
+             {feedbackOverlay.message && (
+                <p className="mt-2 text-2xl text-white drop-shadow-md">{feedbackOverlay.message}</p>
             )}
         </div>
     )}
@@ -693,7 +707,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     </CardHeader>
                     <CardContent className="flex flex-col items-center gap-4">
                          <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                            <div id="video-container-qr" className="w-full h-full [&>video]:transform [&>video]:-scale-x-100" />
+                            <div id="video-container-qr" className="w-full h-full" />
                              {activeScanner !== 'qr' && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                                     <QrCode className="h-10 w-10 text-muted-foreground" />
