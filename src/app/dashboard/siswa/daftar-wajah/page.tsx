@@ -293,7 +293,7 @@ export default function DaftarWajahPage() {
                                 autoPlay 
                                 playsInline 
                                 muted 
-                                className="w-full h-full object-cover"
+                                className="w-full h-full object-cover transform -scale-x-100"
                                 onPlay={async () => {
                                     if(canvasRef.current && videoRef.current){
                                         const video = videoRef.current;
@@ -313,7 +313,7 @@ export default function DaftarWajahPage() {
                                     }
                                 }}
                             />
-                            <canvas ref={canvasRef} className="absolute inset-0" />
+                            <canvas ref={canvasRef} className="absolute inset-0 transform -scale-x-100" />
                              {!videoRef.current?.srcObject && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                                     {isCameraInitializing ? <Loader2 className="h-8 w-8 animate-spin text-primary" /> : <Camera className="h-10 w-10 text-muted-foreground" />}

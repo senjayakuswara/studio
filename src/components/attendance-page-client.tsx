@@ -34,7 +34,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, QrCode, ScanFace } from "lucide-react"
+import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, Video, VideoOff, User, XCircle, QrCode, ScanFace, MessageSquareWarning } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import {
   Alert,
@@ -392,7 +392,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 }
                  tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang.`, 'info');
+                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
                 setHighlightedNisn({ nisn: student.nisn, type: 'error' });
                 playSound('error');
                 cleanup('error', student);
@@ -400,15 +400,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
             
             let photoDataUri: string | undefined = undefined;
-            if (activeScanner && videoRef.current && canvasRef.current) {
+            if (activeScanner && videoRef.current) {
                 const video = videoRef.current;
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = video.videoWidth;
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    context.scale(-1, 1);
-                    context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
+                    if (activeScanner === 'face') {
+                        context.scale(-1, 1);
+                        context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
+                    } else {
+                         context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                    }
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -511,7 +515,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             html5QrCodeRef.current = new Html5Qrcode(`video-container-${mode}`, { verbose: false });
             await html5QrCodeRef.current.start(
                 selectedCameraId, 
-                { fps: 5, qrbox: qrboxFunction },
+                { fps: 5, qrbox: qrboxFunction, facingMode: "user" },
                 (decodedText) => { if (mode === 'qr') handleScan(decodedText); },
                 (errorMessage) => { /* ignore */ }
             );
@@ -546,7 +550,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             handleScan(bestMatch.label);
                         }
                     }
-                }, 1000);
+                }, 1500);
             }
             addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
@@ -676,7 +680,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     </CardHeader>
                     <CardContent className="flex flex-col items-center gap-4">
                          <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                            <div id="video-container-qr" className="w-full h-full transform -scale-x-100" />
+                            <div id="video-container-qr" className="w-full h-full" />
                              {activeScanner !== 'qr' && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                                     <QrCode className="h-10 w-10 text-muted-foreground" />
@@ -813,7 +817,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                     {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
                                     {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
                                     {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                    {log.type === 'warning' && <ShieldAlert className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
+                                    {log.type === 'warning' && <MessageSquareWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
                                     <span className="flex-1">{log.message}</span>
                                 </div>
                             ))
