@@ -875,5 +875,3 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-    
