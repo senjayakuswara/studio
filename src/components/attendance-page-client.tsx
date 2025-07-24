@@ -153,6 +153,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             .then(devices => {
                 if (devices && devices.length) {
                     setAvailableCameras(devices);
+                    setSelectedCameraId(devices[0].id); // Select the first camera by default
                 }
             })
             .catch(err => {
@@ -407,12 +408,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
                 if (context) {
-                    if (activeScanner === 'face') {
-                        context.scale(-1, 1);
-                        context.drawImage(video, 0, 0, tempCanvas.width * -1, tempCanvas.height);
-                    } else {
-                         context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-                    }
+                    // Mirror the canvas context if the video is mirrored
+                    context.scale(-1, 1);
+                    context.drawImage(video, -tempCanvas.width, 0, tempCanvas.width, tempCanvas.height);
                     photoDataUri = tempCanvas.toDataURL('image/jpeg');
                 }
             }
@@ -463,6 +461,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const stopScanner = useCallback(async () => {
         if (detectionIntervalRef.current) {
             clearInterval(detectionIntervalRef.current);
+            detectionIntervalRef.current = undefined;
         }
         if (html5QrCodeRef.current?.isScanning) {
             try {
@@ -542,7 +541,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         const resizedDetections = faceapi.resizeResults(detections, displaySize);
                         const bestMatch = faceMatcher.findBestMatch(resizedDetections.descriptor);
                         const box = resizedDetections.detection.box;
-                        const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.toString() });
+                        const drawBox = new faceapi.draw.DrawBox(box, { label: bestMatch.label === 'unknown' ? 'Tidak Dikenal' : bestMatch.toString() });
                         
                         if(context) drawBox.draw(canvas);
 
@@ -550,7 +549,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             handleScan(bestMatch.label);
                         }
                     }
-                }, 1500);
+                }, 1000);
             }
             addLog(`Kamera diaktifkan untuk mode ${mode?.toUpperCase()}.`, "success");
         } catch (err: any) {
@@ -639,7 +638,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 </CardHeader>
                 <CardContent className="flex flex-col items-center gap-4">
                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                        <div id="video-container-face" className="w-full h-full transform -scale-x-100" />
+                        <div id="video-container-face" className="w-full h-full [&>video]:transform [&>video]:-scale-x-100" />
                         <canvas ref={canvasRef} className="absolute inset-0 z-10 transform -scale-x-100" />
                         {activeScanner !== 'face' && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
@@ -680,7 +679,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     </CardHeader>
                     <CardContent className="flex flex-col items-center gap-4">
                          <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                            <div id="video-container-qr" className="w-full h-full" />
+                            <div id="video-container-qr" className="w-full h-full [&>video]:transform [&>video]:-scale-x-100" />
                              {activeScanner !== 'qr' && (
                                 <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                                     <QrCode className="h-10 w-10 text-muted-foreground" />
@@ -688,10 +687,22 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 </div>
                             )}
                         </div>
-                         <Button className="w-full" onClick={() => activeScanner === 'qr' ? stopScanner() : startScanner('qr')} disabled={isCameraInitializing || isModelsLoading || !selectedCameraId} variant={activeScanner === 'qr' ? 'destructive' : 'default'}>
-                            {activeScanner === 'qr' ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
-                            {activeScanner === 'qr' ? 'Matikan Scanner' : 'Nyalakan Scanner'}
-                        </Button>
+                         <div className="w-full flex gap-2">
+                            <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={!!activeScanner}>
+                                <SelectTrigger className="w-full">
+                                    <SelectValue placeholder="Pilih Perangkat Kamera..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {availableCameras.map(device => (
+                                        <SelectItem key={device.id} value={device.id}>{device.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button className="w-full" onClick={() => activeScanner === 'qr' ? stopScanner() : startScanner('qr')} disabled={isCameraInitializing || isModelsLoading || !selectedCameraId} variant={activeScanner === 'qr' ? 'destructive' : 'default'}>
+                                {activeScanner === 'qr' ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
+                                {activeScanner === 'qr' ? 'Matikan Scanner' : 'Nyalakan Scanner'}
+                            </Button>
+                        </div>
                     </CardContent>
                 </Card>
                 <Card>
