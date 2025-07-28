@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -67,7 +68,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
+type Student = { id: string; nisn: string; nama: string; classId: string; }
+type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
   id: string
   studentId: string
@@ -79,7 +81,13 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
   notes?: string
 }
-type CombinedAttendanceRecord = AttendanceRecord & { classInfo?: Class }
+type CombinedAttendanceRecord = Partial<AttendanceRecord> & { 
+  studentId: string;
+  studentName: string;
+  nisn: string;
+  classId: string;
+  classInfo?: Class 
+}
 
 type ReportConfig = {
     headerImageUrl: string | null
@@ -95,27 +103,29 @@ const attendanceEditSchema = z.object({
   status: z.enum(["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen"]),
 })
 
-const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary'> = {
+const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
     "Hadir": "default",
     "Terlambat": "destructive",
     "Sakit": "secondary",
     "Izin": "secondary",
     "Alfa": "destructive",
     "Dispen": "secondary",
+    "Belum Absen": "outline",
 }
 
-const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen"];
+const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen", "Belum Absen"];
 
 export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
   const [classes, setClasses] = useState<Class[]>([])
+  const [allStudents, setAllStudents] = useState<Student[]>([])
   const [attendanceRecords, setAttendanceRecords] = useState<CombinedAttendanceRecord[]>([])
   const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
-  const [filterStatus, setFilterStatus] = useState("all")
+  const [filterStatus, setFilterStatus] = useState<AttendanceStatus | "all">("all")
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<CombinedAttendanceRecord | null>(null)
   const { toast } = useToast()
@@ -131,9 +141,10 @@ export default function AbsensiPage() {
         const selectedDateStart = startOfDay(date)
         const selectedDateEnd = endOfDay(date)
         
-        const [classesSnapshot, reportConfigSnap] = await Promise.all([
+        const [classesSnapshot, reportConfigSnap, studentsSnapshot] = await Promise.all([
             getDocs(collection(db, "classes")),
-            getDoc(doc(db, "settings", "reportConfig"))
+            getDoc(doc(db, "settings", "reportConfig")),
+            getDocs(collection(db, "students"))
         ]);
 
         if(reportConfigSnap.exists()) {
@@ -144,6 +155,9 @@ export default function AbsensiPage() {
         classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`))
         setClasses(classList)
         const classMap = new Map(classList.map(c => [c.id, c]))
+
+        const studentList = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
+        setAllStudents(studentList);
 
         const attendanceQuery = query(
           collection(db, "attendance"),
@@ -180,13 +194,42 @@ export default function AbsensiPage() {
   }, [date, toast])
 
   const filteredRecords = useMemo(() => {
+    const classMap = new Map(classes.map(c => [c.id, c]));
+
+    if (filterStatus === 'Belum Absen') {
+        const studentsWithAttendance = new Set(attendanceRecords.map(rec => rec.studentId));
+        return allStudents
+            .filter(student => !studentsWithAttendance.has(student.id))
+            .filter(student => filterClass === "all" || student.classId === filterClass)
+            .filter(student => student.nama.toLowerCase().includes(filterName.toLowerCase()))
+            .map(student => ({
+                id: `manual-${student.id}`,
+                studentId: student.id,
+                nisn: student.nisn,
+                studentName: student.nama,
+                classId: student.classId,
+                status: 'Belum Absen',
+                timestampMasuk: null,
+                timestampPulang: null,
+                classInfo: classMap.get(student.classId)
+            }));
+    }
+
     return attendanceRecords
       .filter(record => filterClass === "all" || record.classId === filterClass)
       .filter(record => record.studentName.toLowerCase().includes(filterName.toLowerCase()))
       .filter(record => filterStatus === "all" || record.status === filterStatus)
-  }, [attendanceRecords, filterClass, filterName, filterStatus])
+  }, [allStudents, attendanceRecords, filterClass, filterName, filterStatus, classes])
 
   const openEditDialog = (record: CombinedAttendanceRecord) => {
+    if (!record.id || record.status === 'Belum Absen') {
+      toast({
+        variant: "destructive",
+        title: "Aksi Tidak Diizinkan",
+        description: "Status 'Belum Absen' tidak bisa diedit. Harap lakukan absensi manual dari halaman E-Absensi.",
+      });
+      return;
+    }
     setEditingRecord(record)
     form.reset({
       status: record.status,
@@ -195,7 +238,7 @@ export default function AbsensiPage() {
   }
 
   const handleSaveAttendance = async (values: z.infer<typeof attendanceEditSchema>) => {
-    if (!editingRecord) return
+    if (!editingRecord || !editingRecord.id) return
 
     try {
       const docRef = doc(db, "attendance", editingRecord.id)
@@ -205,7 +248,7 @@ export default function AbsensiPage() {
 
       setAttendanceRecords(prev =>
         prev.map(rec =>
-          rec.id === editingRecord.id ? { ...rec, status: values.status } : rec
+          rec.id === editingRecord.id ? { ...rec, status: values.status as AttendanceStatus } : rec
         )
       )
 
@@ -279,7 +322,7 @@ export default function AbsensiPage() {
           record.classInfo?.grade || 'N/A',
           record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "-",
           record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "-",
-          record.status,
+          record.status || 'Belum Absen',
         ]);
         
         autoTable(doc, {
@@ -441,7 +484,7 @@ export default function AbsensiPage() {
                         ))}
                         </SelectContent>
                     </Select>
-                     <Select value={filterStatus} onValueChange={setFilterStatus}>
+                     <Select value={filterStatus} onValueChange={(value) => setFilterStatus(value as AttendanceStatus | "all")}>
                         <SelectTrigger className="w-full">
                         <SelectValue placeholder="Filter berdasarkan status" />
                         </SelectTrigger>
@@ -465,7 +508,7 @@ export default function AbsensiPage() {
           <CardHeader>
             <CardTitle>Data Absensi - {format(date, "eeee, dd MMMM yyyy", { locale: localeID })}</CardTitle>
             <CardDescription>
-              Menampilkan {filteredRecords.length} dari {attendanceRecords.length} catatan absensi.
+              Menampilkan {filteredRecords.length} dari {filterStatus === 'Belum Absen' ? allStudents.length : attendanceRecords.length} catatan.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -493,13 +536,13 @@ export default function AbsensiPage() {
                     ))
                   ) : filteredRecords.length > 0 ? (
                     filteredRecords.map((record) => (
-                      <TableRow key={record.id}>
+                      <TableRow key={record.studentId}>
                         <TableCell>{record.nisn}</TableCell>
                         <TableCell className="font-medium">{record.studentName}</TableCell>
                         <TableCell>{record.classInfo?.name || 'N/A'}</TableCell>
                          <TableCell>
-                            <Badge variant={statusBadgeVariant[record.status] || "outline"}>
-                              {record.status}
+                            <Badge variant={statusBadgeVariant[record.status || 'Belum Absen'] || "outline"}>
+                              {record.status || 'Belum Absen'}
                             </Badge>
                          </TableCell>
                         <TableCell className="font-mono">
@@ -518,7 +561,7 @@ export default function AbsensiPage() {
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
                                   <DropdownMenuLabel>Aksi</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => openEditDialog(record)}>
+                                  <DropdownMenuItem onClick={() => openEditDialog(record)} disabled={record.status === 'Belum Absen'}>
                                       Edit Status
                                   </DropdownMenuItem>
                               </DropdownMenuContent>
@@ -542,3 +585,5 @@ export default function AbsensiPage() {
     </>
   )
 }
+
+    
