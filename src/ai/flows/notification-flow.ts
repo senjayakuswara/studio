@@ -146,6 +146,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     let timestampStr: string | null = null;
     let title: string;
     let finalStatus: string;
+    let isManualAttendance = false;
 
     if (record.timestampPulang) {
         timestampStr = record.timestampPulang;
@@ -165,6 +166,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
+        isManualAttendance = true;
     }
     
     const timeZone = 'Asia/Jakarta';
@@ -172,8 +174,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const zonedDate = toZonedTime(dateObj, timeZone);
 
     const formattedDate = format(zonedDate, "eeee, dd MMMM yyyy", { locale: localeID, timeZone });
-    const formattedTime = format(zonedDate, "HH:mm:ss", { locale: localeID, timeZone });
-
+    
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
         `*${title}: ${formattedDate}*`,
@@ -181,12 +182,16 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `👤 *Nama*      : ${record.studentName}`,
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
-        `⏰ *Jam*       : ${formattedTime} WIB`,
-        `👋 *Status*    : *${finalStatus}*`,
-        "",
-        "--------------------------------",
-        "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas. Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
     ];
+
+    if (!isManualAttendance) {
+        const formattedTime = format(zonedDate, "HH:mm:ss", { locale: localeID, timeZone });
+        messageLines.push(`⏰ *Jam*       : ${formattedTime} WIB`);
+    }
+    
+    messageLines.push(`👋 *Status*    : *${finalStatus}*`);
+    messageLines.push("", "--------------------------------");
+    messageLines.push("_Pesan ini dikirim oleh sistem dan tidak untuk dibalas. Mohon simpan nomor ini untuk menerima informasi selanjutnya._");
     
     const message = messageLines.join("\n");
     const webhookPayload: WebhookPayload = { 

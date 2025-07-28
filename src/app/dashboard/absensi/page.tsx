@@ -104,6 +104,8 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
     "Dispen": "secondary",
 }
 
+const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen"];
+
 export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
   const [classes, setClasses] = useState<Class[]>([])
@@ -113,6 +115,7 @@ export default function AbsensiPage() {
   const [isPrinting, setIsPrinting] = useState(false)
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
+  const [filterStatus, setFilterStatus] = useState("all")
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<CombinedAttendanceRecord | null>(null)
   const { toast } = useToast()
@@ -180,7 +183,8 @@ export default function AbsensiPage() {
     return attendanceRecords
       .filter(record => filterClass === "all" || record.classId === filterClass)
       .filter(record => record.studentName.toLowerCase().includes(filterName.toLowerCase()))
-  }, [attendanceRecords, filterClass, filterName])
+      .filter(record => filterStatus === "all" || record.status === filterStatus)
+  }, [attendanceRecords, filterClass, filterName, filterStatus])
 
   const openEditDialog = (record: CombinedAttendanceRecord) => {
     setEditingRecord(record)
@@ -229,6 +233,13 @@ export default function AbsensiPage() {
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageMargin = 15;
       let lastY = 10;
+      
+      const recordsToPrint = [...filteredRecords].sort((a, b) => {
+        const timeA = a.timestampMasuk?.toMillis() || Infinity;
+        const timeB = b.timestampMasuk?.toMillis() || Infinity;
+        if (timeA !== timeB) return timeA - timeB;
+        return a.studentName.localeCompare(b.studentName);
+      });
 
       if (reportConfig.headerImageUrl) {
           try {
@@ -259,8 +270,8 @@ export default function AbsensiPage() {
       doc.text(`Tanggal: ${format(date, "dd MMMM yyyy", { locale: localeID })}`, pageWidth / 2, lastY, { align: 'center' });
       lastY += 10;
       
-      if (filteredRecords.length > 0) {
-        const tableData = filteredRecords.map((record) => [
+      if (recordsToPrint.length > 0) {
+        const tableData = recordsToPrint.map((record) => [
           format(date, "dd/MM/yyyy"),
           record.studentName,
           record.nisn,
@@ -284,7 +295,7 @@ export default function AbsensiPage() {
         lastY = (doc as any).lastAutoTable.finalY || lastY + 20;
       } else {
         doc.setFontSize(10);
-        doc.text("Tidak ada data absensi untuk ditampilkan pada tanggal ini.", pageWidth / 2, lastY + 10, { align: 'center' });
+        doc.text("Tidak ada data absensi untuk ditampilkan berdasarkan filter yang dipilih.", pageWidth / 2, lastY + 10, { align: 'center' });
         lastY = lastY + 20;
       }
 
@@ -390,13 +401,13 @@ export default function AbsensiPage() {
                         {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
                     </Button>
                 </div>
-                <div className="mt-4 flex flex-col md:flex-row gap-4">
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <Popover>
                         <PopoverTrigger asChild>
                         <Button
                             variant={"outline"}
                             className={cn(
-                            "w-full justify-start text-left font-normal md:w-[240px]",
+                            "w-full justify-start text-left font-normal",
                             !date && "text-muted-foreground"
                             )}
                         >
@@ -415,7 +426,7 @@ export default function AbsensiPage() {
                         </PopoverContent>
                     </Popover>
                     <Select value={filterClass} onValueChange={setFilterClass}>
-                        <SelectTrigger className="w-full md:w-[280px]">
+                        <SelectTrigger className="w-full">
                         <SelectValue placeholder="Filter berdasarkan kelas" />
                         </SelectTrigger>
                         <SelectContent>
@@ -430,11 +441,22 @@ export default function AbsensiPage() {
                         ))}
                         </SelectContent>
                     </Select>
+                     <Select value={filterStatus} onValueChange={setFilterStatus}>
+                        <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Filter berdasarkan status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">Semua Status</SelectItem>
+                            {ALL_STATUSES.map(status => (
+                                <SelectItem key={status} value={status}>{status}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                      <Input
                         placeholder="Cari berdasarkan nama siswa..."
                         value={filterName}
                         onChange={(e) => setFilterName(e.target.value)}
-                        className="w-full md:w-[280px]"
+                        className="w-full"
                     />
                 </div>
             </CardHeader>
