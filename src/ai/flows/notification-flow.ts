@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview Handles all student and parent notifications via an external webhook.
@@ -163,6 +164,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
             finalStatus = record.status;
         }
     } else {
+        // This case handles manual attendance (Sakit, Izin, Alfa) and the new mass attendance feature
         timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
@@ -184,7 +186,8 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `📚 *Kelas*     : ${classInfo.name}`,
     ];
 
-    if (!isManualAttendance) {
+    // Only add the time if it's a real scan (masuk or pulang) or mass attendance
+    if (record.timestampMasuk || record.timestampPulang) {
         const formattedTime = format(zonedDate, "HH:mm:ss", { locale: localeID, timeZone });
         messageLines.push(`⏰ *Jam*       : ${formattedTime} WIB`);
     }
