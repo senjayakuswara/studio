@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
@@ -46,6 +47,7 @@ type Student = {
     grade: string, 
     jenisKelamin: "Laki-laki" | "Perempuan", 
     parentWaNumber?: string,
+    status?: "Aktif" | "Lulus" | "Pindah"
 }
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
@@ -196,7 +198,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 }
                 
                 if (classList.length > 0) {
-                    const studentQuery = query(collection(db, "students"), where("classId", "in", classList.map(c => c.id)));
+                    const studentQuery = query(collection(db, "students"), where("classId", "in", classList.map(c => c.id)), where("status", "==", "Aktif"));
                     const studentSnapshot = await getDocs(studentQuery);
                     const studentList = studentSnapshot.docs.map(doc => {
                         const data = doc.data();
@@ -369,8 +371,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord));
             } catch (error) {
                  notificationFailed = true;
-                 console.error("Notification failed:", error);
-                 addLog(`Notifikasi untuk ${student.nama} gagal: ${(error as Error).message}`, 'warning');
+                 console.error("Notification failed but was queued:", error);
+                 addLog(`Notifikasi untuk ${student.nama} gagal & diantrekan.`, 'warning');
             }
 
             let docId = existingRecord?.id;
@@ -705,3 +707,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+    
