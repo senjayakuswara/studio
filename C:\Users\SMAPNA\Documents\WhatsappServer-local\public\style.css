@@ -1,0 +1,133 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: #f0f2f5;
+    color: #1c1e21;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+}
+
+.container {
+    background-color: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    max-width: 500px;
+    width: 100%;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: #333;
+}
+
+.status-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+    font-weight: 500;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#status-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 10px;
+    transition: background-color 0.3s ease;
+}
+
+.status-box.disconnected {
+    background-color: #fde2e2;
+    color: #7d2a2a;
+}
+.status-box.disconnected #status-indicator {
+    background-color: #f05454;
+}
+
+.status-box.needs-scan {
+    background-color: #fff4e0;
+    color: #8a6c3e;
+}
+.status-box.needs-scan #status-indicator {
+    background-color: #ffc107;
+}
+
+.status-box.connected {
+    background-color: #e2f5e8;
+    color: #2b6b43;
+}
+.status-box.connected #status-indicator {
+    background-color: #4caf50;
+}
+
+
+#qr-container {
+    width: 280px;
+    height: 280px;
+    margin: 0 auto 1.5rem;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#qr-image {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 4px;
+}
+
+#qr-placeholder {
+    color: #888;
+    font-size: 1rem;
+}
+
+#qr-placeholder p {
+    margin: 0;
+}
+
+.logs {
+    margin-top: 1.5rem;
+    text-align: left;
+    border-top: 1px solid #eee;
+    padding-top: 1rem;
+}
+
+.logs h2 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #555;
+}
+
+.logs ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    height: 120px;
+    overflow-y: auto;
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 0.5rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.8rem;
+    color: #333;
+}
+
+.logs li {
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+.logs li:last-child {
+    border-bottom: none;
+}

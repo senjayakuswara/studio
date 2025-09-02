@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Server Status</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Status Server Notifikasi WhatsApp</h1>
+        <div id="status-box" class="status-box disconnected">
+            <div id="status-indicator"></div>
+            <span id="status-text">Terputus</span>
+        </div>
+        <div id="qr-container">
+            <img id="qr-image" src="" alt="QR Code" style="display: none;">
+            <div id="qr-placeholder">
+                <p>Menunggu QR Code...</p>
+            </div>
+        </div>
+        <div class="logs">
+            <h2>Log Aktivitas</h2>
+            <ul id="logs-list">
+                <li>Menunggu koneksi ke server...</li>
+            </ul>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io("http://localhost:3000");
+
+        const statusBox = document.getElementById('status-box');
+        const statusText = document.getElementById('status-text');
+        const qrImage = document.getElementById('qr-image');
+        const qrPlaceholder = document.getElementById('qr-placeholder');
+        const logsList = document.getElementById('logs-list');
+
+        function addLog(message) {
+            const li = document.createElement('li');
+            const time = new Date().toLocaleTimeString();
+            li.textContent = `[${time}] ${message}`;
+            logsList.prepend(li);
+            if (logsList.children.length > 10) {
+                logsList.removeChild(logsList.lastChild);
+            }
+        }
+
+        socket.on('connect', () => {
+            addLog('Terhubung ke server notifikasi.');
+        });
+
+        socket.on('log', (message) => {
+            addLog(message);
+        });
+
+        socket.on('qr', (url) => {
+            qrImage.src = url;
+            qrImage.style.display = 'block';
+            qrPlaceholder.style.display = 'none';
+            statusBox.className = 'status-box needs-scan';
+            statusText.textContent = 'Perlu Scan QR';
+            addLog('QR Code diterima. Silakan pindai dengan aplikasi WhatsApp Anda.');
+        });
+
+        socket.on('ready', (message) => {
+            qrImage.style.display = 'none';
+            qrPlaceholder.style.display = 'block';
+            qrPlaceholder.innerHTML = '<p>✅ Terhubung!</p>';
+            statusBox.className = 'status-box connected';
+            statusText.textContent = 'Terhubung';
+            addLog(message);
+        });
+
+        socket.on('disconnected', (message) => {
+            statusBox.className = 'status-box disconnected';
+            statusText.textContent = 'Terputus';
+            addLog(message);
+        });
+    </script>
+</body>
+</html>
