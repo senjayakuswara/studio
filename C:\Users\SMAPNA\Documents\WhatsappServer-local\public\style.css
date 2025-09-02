@@ -5,8 +5,10 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 100vh;
+    min-height: 100vh;
     margin: 0;
+    padding: 1rem;
+    box-sizing: border-box;
 }
 
 .container {
@@ -79,6 +81,7 @@ h1 {
     display: flex;
     justify-content: center;
     align-items: center;
+    background-color: #f9f9f9;
 }
 
 #qr-image {
@@ -113,7 +116,7 @@ h1 {
     list-style: none;
     padding: 0;
     margin: 0;
-    height: 120px;
+    height: 150px;
     overflow-y: auto;
     background-color: #f9f9f9;
     border: 1px solid #eee;

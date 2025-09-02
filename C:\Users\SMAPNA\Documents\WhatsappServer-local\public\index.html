@@ -41,7 +41,7 @@
             const time = new Date().toLocaleTimeString();
             li.textContent = `[${time}] ${message}`;
             logsList.prepend(li);
-            if (logsList.children.length > 10) {
+            if (logsList.children.length > 20) {
                 logsList.removeChild(logsList.lastChild);
             }
         }
@@ -75,6 +75,9 @@
         socket.on('disconnected', (message) => {
             statusBox.className = 'status-box disconnected';
             statusText.textContent = 'Terputus';
+            qrImage.style.display = 'none';
+            qrPlaceholder.style.display = 'block';
+            qrPlaceholder.innerHTML = '<p>Menunggu QR Code...</p>';
             addLog(message);
         });
     </script>

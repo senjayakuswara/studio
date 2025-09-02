@@ -21,6 +21,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 console.log("Mempersiapkan WhatsApp Client...");
+io.emit('log', 'Mempersiapkan WhatsApp Client...');
 
 const client = new Client({
     authStrategy: new LocalAuth({
@@ -62,6 +63,11 @@ io.on('connection', (socket) => {
         });
     });
 
+    client.on('auth_failure', (msg) => {
+        console.error('Autentikasi Gagal:', msg);
+        socket.emit('log', `Autentikasi Gagal: ${msg}`);
+    });
+
     client.on('authenticated', () => {
         console.log('Autentikasi berhasil.');
         socket.emit('log', 'Autentikasi berhasil.');
@@ -76,19 +82,25 @@ io.on('connection', (socket) => {
     client.on('disconnected', (reason) => {
         console.log('Klien terputus, alasan:', reason);
         socket.emit('disconnected', 'Koneksi WhatsApp terputus. Mencoba menghubungkan kembali...');
-        socket.emit('log', 'Koneksi WhatsApp terputus. Mencoba menghubungkan kembali...');
-        client.initialize();
+        socket.emit('log', `Koneksi WhatsApp terputus: ${reason}. Inisialisasi ulang...`);
+        // Hapus sesi lama untuk memaksa pemindaian QR baru jika terjadi masalah
+        // Ini adalah tindakan drastis, mungkin perlu penanganan yang lebih halus
+        // client.destroy(); 
+        // client.initialize();
     });
 });
 
 client.initialize().catch(err => {
     console.error('Gagal menginisialisasi client:', err);
+    io.emit('log', `Error Inisialisasi Kritis: ${err.message}`);
 });
 
 // Endpoint untuk mengirim pesan
 app.post('/send', async (req, res) => {
-    if (!client.info) {
-        return res.status(503).json({ success: false, error: 'WhatsApp client belum siap. Silakan pindai QR code terlebih dahulu.' });
+    // Periksa status client sebelum mengirim
+    const clientState = await client.getState();
+    if (clientState !== 'CONNECTED') {
+         return res.status(503).json({ success: false, error: 'WhatsApp client belum siap atau tidak terhubung.' });
     }
 
     const { recipient, message, isGroup = false } = req.body;
@@ -100,10 +112,12 @@ app.post('/send', async (req, res) => {
     const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
 
     try {
-        const isRegistered = await client.isRegisteredUser(final_number);
-        if (!isRegistered && !isGroup) {
-            console.error(`Nomor ${final_number} tidak terdaftar di WhatsApp.`);
-            return res.status(400).json({ success: false, error: `Nomor ${recipient} tidak terdaftar di WhatsApp.` });
+        if (!isGroup) {
+            const isRegistered = await client.isRegisteredUser(final_number);
+            if (!isRegistered) {
+                console.error(`Nomor ${final_number} tidak terdaftar di WhatsApp.`);
+                return res.status(400).json({ success: false, error: `Nomor ${recipient} tidak terdaftar di WhatsApp.` });
+            }
         }
         
         console.log(`Mencoba mengirim pesan ke: ${final_number}`);
@@ -111,7 +125,7 @@ app.post('/send', async (req, res) => {
         console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
         res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
 
-    } catch (error) => {
+    } catch (error) {
         console.error(`Gagal mengirim pesan ke ${final_number}:`, error);
         res.status(500).json({ success: false, error: 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.' });
     }
