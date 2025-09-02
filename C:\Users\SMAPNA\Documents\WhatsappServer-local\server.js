@@ -21,14 +21,14 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // We will generate QR code manually
+        printQRInTerminal: true, // We will also print QR in terminal for easy scanning
         logger: pino({ level: 'silent' })
     });
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
-            console.log("QR Code diterima, silahkan pindai.");
+            console.log("QR Code diterima, silahkan pindai di terminal atau buka http://localhost:3000/status di browser.");
             qrCodeData = await qrcode.toDataURL(qr);
             connectionStatus = 'qr';
         }
@@ -38,6 +38,8 @@ async function connectToWhatsApp() {
             connectionStatus = 'disconnected';
             if (shouldReconnect) {
                 connectToWhatsApp();
+            } else {
+                console.log('Tidak dapat terhubung kembali, koneksi ditutup secara permanen. Anda mungkin perlu memindai ulang QR code.');
             }
         } else if (connection === 'open') {
             console.log('✅ Koneksi WhatsApp berhasil!');
@@ -49,7 +51,7 @@ async function connectToWhatsApp() {
     sock.ev.on('creds.update', saveCreds);
 }
 
-// Endpoint untuk mendapatkan status koneksi dan QR code
+// Endpoint untuk mendapatkan status koneksi dan QR code (jika ada)
 app.get('/status', (req, res) => {
     res.json({
         status: connectionStatus,
@@ -94,5 +96,5 @@ app.post('/send', async (req, res) => {
 connectToWhatsApp().catch(err => console.log("Gagal menginisialisasi koneksi WhatsApp: ", err));
 app.listen(port, () => {
     console.log(`Server notifikasi lokal (Baileys) berjalan di http://localhost:${port}`);
-    console.log(`Buka browser dan navigasi ke http://localhost:${port}/status untuk melihat QR Code.`);
+    console.log(`Jika QR code dibutuhkan, pindai yang muncul di terminal ini.`);
 });
