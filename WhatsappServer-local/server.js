@@ -16,11 +16,20 @@ console.log("Mempersiapkan WhatsApp Client...");
 
 const client = new Client({
     authStrategy: new LocalAuth({
-        clientId: 'abtrack-server'
-    }),
+            clientId: 'abtrack-server'
+                }),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', // <- this one doesn't works in Windows
+            '--disable-gpu'
+        ],
     }
 });
 
@@ -55,12 +64,12 @@ app.post('/send', async (req, res) => {
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Nomor penerima (recipient) dan pesan (message) diperlukan.' });
     }
-    
+        
     const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
 
     try {
         console.log(`Mencoba mengirim pesan ke: ${final_number}`);
-        
+            
         await client.sendMessage(final_number, message);
         console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
 
@@ -68,10 +77,10 @@ app.post('/send', async (req, res) => {
 
     } catch (error) {
         let errorMessage = 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.';
-        
+            
         // Error handling yang lebih spesifik
         if (error.message && error.message.includes('message is not a valid')) {
-             errorMessage = `Nomor ${recipient} tidak terdaftar di WhatsApp.`;
+            errorMessage = `Nomor ${recipient} tidak terdaftar di WhatsApp.`;
         } else if (error.message && error.message.includes('Evaluation failed')) {
             errorMessage = `Nomor ${recipient} tidak valid atau tidak terdaftar di WhatsApp.`
         } else if (error.message) {
