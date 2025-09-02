@@ -1,8 +1,10 @@
-
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
 const express = require('express');
 const cors = require('cors');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const qrcode = require('qrcode');
+const pino = require('pino');
+const path = require('path');
 
 const app = express();
 const port = 3000;
@@ -10,86 +12,87 @@ const port = 3000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-console.log("Mempersiapkan WhatsApp Client...");
+let sock;
+let qrCodeData = null;
+let connectionStatus = 'connecting';
 
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: 'abtrack-server'
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu'
-        ],
-    }
-});
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, 'baileys_auth_info'));
 
-client.on('qr', (qr) => {
-    console.log('--------------------------------------------------');
-    console.log('--- PINDAI QR CODE INI DENGAN WHATSAPP ANDA ---');
-    qrcode.generate(qr, { small: true });
-    console.log('--------------------------------------------------');
-});
+    sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false, // We will generate QR code manually
+        logger: pino({ level: 'silent' })
+    });
 
-client.on('authenticated', () => {
-    console.log('Autentikasi berhasil.');
-});
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+            console.log("QR Code diterima, silahkan pindai.");
+            qrCodeData = await qrcode.toDataURL(qr);
+            connectionStatus = 'qr';
+        }
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
+            console.log('Koneksi terputus karena: ', lastDisconnect.error, ', mencoba menghubungkan kembali: ', shouldReconnect);
+            connectionStatus = 'disconnected';
+            if (shouldReconnect) {
+                connectToWhatsApp();
+            }
+        } else if (connection === 'open') {
+            console.log('✅ Koneksi WhatsApp berhasil!');
+            connectionStatus = 'connected';
+            qrCodeData = null;
+        }
+    });
 
-client.on('ready', () => {
-    console.log('✅ WhatsApp Client siap digunakan!');
-});
+    sock.ev.on('creds.update', saveCreds);
+}
 
-client.on('disconnected', (reason) => {
-    console.log('Klien terputus, alasan:', reason);
-    client.initialize();
-});
-
-client.initialize().catch(err => {
-    console.error('Gagal menginisialisasi client:', err);
+// Endpoint untuk mendapatkan status koneksi dan QR code
+app.get('/status', (req, res) => {
+    res.json({
+        status: connectionStatus,
+        qrCodeUrl: qrCodeData
+    });
 });
 
 // Endpoint untuk mengirim pesan
 app.post('/send', async (req, res) => {
-    const { recipient, message, isGroup = false } = req.body;
+    if (connectionStatus !== 'connected') {
+        return res.status(503).json({ success: false, error: 'WhatsApp client belum siap. Silakan pindai QR code terlebih dahulu.' });
+    }
 
+    const { recipient, message, isGroup = false } = req.body;
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Nomor penerima (recipient) dan pesan (message) diperlukan.' });
     }
-        
-    const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
 
     try {
-        console.log(`Mencoba mengirim pesan ke: ${final_number}`);
-            
-        await client.sendMessage(final_number, message);
-        console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
+        const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
+        
+        // Cek apakah nomor atau grup ada
+        const [result] = await sock.onWhatsApp(final_number);
 
+        if (!result || !result.exists) {
+            console.error(`Nomor atau Grup ${final_number} tidak terdaftar di WhatsApp.`);
+            return res.status(400).json({ success: false, error: `Nomor atau Grup ${recipient} tidak terdaftar di WhatsApp.` });
+        }
+        
+        console.log(`Mencoba mengirim pesan ke: ${final_number}`);
+        await sock.sendMessage(final_number, { text: message });
+        console.log(`Pesan berhasil dikirim ke ${final_number}`);
         res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
 
     } catch (error) {
-        let errorMessage = 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.';
-            
-        if (error.message && error.message.includes('message is not a valid')) {
-            errorMessage = `Nomor ${recipient} tidak terdaftar di WhatsApp.`;
-        } else if (error.message && error.message.includes('Evaluation failed')) {
-            errorMessage = `Nomor ${recipient} tidak valid atau tidak terdaftar di WhatsApp.`
-        } else if (error.message) {
-            errorMessage = error.message;
-        }
-
-        console.error(`Gagal mengirim pesan ke ${final_number}:`, errorMessage);
-        console.error("Full Error Object:", error);
-        res.status(500).json({ success: false, error: errorMessage });
+        console.error('Gagal mengirim pesan:', error);
+        res.status(500).json({ success: false, error: 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.' });
     }
 });
 
+// Jalankan koneksi dan server
+connectToWhatsApp().catch(err => console.log("Gagal menginisialisasi koneksi WhatsApp: ", err));
 app.listen(port, () => {
-    console.log(`Server notifikasi lokal berjalan di http://localhost:${port}`);
+    console.log(`Server notifikasi lokal (Baileys) berjalan di http://localhost:${port}`);
+    console.log(`Buka browser dan navigasi ke http://localhost:${port}/status untuk melihat QR Code.`);
 });
