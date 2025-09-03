@@ -1,9 +1,10 @@
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const qrcode = require('qrcode');
+const qrcode = require('qrcode-terminal');
 const path = require('path');
 const cors = require('cors');
 
@@ -31,7 +32,7 @@ async function connectToWhatsApp() {
     
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        printQRInTerminal: false, // Diubah ke false karena kita akan menampilkannya di web
         browser: Browsers.macOS('Desktop'),
     });
 
@@ -42,7 +43,9 @@ async function connectToWhatsApp() {
             connectionStatus = 'Membutuhkan Scan QR Code';
             io.emit('qr', qr);
             io.emit('status', connectionStatus);
-            console.log('QR code generated. Scan it with your phone.');
+            console.log('QR code generated. Scan it with your phone or open http://localhost:3000 in your browser.');
+            // Juga tampilkan di terminal sebagai cadangan
+            qrcode.generate(qr, { small: true });
         }
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
