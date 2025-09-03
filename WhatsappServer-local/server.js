@@ -1,98 +1,111 @@
-
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const qrcode = require('qrcode');
+const path = require('path');
 const cors = require('cors');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js-plus');
-const qrcode = require('qrcode-terminal');
 
 const app = express();
-const port = 3000;
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  }
+});
 
-// Increase payload size limit to handle base64 images
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
+let sock;
+let qrCodeData;
+let connectionStatus = 'Sedang Menghubungkan...';
 
-console.log("Mempersiapkan WhatsApp Client...");
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
+    
+    sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true,
+        browser: Browsers.macOS('Desktop'),
+    });
 
-const client = new Client({
-    authStrategy: new LocalAuth({
-            clientId: 'abtrack-server'
-                }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process', // <- this one doesn't works in Windows
-            '--disable-gpu'
-        ],
-    }
-});
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+            qrCodeData = qr;
+            connectionStatus = 'Membutuhkan Scan QR Code';
+            io.emit('qr', qr);
+            io.emit('status', connectionStatus);
+            console.log('QR code generated. Scan it with your phone.');
+        }
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
+            connectionStatus = `Koneksi ditutup. ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : 'Silakan hapus folder baileys_auth_info dan mulai ulang.'}`;
+            io.emit('status', connectionStatus);
+            console.log(connectionStatus);
+            if (shouldReconnect) {
+                setTimeout(connectToWhatsApp, 5000);
+            }
+        } else if (connection === 'open') {
+            qrCodeData = null;
+            connectionStatus = 'WhatsApp Terhubung!';
+            io.emit('status', connectionStatus);
+            io.emit('qr', null); // Clear QR code on successful connection
+            console.log(connectionStatus);
+        }
+    });
 
-client.on('qr', (qr) => {
-    console.log('--------------------------------------------------');
-    console.log('--- PINDAI QR CODE INI DENGAN WHATSAPP ANDA ---');
-    qrcode.generate(qr, { small: true });
-    console.log('--------------------------------------------------');
-});
+    sock.ev.on('creds.update', saveCreds);
+}
 
-client.on('authenticated', () => {
-    console.log('Autentikasi berhasil.');
-});
-
-client.on('ready', () => {
-    console.log('✅ WhatsApp Client siap digunakan!');
-});
-
-client.on('disconnected', (reason) => {
-    console.log('Klien terputus, alasan:', reason);
-    client.initialize();
-});
-
-client.initialize().catch(err => {
-    console.error('Gagal menginisialisasi client:', err);
-});
-
-// Endpoint untuk mengirim pesan
+// Endpoint to send messages
 app.post('/send', async (req, res) => {
-    const { recipient, message, isGroup = false } = req.body;
-
-    if (!recipient || !message) {
-        return res.status(400).json({ success: false, error: 'Nomor penerima (recipient) dan pesan (message) diperlukan.' });
+    if (connectionStatus !== 'WhatsApp Terhubung!') {
+        return res.status(400).json({ success: false, message: 'WhatsApp client is not ready.' });
     }
-        
-    const final_number = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@c.us`;
+
+    const { recipient, message, isGroup = false } = req.body;
+    if (!recipient || !message) {
+        return res.status(400).json({ success: false, message: 'Recipient and message are required.' });
+    }
 
     try {
-        console.log(`Mencoba mengirim pesan ke: ${final_number}`);
-            
-        await client.sendMessage(final_number, message);
-        console.log(`Pesan teks berhasil dikirim ke ${final_number}`);
-
-        res.status(200).json({ success: true, message: `Pesan berhasil dikirim ke ${recipient}` });
-
-    } catch (error) {
-        let errorMessage = 'Gagal mengirim pesan WhatsApp. Lihat log server untuk detail.';
-            
-        // Error handling yang lebih spesifik
-        if (error.message && error.message.includes('message is not a valid')) {
-            errorMessage = `Nomor ${recipient} tidak terdaftar di WhatsApp.`;
-        } else if (error.message && error.message.includes('Evaluation failed')) {
-            errorMessage = `Nomor ${recipient} tidak valid atau tidak terdaftar di WhatsApp.`
-        } else if (error.message) {
-            errorMessage = error.message;
+        const formattedRecipient = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
+        
+        // Check if recipient exists
+        const [result] = await sock.onWhatsApp(formattedRecipient);
+        if (!result?.exists) {
+            throw new Error(`Nomor ${recipient} tidak terdaftar di WhatsApp.`);
         }
 
-        console.error(`Gagal mengirim pesan ke ${final_number}:`, errorMessage);
-        console.error("Full Error Object:", error); // Log a more detailed error
-        res.status(500).json({ success: false, error: errorMessage });
+        await sock.sendMessage(formattedRecipient, { text: message });
+        console.log(`Message sent to ${recipient}`);
+        res.json({ success: true, message: 'Message sent successfully.' });
+    } catch (error) {
+        console.error('Error sending message:', error.message);
+        res.status(500).json({ success: false, message: `Failed to send message: ${error.message}` });
     }
 });
 
-app.listen(port, () => {
-    console.log(`Server notifikasi lokal berjalan di http://localhost:${port}`);
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  console.log('A user connected to the web UI.');
+  socket.emit('status', connectionStatus);
+  if (qrCodeData) {
+    socket.emit('qr', qrCodeData);
+  }
+  socket.on('disconnect', () => {
+    console.log('User disconnected from the web UI.');
+  });
+});
+
+server.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    connectToWhatsApp();
 });

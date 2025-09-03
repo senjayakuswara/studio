@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Server Status</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Status Server Notifikasi WhatsApp</h1>
+        <div id="status-box" class="status-box connecting">
+            <div class="status-icon"></div>
+            <p id="status-text">Sedang Menghubungkan...</p>
+        </div>
+        <div id="qr-container">
+            <p>Pindai QR Code di bawah ini dengan aplikasi WhatsApp Anda:</p>
+            <div id="qrcode"></div>
+        </div>
+        <div class="instructions">
+            <p><strong>Penting:</strong> Biarkan server dan jendela ini tetap terbuka agar notifikasi dapat berfungsi.</p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.js"></script>
+    <script>
+        const socket = io();
+
+        const statusBox = document.getElementById('status-box');
+        const statusText = document.getElementById('status-text');
+        const qrContainer = document.getElementById('qr-container');
+        const qrCodeEl = document.getElementById('qrcode');
+
+        socket.on('status', (status) => {
+            console.log('Status update:', status);
+            statusText.textContent = status;
+            statusBox.className = 'status-box'; // Reset classes
+            if (status.includes('Terhubung')) {
+                statusBox.classList.add('connected');
+            } else if (status.includes('QR')) {
+                statusBox.classList.add('qr-needed');
+            } else {
+                statusBox.classList.add('connecting');
+            }
+        });
+
+        socket.on('qr', (qr) => {
+            if (qr) {
+                console.log('QR code received');
+                qrContainer.style.display = 'block';
+                qrCodeEl.innerHTML = '';
+                
+                const typeNumber = 4;
+                const errorCorrectionLevel = 'L';
+                const qrInstance = qrcode(typeNumber, errorCorrectionLevel);
+                qrInstance.addData(qr);
+                qrInstance.make();
+                qrCodeEl.innerHTML = qrInstance.createImgTag(8);
+            } else {
+                qrContainer.style.display = 'none';
+                qrCodeEl.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>
