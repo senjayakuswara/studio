@@ -17,21 +17,30 @@ Aplikasi ini menggunakan server lokal untuk mengirim notifikasi WhatsApp. Ini ha
 ### Persiapan (Lakukan Sekali Saja)
 
 1.  Pastikan Anda memiliki Node.js terinstal di komputer Anda.
-2.  Buka Command Prompt atau Terminal.
-3.  Masuk ke direktori server: `cd WhatsappServer-local`
-4.  Install dependencies: `npm install`
+2.  Unduh Ngrok dari [https://ngrok.com/download](https://ngrok.com/download). Unzip file tersebut dan letakkan file `ngrok.exe` di dalam folder `WhatsappServer-local`.
+3.  Buka Command Prompt atau Terminal di dalam folder `WhatsappServer-local`.
+4.  Jalankan perintah: `npm install`. Tunggu hingga prosesnya selesai.
 
-### Alur Kerja Harian
+### Alur Kerja Harian (Setiap Kali Ingin Menggunakan Notifikasi)
 
-1.  **Jalankan Server WhatsApp:** Buka direktori `WhatsappServer-local` dan jalankan file `start_server.bat` (atau `node server.js` di terminal).
-    -   *Saat pertama kali menjalankan, Anda perlu memindai QR code yang muncul dengan aplikasi WhatsApp di ponsel Anda.*
-2.  **Jalankan Ngrok:** Jalankan file `start_ngrok.bat` untuk membuat "jembatan" dari internet ke server lokal Anda.
-3.  **Salin URL Ngrok:** Salin URL yang diberikan oleh Ngrok (contoh: `https://xxxx-xxxx.ngrok-free.app`).
-4.  **Perbarui di Aplikasi:**
-    -   Buka aplikasi web Anda.
-    -   Navigasikan ke `Pengaturan` -> `Aplikasi`.
-    -   Tempel URL Ngrok yang baru ke dalam kolom **"URL Webhook Notifikasi"**.
-    -   Lakukan tes pengiriman pesan untuk memastikan semuanya berfungsi.
-    -   Klik **"Simpan Semua Pengaturan"**.
+1.  **Jalankan Server WhatsApp:**
+    *   Buka Command Prompt/Terminal di dalam folder `WhatsappServer-local`.
+    *   Jalankan perintah: `node server.js`.
+    *   Biarkan jendela ini berjalan. Saat pertama kali, buka browser Anda ke `http://localhost:3000` untuk memindai QR code.
 
-Server lokal dan Ngrok harus tetap berjalan selama Anda ingin notifikasi berfungsi.
+2.  **Jalankan Ngrok:**
+    *   Buka folder `WhatsappServer-local` di File Explorer.
+    *   Klik dua kali file `start_ngrok.bat`.
+    *   Biarkan jendela kedua ini berjalan.
+
+3.  **Salin URL Ngrok:**
+    *   Dari jendela Ngrok yang baru muncul, salin URL yang diberikan (contoh: `https://xxxx-xxxx.ngrok-free.app`).
+
+4.  **Perbarui di Aplikasi Web:**
+    *   Buka aplikasi web AbTrack Anda.
+    *   Navigasikan ke `Pengaturan` -> `Aplikasi`.
+    *   Tempel URL Ngrok yang baru ke dalam kolom **"URL Webhook Notifikasi"**.
+    *   Lakukan tes pengiriman pesan untuk memastikan semuanya berfungsi.
+    *   Klik **"Simpan Semua Pengaturan"**.
+
+Kedua jendela (server WhatsApp dan Ngrok) harus tetap berjalan selama Anda ingin notifikasi berfungsi.
