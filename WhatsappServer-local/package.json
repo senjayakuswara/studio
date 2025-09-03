@@ -10,7 +10,7 @@
   "author": "AbTrack",
   "license": "ISC",
   "dependencies": {
-    "@whiskeysockets/baileys": "6.6.0",
+    "baileys": "^6.6.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "qrcode-terminal": "^0.12.0",
