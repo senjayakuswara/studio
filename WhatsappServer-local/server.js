@@ -21,7 +21,15 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
+
+// Serve the HTML file for the web UI
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Serve static files (CSS, JS)
 app.use(express.static(path.join(__dirname, 'public')));
+
 
 let sock;
 let qrCodeData;
@@ -32,7 +40,7 @@ async function connectToWhatsApp() {
     
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: false, // Diubah ke false karena kita akan menampilkannya di web
+        printQRInTerminal: false, // We will display it on the web UI
         browser: Browsers.macOS('Desktop'),
     });
 
@@ -44,7 +52,7 @@ async function connectToWhatsApp() {
             io.emit('qr', qr);
             io.emit('status', connectionStatus);
             console.log('QR code generated. Scan it with your phone or open http://localhost:3000 in your browser.');
-            // Juga tampilkan di terminal sebagai cadangan
+            // Also display in terminal as a fallback
             qrcode.generate(qr, { small: true });
         }
         if (connection === 'close') {
@@ -88,27 +96,28 @@ app.post('/send', async (req, res) => {
         }
 
         await sock.sendMessage(formattedRecipient, { text: message });
-        console.log(`Message sent to ${recipient}`);
-        res.json({ success: true, message: 'Message sent successfully.' });
+        console.log(`Pesan terkirim ke ${recipient}`);
+        res.json({ success: true, message: 'Pesan berhasil dikirim.' });
     } catch (error) {
         console.error('Error sending message:', error.message);
-        res.status(500).json({ success: false, message: `Failed to send message: ${error.message}` });
+        res.status(500).json({ success: false, message: `Gagal mengirim pesan: ${error.message}` });
     }
 });
 
-// Socket.IO connection handling
+// Socket.IO connection handling for the web UI
 io.on('connection', (socket) => {
-  console.log('A user connected to the web UI.');
+  console.log('Pengguna terhubung ke antarmuka web.');
   socket.emit('status', connectionStatus);
   if (qrCodeData) {
     socket.emit('qr', qrCodeData);
   }
   socket.on('disconnect', () => {
-    console.log('User disconnected from the web UI.');
+    console.log('Pengguna terputus dari antarmuka web.');
   });
 });
 
 server.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log(`Server berjalan di http://localhost:${PORT}`);
+    console.log('Silakan buka alamat di atas di browser Anda untuk memindai QR code.');
     connectToWhatsApp();
 });
