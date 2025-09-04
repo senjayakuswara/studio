@@ -1,5 +1,4 @@
 @echo off
-title WhatsApp Server
-echo Memulai server notifikasi WhatsApp...
+echo Memulai server WhatsApp...
 node server.js
 pause
