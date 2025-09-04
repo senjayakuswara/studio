@@ -133,6 +133,9 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
 
 const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen", "Belum Absen"];
 
+// Helper function to introduce a delay
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
   const [classes, setClasses] = useState<Class[]>([])
@@ -175,7 +178,7 @@ export default function AbsensiPage() {
       }
 
       const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
-      classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`))
+      classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`))
       setClasses(classList)
       const classMap = new Map(classList.map(c => [c.id, c]))
 
@@ -301,13 +304,15 @@ export default function AbsensiPage() {
         // Refresh data after commit
         await fetchData(date);
 
-        // Send notifications after UI is updated
-        toast({ title: "Mengirim Notifikasi...", description: "Notifikasi sedang dikirim di latar belakang." });
+        // Send notifications after UI is updated, with a delay
+        toast({ title: "Mengirim Notifikasi...", description: "Notifikasi sedang dikirim di latar belakang. Proses ini mungkin memakan waktu." });
         for (const notification of notifications) {
             try {
                 await notifyOnAttendance(notification);
+                await sleep(1000); // Wait 1 second between each notification
             } catch (e) {
                 console.warn(`Gagal mengirim notifikasi untuk ${notification.studentName}, diantrekan.`);
+                // Continue to the next notification even if one fails
             }
         }
     } catch (error) {
