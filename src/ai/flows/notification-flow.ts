@@ -147,7 +147,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     let timestampStr: string | null = null;
     let title: string;
     let finalStatus: string;
-    let isManualAttendance = false;
 
     if (record.timestampPulang) {
         timestampStr = record.timestampPulang;
@@ -164,11 +163,10 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
             finalStatus = record.status;
         }
     } else {
-        // This case handles manual attendance (Sakit, Izin, Alfa) and the new mass attendance feature
+        // This case handles manual attendance (Sakit, Izin, Alfa) and mass attendance
         timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
-        isManualAttendance = true;
     }
     
     const timeZone = 'Asia/Jakarta';
