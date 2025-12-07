@@ -52,8 +52,7 @@ async function connectToWhatsApp() {
             io.emit('qr', qr);
             io.emit('status', connectionStatus);
             console.log('QR code generated. Scan it with your phone or open http://localhost:3000 in your browser.');
-            // Also display in terminal as a fallback
-            qrcode.generate(qr, { small: true });
+            // qrcode.generate(qr, { small: true }); // This line is causing issues and is removed.
         }
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
