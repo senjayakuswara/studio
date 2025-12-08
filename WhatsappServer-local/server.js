@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
@@ -31,11 +31,8 @@ function updateStatus(status, qr = null) {
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Menggunakan Baileys versi: ${version.join('.')}, Terbaru: ${isLatest}`);
 
     sock = makeWASocket({
-        version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false, // Kita akan handle secara manual
         auth: state,
