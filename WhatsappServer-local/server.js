@@ -1,5 +1,5 @@
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('baileys');
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
@@ -82,7 +82,8 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        browser: ['AbTrack', 'Chrome', '1.0.0']
+        browser: Browsers.macOS('Desktop'),
+        printQRInTerminal: false,
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -98,20 +99,35 @@ async function connectToWhatsApp() {
 
         if (connection === 'close') {
             const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             
+            const nonReconnectableErrors = [
+                DisconnectReason.loggedOut,
+                DisconnectReason.badSession,
+                DisconnectReason.connectionClosed,
+                DisconnectReason.connectionReplaced,
+                DisconnectReason.multideviceMismatch
+            ];
+
+            const shouldReconnect = !nonReconnectableErrors.includes(statusCode);
+
             let reason = `Koneksi ditutup.`;
-            if(statusCode) {
+            if (statusCode) {
                 reason += ` Alasan: ${statusCode}.`;
             }
-
-            updateStatus(`${reason} ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : ''}`);
+            
+            updateStatus(`${reason} ${shouldReconnect ? 'Mencoba menghubungkan kembali dalam 5 detik...' : ''}`);
             
             if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                 console.log("Tidak bisa menghubungkan kembali. Jika ini terjadi berulang kali, hapus folder 'baileys_auth_info' dan restart.");
-                 updateStatus('Gagal terhubung secara permanen. Silakan hapus folder baileys_auth_info dan mulai ulang server.');
+                 let instruction = "Tidak bisa menyambung kembali secara otomatis.";
+                 if (statusCode === DisconnectReason.badSession) {
+                    instruction = "Koneksi gagal (Bad Session). Silakan hapus folder 'baileys_auth_info' dan mulai ulang server.";
+                 } else if (statusCode === DisconnectReason.loggedOut) {
+                    instruction = "Anda telah keluar dari perangkat. Pindai ulang QR code.";
+                 }
+                 console.log(instruction);
+                 updateStatus(instruction);
             }
         } else if (connection === 'open') {
             updateStatus('WhatsApp Terhubung!');
@@ -132,7 +148,9 @@ app.post('/send', async (req, res) => {
     console.log(`Pesan untuk ${recipient} ditambahkan ke antrian. Total antrian: ${messageQueue.length}`);
     
     // Mulai proses antrian jika belum berjalan
-    processQueue();
+    if (!isProcessingQueue) {
+        processQueue();
+    }
 
     // Langsung berikan respons sukses karena pesan sudah berhasil masuk antrian
     res.status(202).json({ success: true, message: 'Pesan berhasil ditambahkan ke antrian pengiriman.' });
