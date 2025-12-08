@@ -133,12 +133,6 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
 
 const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen", "Belum Absen"];
 
-// Helper function to introduce a random delay
-const sleepRandom = (min: number, max: number) => {
-    const ms = Math.floor(Math.random() * (max - min + 1) + min) * 1000;
-    return new Promise(resolve => setTimeout(resolve, ms));
-};
-
 export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
   const [classes, setClasses] = useState<Class[]>([])
@@ -307,12 +301,12 @@ export default function AbsensiPage() {
         // Refresh data after commit
         await fetchData(date);
 
-        // Send notifications after UI is updated, with a random delay
+        // Send notifications after UI is updated
+        // The server-side queue will handle the throttling, no need for frontend delay
         toast({ title: "Mengirim Notifikasi...", description: "Notifikasi dikirim secara perlahan di latar belakang untuk keamanan. Proses ini mungkin memakan waktu." });
         for (const notification of notifications) {
             try {
-                // Introduce a random delay between 3 to 8 seconds
-                await sleepRandom(3, 8);
+                // No more client-side delay. Let the server handle it.
                 await notifyOnAttendance(notification);
             } catch (e) {
                 console.warn(`Gagal mengirim notifikasi untuk ${notification.studentName}, diantrekan.`);
@@ -713,5 +707,3 @@ export default function AbsensiPage() {
     </>
   )
 }
-
-    
