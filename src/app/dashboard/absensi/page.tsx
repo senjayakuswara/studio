@@ -133,8 +133,11 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
 
 const ALL_STATUSES: AttendanceStatus[] = ["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen", "Belum Absen"];
 
-// Helper function to introduce a delay
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Helper function to introduce a random delay
+const sleepRandom = (min: number, max: number) => {
+    const ms = Math.floor(Math.random() * (max - min + 1) + min) * 1000;
+    return new Promise(resolve => setTimeout(resolve, ms));
+};
 
 export default function AbsensiPage() {
   const [date, setDate] = useState<Date>(new Date())
@@ -304,12 +307,13 @@ export default function AbsensiPage() {
         // Refresh data after commit
         await fetchData(date);
 
-        // Send notifications after UI is updated, with a delay
-        toast({ title: "Mengirim Notifikasi...", description: "Notifikasi sedang dikirim di latar belakang. Proses ini mungkin memakan waktu." });
+        // Send notifications after UI is updated, with a random delay
+        toast({ title: "Mengirim Notifikasi...", description: "Notifikasi dikirim secara perlahan di latar belakang untuk keamanan. Proses ini mungkin memakan waktu." });
         for (const notification of notifications) {
             try {
+                // Introduce a random delay between 3 to 8 seconds
+                await sleepRandom(3, 8);
                 await notifyOnAttendance(notification);
-                await sleep(1000); // Wait 1 second between each notification
             } catch (e) {
                 console.warn(`Gagal mengirim notifikasi untuk ${notification.studentName}, diantrekan.`);
                 // Continue to the next notification even if one fails
@@ -709,3 +713,5 @@ export default function AbsensiPage() {
     </>
   )
 }
+
+    
