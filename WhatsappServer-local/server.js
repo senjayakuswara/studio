@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('baileys');
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
@@ -34,7 +34,7 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false, // Kita akan handle secara manual
+        printQRInTerminal: true, // Akan menampilkan QR di terminal
         auth: state,
         browser: ['AbTrack', 'Chrome', '1.0.0']
     });
@@ -47,13 +47,12 @@ async function connectToWhatsApp() {
         if (qr) {
             qrCodeData = await qrcode.toDataURL(qr);
             console.log("QR Code diterima, silakan scan di browser atau di terminal bawah ini:");
-            qrcodeTerminal.generate(qr, { small: true });
             updateStatus('Membutuhkan Scan QR', qrCodeData);
         }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            updateStatus(`Koneksi ditutup. Alasan: ${lastDisconnect?.error?.message}. ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : 'Anda harus scan ulang.'}`);
+            updateStatus(`Koneksi ditutup. Alasan: ${lastDisconnect?.error?.message}. ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : ''}`);
             
             if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
