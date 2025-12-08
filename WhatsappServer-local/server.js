@@ -4,7 +4,6 @@ const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
 const qrcode = require('qrcode');
-const qrcode_terminal = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 
@@ -92,10 +91,7 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log("QR Code diterima. Pindai dari browser atau dari terminal di bawah ini:");
-            // 1. Menampilkan di terminal
-            qrcode_terminal.generate(qr, { small: true });
-            // 2. Mengirim ke web
+            console.log("QR Code diterima. Silakan pindai dari browser.");
             const qrForWeb = await qrcode.toDataURL(qr);
             updateStatus('Membutuhkan Scan QR', qrForWeb);
         }
