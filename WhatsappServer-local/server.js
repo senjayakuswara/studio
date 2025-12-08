@@ -1,9 +1,9 @@
-
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
 const qrcode = require('qrcode');
+const qrcodeTerminal = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 
@@ -31,13 +31,13 @@ function updateStatus(status, qr = null) {
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
-    const { version } = await fetchLatestBaileysVersion();
-    console.log(`Menggunakan Baileys versi: ${version.join('.')}`);
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Menggunakan Baileys versi: ${version.join('.')}, Terbaru: ${isLatest}`);
 
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
+        printQRInTerminal: false, // Kita akan handle secara manual
         auth: state,
         browser: ['AbTrack', 'Chrome', '1.0.0']
     });
@@ -49,6 +49,8 @@ async function connectToWhatsApp() {
 
         if (qr) {
             qrCodeData = await qrcode.toDataURL(qr);
+            console.log("QR Code diterima, silakan scan di browser atau di terminal bawah ini:");
+            qrcodeTerminal.generate(qr, { small: true });
             updateStatus('Membutuhkan Scan QR', qrCodeData);
         }
 
