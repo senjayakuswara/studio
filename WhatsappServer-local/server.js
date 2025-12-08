@@ -1,4 +1,5 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('baileys');
+
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('baileys');
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
@@ -12,7 +13,12 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
 
-console.log("Memulai server WhatsApp...");
+console.log("Menjalankan server...");
+
+// --- Sistem Antrian Notifikasi ---
+const messageQueue = [];
+let isProcessingQueue = false;
+// ---------------------------------
 
 // Middleware untuk parse JSON body
 app.use(express.json());
@@ -29,13 +35,52 @@ function updateStatus(status, qr = null) {
     console.log(`Status berubah: ${status}`);
 }
 
+// --- Fungsi untuk memproses antrian ---
+async function processQueue() {
+    if (isProcessingQueue || messageQueue.length === 0) {
+        return;
+    }
+
+    isProcessingQueue = true;
+    const job = messageQueue.shift(); // Ambil tugas pertama dari antrian
+
+    try {
+        if (sock && connectionStatus === 'WhatsApp Terhubung!') {
+            const { recipient, message, isGroup } = job;
+            const fullRecipientId = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
+            
+            const [result] = await sock.onWhatsApp(fullRecipientId);
+
+            if (result?.exists) {
+                await sock.sendMessage(fullRecipientId, { text: message });
+                console.log(`Pesan berhasil dikirim ke ${recipient}`);
+            } else {
+                console.warn(`Penerima ${recipient} tidak terdaftar di WhatsApp. Pesan dilewati.`);
+            }
+        } else {
+            console.warn("WhatsApp tidak terhubung. Mengembalikan pesan ke antrian.");
+            messageQueue.unshift(job); // Kembalikan ke depan antrian jika koneksi putus
+        }
+    } catch (error) {
+        console.error('Gagal mengirim pesan dari antrian:', error);
+        // Pertimbangkan untuk mengembalikan job ke antrian jika terjadi error sementara
+        // messageQueue.unshift(job); 
+    } finally {
+        // Jeda acak antara 3 sampai 8 detik
+        const randomDelay = Math.floor(Math.random() * (8000 - 3000 + 1) + 3000);
+        console.log(`Menunggu ${randomDelay / 1000} detik sebelum pesan berikutnya...`);
+        setTimeout(() => {
+            isProcessingQueue = false;
+            processQueue(); // Panggil lagi untuk memproses tugas selanjutnya
+        }, randomDelay);
+    }
+}
+
+
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Menggunakan Baileys versi: ${version.join('.')}, Terbaru: ${isLatest}`);
 
     sock = makeWASocket({
-        version,
         logger: pino({ level: 'silent' }),
         auth: state,
         browser: ['AbTrack', 'Chrome', '1.0.0']
@@ -48,9 +93,9 @@ async function connectToWhatsApp() {
 
         if (qr) {
             console.log("QR Code diterima. Pindai dari browser atau dari terminal di bawah ini:");
-            // Menampilkan di terminal
+            // 1. Menampilkan di terminal
             qrcode_terminal.generate(qr, { small: true });
-            // Mengirim ke web
+            // 2. Mengirim ke web
             const qrForWeb = await qrcode.toDataURL(qr);
             updateStatus('Membutuhkan Scan QR', qrForWeb);
         }
@@ -78,36 +123,23 @@ async function connectToWhatsApp() {
     });
 }
 
-// Endpoint untuk mengirim pesan
+// Endpoint untuk MENAMBAHKAN pesan ke antrian
 app.post('/send', async (req, res) => {
     const { recipient, message, isGroup = false } = req.body;
 
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Recipient dan message diperlukan.' });
     }
+    
+    // Tambahkan pesan ke antrian
+    messageQueue.push({ recipient, message, isGroup });
+    console.log(`Pesan untuk ${recipient} ditambahkan ke antrian. Total antrian: ${messageQueue.length}`);
+    
+    // Mulai proses antrian jika belum berjalan
+    processQueue();
 
-    if (!sock || connectionStatus !== 'WhatsApp Terhubung!') {
-         return res.status(503).json({ success: false, error: 'WhatsApp belum terhubung.' });
-    }
-
-    try {
-        const fullRecipientId = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
-        
-        // Cek apakah nomor/grup terdaftar di WhatsApp
-        const [result] = await sock.onWhatsApp(fullRecipientId);
-
-        if (result?.exists) {
-            await sock.sendMessage(fullRecipientId, { text: message });
-            console.log(`Pesan berhasil dikirim ke ${recipient}`);
-            res.status(200).json({ success: true, message: 'Pesan berhasil dikirim.' });
-        } else {
-            console.warn(`Nomor atau Grup ${recipient} tidak terdaftar di WhatsApp.`);
-            res.status(404).json({ success: false, error: `Nomor atau Grup ${recipient} tidak terdaftar di WhatsApp.` });
-        }
-    } catch (error) {
-        console.error('Gagal mengirim pesan:', error);
-        res.status(500).json({ success: false, error: 'Gagal mengirim pesan.' });
-    }
+    // Langsung berikan respons sukses karena pesan sudah berhasil masuk antrian
+    res.status(202).json({ success: true, message: 'Pesan berhasil ditambahkan ke antrian pengiriman.' });
 });
 
 
