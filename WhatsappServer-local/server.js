@@ -3,7 +3,6 @@ const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
 const qrcode = require('qrcode');
-const qrcodeTerminal = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 
@@ -34,7 +33,6 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true, // Akan menampilkan QR di terminal
         auth: state,
         browser: ['AbTrack', 'Chrome', '1.0.0']
     });
@@ -46,19 +44,26 @@ async function connectToWhatsApp() {
 
         if (qr) {
             qrCodeData = await qrcode.toDataURL(qr);
-            console.log("QR Code diterima, silakan scan di browser atau di terminal bawah ini:");
+            console.log("QR Code diterima, silakan scan di browser.");
             updateStatus('Membutuhkan Scan QR', qrCodeData);
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            updateStatus(`Koneksi ditutup. Alasan: ${lastDisconnect?.error?.message}. ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : ''}`);
+            const statusCode = (lastDisconnect?.error)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            
+            let reason = `Koneksi ditutup.`;
+            if(statusCode) {
+                reason += ` Alasan: ${statusCode}.`;
+            }
+
+            updateStatus(`${reason} ${shouldReconnect ? 'Mencoba menghubungkan kembali...' : ''}`);
             
             if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                 console.log("Tidak bisa menghubungkan kembali, hapus folder 'baileys_auth_info' dan restart.");
-                 updateStatus('Gagal terhubung. Silakan hapus folder baileys_auth_info dan mulai ulang server.');
+                 console.log("Tidak bisa menghubungkan kembali. Jika ini terjadi berulang kali, hapus folder 'baileys_auth_info' dan restart.");
+                 updateStatus('Gagal terhubung secara permanen. Silakan hapus folder baileys_auth_info dan mulai ulang server.');
             }
         } else if (connection === 'open') {
             updateStatus('WhatsApp Terhubung!');
