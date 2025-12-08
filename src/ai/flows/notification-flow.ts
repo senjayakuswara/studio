@@ -150,11 +150,11 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 
     if (record.timestampPulang) {
         timestampStr = record.timestampPulang;
-        title = `Absensi Pulang`;
+        title = `✅ Absensi Pulang`;
         finalStatus = 'Pulang';
     } else if (record.timestampMasuk) {
         timestampStr = record.timestampMasuk;
-        title = `Absensi Masuk`;
+        title = `➡️ Absensi Masuk`;
         if(record.status === 'Hadir') {
             finalStatus = 'Hadir (Tepat Waktu)';
         } else if (record.status === 'Terlambat') {
@@ -165,7 +165,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     } else {
         // This case handles manual attendance (Sakit, Izin, Alfa) and mass attendance
         timestampStr = record.recordDate; 
-        title = `Informasi Absensi`;
+        title = `ℹ️ Informasi Absensi`;
         finalStatus = record.status;
     }
     
@@ -192,7 +192,10 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     
     messageLines.push(`👋 *Status*    : *${finalStatus}*`);
     messageLines.push("", "--------------------------------");
-    messageLines.push("_Pesan ini dikirim oleh sistem dan tidak untuk dibalas. Mohon simpan nomor ini untuk menerima informasi selanjutnya._");
+    messageLines.push("ℹ️ _Pesan ini dikirim oleh sistem dan tidak untuk dibalas._");
+    messageLines.push("📲 _Mohon simpan nomor ini untuk menerima informasi absensi selanjutnya._");
+    messageLines.push("🚫 *_PENTING:_* _Jangan memblokir nomor ini agar notifikasi tetap berjalan lancar._");
+
     
     const message = messageLines.join("\n");
     const webhookPayload: WebhookPayload = { 
@@ -278,15 +281,15 @@ export async function sendMonthlyRecapToParent(studentData: MonthlySummaryData, 
         `*Nama Siswa*: ${studentInfo.nama}`,
         `*NISN*: ${studentInfo.nisn}`,
         "",
-        "*Rincian Kehadiran:*",
-        `  - Hadir       : ${totalHadir} hari`,
-        `  - Terlambat   : ${summary.T} hari`,
-        `  - Sakit       : ${summary.S} hari`,
-        `  - Izin        : ${summary.I} hari`,
-        `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
-        `  - Dispensasi  : ${summary.D} hari`,
+        "📊 *Rincian Kehadiran:*",
+        `  - ✅ Hadir       : ${totalHadir} hari`,
+        `  - 🕒 Terlambat   : ${summary.T} hari`,
+        `  - 🤒 Sakit       : ${summary.S} hari`,
+        `  - ✉️ Izin        : ${summary.I} hari`,
+        `  - ❌ Tanpa Keterangan (Alfa) : ${summary.A} hari`,
+        `  - 🏃 Dispensasi  : ${summary.D} hari`,
         "",
-        "_Pesan ini adalah rekapitulasi otomatis. Untuk informasi lebih lanjut, silakan hubungi pihak sekolah._"
+        "ℹ️ _Pesan ini adalah rekapitulasi otomatis. Untuk informasi lebih lanjut, silakan hubungi pihak sekolah._"
     ];
 
     const message = messageLines.join('\n');
@@ -334,7 +337,7 @@ export async function sendClassMonthlyRecap(className: string, grade: string, mo
     if (studentsWithAbsences.length === 0) {
         messageLines.push("✅ Alhamdulillah, semua siswa di kelas ini hadir penuh selama sebulan terakhir. Terima kasih atas kerja samanya!");
     } else {
-        messageLines.push("Berikut adalah siswa dengan catatan ketidakhadiran (Sakit, Izin, Alfa):");
+        messageLines.push("⚠️ Berikut adalah siswa dengan catatan ketidakhadiran (Sakit, Izin, Alfa):");
         studentsWithAbsences.forEach(s => {
             const summaryParts: string[] = [];
             if (s.summary.S > 0) summaryParts.push(`${s.summary.S} S`);
@@ -357,3 +360,5 @@ export async function sendClassMonthlyRecap(className: string, grade: string, mo
         await queueNotification(webhookPayload, 'recap', { className, month, year });
     }
 }
+
+    
