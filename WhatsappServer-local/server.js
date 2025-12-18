@@ -33,7 +33,7 @@ function updateStatus(status, qr = null) {
 }
 
 // Function to get a random delay
-function getRandomDelay(min = 5000, max = 15000) { // 5 to 15 seconds
+function getRandomDelay(min = 8000, max = 20000) { // 8 to 20 seconds
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
@@ -112,19 +112,20 @@ async function connectToWhatsApp() {
                 reason += ` Alasan: ${statusCode}.`;
             }
 
-            updateStatus(reason);
-
             if (shouldReconnect) {
+                reason += " Mencoba menghubungkan kembali...";
                 console.log("Mencoba menghubungkan kembali...");
                 connectToWhatsApp();
             } else {
-                let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
+                 let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
                 if (statusCode === DisconnectReason.badSession) {
                     instruction = "Koneksi gagal (Sesi Buruk). Silakan HAPUS folder 'baileys_auth_info' dan mulai ulang server.";
                 }
                 console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
-                updateStatus(instruction);
+                reason = instruction;
             }
+            updateStatus(reason);
+            
         } else if (connection === 'open') {
             updateStatus('WhatsApp Terhubung!');
             console.log("WhatsApp Terhubung!");
