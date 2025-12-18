@@ -269,10 +269,9 @@ export default function AbsensiPage() {
         const deadlineTime = setSeconds(setMinutes(setHours(date, hours), minutes + (parseInt(schoolHours.toleransi) || 0)), 0);
         
         const batch = writeBatch(db);
-        const notifications: SerializableAttendanceRecord[] = [];
         
         studentsToAttend.forEach(student => {
-            const newRecord: Omit<AttendanceRecord, 'id'> = {
+            const newRecord: Omit<AttendanceRecord, 'id'> & {recordDate: Timestamp} = {
                 studentId: student.id,
                 nisn: student.nisn,
                 studentName: student.nama,
@@ -286,32 +285,24 @@ export default function AbsensiPage() {
             const docRef = doc(collection(db, "attendance"));
             batch.set(docRef, newRecord);
             
-            notifications.push({
+            const serializableNotification = {
                 ...newRecord,
                 timestampMasuk: deadlineTime.toISOString(),
                 timestampPulang: null,
                 recordDate: startOfDay(date).toISOString(),
                 parentWaNumber: student.parentWaNumber
-            });
+            }
+             // This will now queue notifications instead of sending directly
+            notifyOnAttendance(serializableNotification);
         });
 
         await batch.commit();
 
-        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen secara massal.` });
+        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen & notifikasi ditambahkan ke antrean.` });
 
         // Refresh data after commit
         await fetchData(date);
 
-        // Send notifications after UI is updated
-        toast({ title: "Mengirim Notifikasi...", description: "Notifikasi dikirim secara perlahan di latar belakang untuk keamanan. Proses ini mungkin memakan waktu." });
-        for (const notification of notifications) {
-            try {
-                await notifyOnAttendance(notification);
-            } catch (e) {
-                console.warn(`Gagal mengirim notifikasi untuk ${notification.studentName}, diantrekan.`);
-                // Continue to the next notification even if one fails
-            }
-        }
     } catch (error) {
         console.error("Error during mass attendance:", error);
         toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi massal." });
@@ -331,20 +322,16 @@ export default function AbsensiPage() {
 
         const message = "⚙️ *Uji Coba Sistem* ⚙️\n\n_Pesan ini adalah bagian dari uji coba sistem notifikasi E-Absensi untuk memastikan semua berjalan lancar. Mohon abaikan pesan ini. Terima kasih._";
         
-        toast({ title: "Mengirim Uji Coba...", description: `Mengirim pesan tes ke ${studentsWithWa.length} nomor. Proses ini mungkin memakan waktu.` });
-
         for (const student of studentsWithWa) {
-            try {
-                // The smart queue on the server will handle the delay
-                await sendGenericNotification(student.parentWaNumber!, message);
-            } catch (e) {
-                console.warn(`Gagal mengirim notifikasi tes untuk ${student.nama}, diantrekan.`);
-            }
+            // This function now queues notifications, making it safe for bulk operations
+            await sendGenericNotification(student.parentWaNumber!, message);
         }
         
+        toast({ title: "Antrean Dibuat", description: `Tugas pengiriman pesan tes untuk ${studentsWithWa.length} nomor telah dibuat. Kelola di menu Pengaturan > Notifikasi.` });
+
     } catch (error) {
         console.error("Error during mass test notification:", error);
-        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal mengirim notifikasi uji coba." });
+        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal membuat antrean notifikasi uji coba." });
     } finally {
         setIsMassTesting(false);
     }
@@ -573,19 +560,19 @@ export default function AbsensiPage() {
                             <AlertDialogTrigger asChild>
                                 <Button variant="outline" className="w-full md:w-auto" disabled={isMassTesting || isLoading}>
                                     {isMassTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
-                                    {isMassTesting ? 'Mengirim...' : 'Uji Coba Notifikasi'}
+                                    {isMassTesting ? 'Membuat Antrean...' : 'Uji Coba Notifikasi'}
                                 </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                                 <AlertDialogHeader>
                                     <AlertDialogTitle>Konfirmasi Uji Coba Notifikasi Massal</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        Tindakan ini akan mengirim pesan uji coba ke semua nomor orang tua yang terdaftar. Pesan ini tidak mencatat absensi. Anda yakin?
+                                        Tindakan ini akan membuat tugas pengiriman pesan di antrean notifikasi untuk semua nomor orang tua yang terdaftar. Anda dapat mengelola dan memulai pengiriman dari halaman Notifikasi. Lanjutkan?
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel>Batal</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleMassTestNotification}>Ya, Kirim Uji Coba</AlertDialogAction>
+                                    <AlertDialogAction onClick={handleMassTestNotification}>Ya, Buat Antrean Uji Coba</AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
@@ -600,7 +587,7 @@ export default function AbsensiPage() {
                                 <AlertDialogHeader>
                                     <AlertDialogTitle>Konfirmasi Absensi Massal</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir' dengan jam masuk sesuai deadline. Notifikasi akan dikirim ke orang tua. Anda yakin?
+                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir'. Notifikasi akan ditambahkan ke antrean. Anda yakin?
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>

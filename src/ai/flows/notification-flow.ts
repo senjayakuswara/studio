@@ -369,7 +369,7 @@ export async function sendClassMonthlyRecap(className: string, grade: string, mo
 }
 
 /**
- * Sends a generic notification message to a specific recipient.
+ * Sends a generic notification message to a specific recipient by QUEUING it.
  * This is useful for system tests or other administrative messages.
  * @param recipient The WA number of the recipient.
  * @param message The message to send.
@@ -381,11 +381,6 @@ export async function sendGenericNotification(recipient: string, message: string
         isGroup: false,
     };
 
-    try {
-        await sendToWebhook(webhookPayload);
-    } catch (e: any) {
-        console.error(`Failed to send generic notification to ${recipient}, queuing.`, e.message);
-        await queueNotification(webhookPayload, 'test', { recipient });
-        throw e;
-    }
+    // Always queue test messages for controlled sending
+    await queueNotification(webhookPayload, 'test', { recipient });
 }
