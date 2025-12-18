@@ -3,9 +3,9 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers
 const { Server } = require('socket.io');
 const express = require('express');
 const http = require('http');
-const qrcode = require('qrcode');
 const pino = require('pino');
 const path = require('path');
+const qrcode = require('qrcode-terminal');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,13 +24,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 let sock;
-let qrCodeData;
 let connectionStatus = 'Menunggu koneksi...';
 
-function updateStatus(status, qr = null) {
+function updateStatus(status) {
     connectionStatus = status;
-    qrCodeData = qr;
-    io.emit('statusUpdate', { status: connectionStatus, qr: qrCodeData });
+    io.emit('statusUpdate', { status: connectionStatus, qr: null }); // QR tidak lagi dikirim ke web
     console.log(`Status berubah: ${status}`);
 }
 
@@ -62,7 +60,6 @@ async function processQueue() {
         }
     } catch (error) {
         console.error('Gagal mengirim pesan dari antrian:', error);
-        // Pertimbangkan untuk mengembalikan job ke antrian jika terjadi error sementara
         // messageQueue.unshift(job); 
     } finally {
         // Jeda acak antara 3 sampai 8 detik
@@ -83,7 +80,7 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: false,
+        printQRInTerminal: true, // Akan menampilkan QR di terminal jika tidak ada QR yang diterima
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -92,18 +89,19 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            console.log("QR Code diterima. Silakan pindai dari browser.");
-            const qrForWeb = await qrcode.toDataURL(qr);
-            updateStatus('Membutuhkan Scan QR', qrForWeb);
+            console.log("------------------------------------------------");
+            console.log("Pindai QR Code di bawah ini dengan WhatsApp Anda:");
+            qrcode.generate(qr, { small: true });
+            console.log("------------------------------------------------");
+            updateStatus('Membutuhkan Scan QR dari Terminal');
         }
 
         if (connection === 'close') {
             const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            // PERBAIKAN LOGIKA: Hanya coba sambung ulang jika error bersifat sementara (connectionLost)
             const shouldReconnect = statusCode === DisconnectReason.connectionLost;
 
             let reason = `Koneksi ditutup.`;
-            if (statusCode) {
+             if (statusCode) {
                 reason += ` Alasan: ${statusCode}.`;
             }
             
@@ -114,17 +112,18 @@ async function connectToWhatsApp() {
             } else {
                  let instruction = "Tidak bisa menyambung kembali secara otomatis.";
                  if (statusCode === DisconnectReason.badSession) {
-                    instruction = "Koneksi gagal (Bad Session). Silakan hapus folder 'baileys_auth_info' dan mulai ulang server.";
+                    instruction = "Koneksi gagal (Sesi Buruk). Silakan HAPUS folder 'baileys_auth_info' dan mulai ulang server.";
                  } else if (statusCode === DisconnectReason.loggedOut) {
-                    instruction = "Anda telah keluar dari perangkat. Pindai ulang QR code.";
+                    instruction = "Anda telah keluar dari perangkat. Hapus folder 'baileys_auth_info' dan pindai ulang QR code.";
                  } else if (statusCode === DisconnectReason.connectionReplaced) {
-                    instruction = "Koneksi digantikan, sesi baru dibuka di tempat lain.";
+                    instruction = "Koneksi digantikan, sesi baru dibuka di tempat lain. Tutup server ini.";
                  }
-                 console.log(instruction);
+                 console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
                  updateStatus(instruction);
             }
         } else if (connection === 'open') {
             updateStatus('WhatsApp Terhubung!');
+            console.log("WhatsApp Terhubung!");
         }
     });
 }
@@ -153,11 +152,10 @@ app.post('/send', async (req, res) => {
 
 io.on('connection', (socket) => {
     console.log('Client terhubung ke status server');
-    socket.emit('statusUpdate', { status: connectionStatus, qr: qrCodeData });
+    socket.emit('statusUpdate', { status: connectionStatus, qr: null });
 });
 
 server.listen(PORT, () => {
-    console.log(`Server berjalan di http://localhost:${PORT}`);
-    console.log("Silakan buka alamat di atas di browser Anda untuk memindai QR code.");
+    console.log(`Server HTTP berjalan di http://localhost:${PORT}`);
     connectToWhatsApp();
 });
