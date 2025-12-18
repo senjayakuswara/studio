@@ -7,13 +7,13 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay, setHours, setMinutes, setSeconds, parse } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Calendar as CalendarIcon, Download, Loader2, MoreHorizontal, Users } from "lucide-react"
+import { Calendar as CalendarIcon, Download, Loader2, MoreHorizontal, Users, TestTube } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
-import { notifyOnAttendance, SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
+import { notifyOnAttendance, sendGenericNotification, SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -143,6 +143,7 @@ export default function AbsensiPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
   const [isMassAttending, setIsMassAttending] = useState(false);
+  const [isMassTesting, setIsMassTesting] = useState(false);
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
   const [filterStatus, setFilterStatus] = useState<AttendanceStatus | "all">("all")
@@ -302,11 +303,9 @@ export default function AbsensiPage() {
         await fetchData(date);
 
         // Send notifications after UI is updated
-        // The server-side queue will handle the throttling, no need for frontend delay
         toast({ title: "Mengirim Notifikasi...", description: "Notifikasi dikirim secara perlahan di latar belakang untuk keamanan. Proses ini mungkin memakan waktu." });
         for (const notification of notifications) {
             try {
-                // No more client-side delay. Let the server handle it.
                 await notifyOnAttendance(notification);
             } catch (e) {
                 console.warn(`Gagal mengirim notifikasi untuk ${notification.studentName}, diantrekan.`);
@@ -318,6 +317,36 @@ export default function AbsensiPage() {
         toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi massal." });
     } finally {
         setIsMassAttending(false);
+    }
+  };
+  
+  const handleMassTestNotification = async () => {
+    setIsMassTesting(true);
+    try {
+        const studentsWithWa = allStudents.filter(s => s.parentWaNumber);
+        if (studentsWithWa.length === 0) {
+            toast({ title: "Informasi", description: "Tidak ada siswa dengan nomor WhatsApp orang tua terdaftar." });
+            return;
+        }
+
+        const message = "⚙️ *Uji Coba Sistem* ⚙️\n\n_Pesan ini adalah bagian dari uji coba sistem notifikasi E-Absensi untuk memastikan semua berjalan lancar. Mohon abaikan pesan ini. Terima kasih._";
+        
+        toast({ title: "Mengirim Uji Coba...", description: `Mengirim pesan tes ke ${studentsWithWa.length} nomor. Proses ini mungkin memakan waktu.` });
+
+        for (const student of studentsWithWa) {
+            try {
+                // The smart queue on the server will handle the delay
+                await sendGenericNotification(student.parentWaNumber!, message);
+            } catch (e) {
+                console.warn(`Gagal mengirim notifikasi tes untuk ${student.nama}, diantrekan.`);
+            }
+        }
+        
+    } catch (error) {
+        console.error("Error during mass test notification:", error);
+        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal mengirim notifikasi uji coba." });
+    } finally {
+        setIsMassTesting(false);
     }
 };
 
@@ -540,6 +569,26 @@ export default function AbsensiPage() {
                         <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
                     </div>
                     <div className="flex flex-col md:flex-row gap-2">
+                         <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <Button variant="outline" className="w-full md:w-auto" disabled={isMassTesting || isLoading}>
+                                    {isMassTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
+                                    {isMassTesting ? 'Mengirim...' : 'Uji Coba Notifikasi'}
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Konfirmasi Uji Coba Notifikasi Massal</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Tindakan ini akan mengirim pesan uji coba ke semua nomor orang tua yang terdaftar. Pesan ini tidak mencatat absensi. Anda yakin?
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Batal</AlertDialogCancel>
+                                    <AlertDialogAction onClick={handleMassTestNotification}>Ya, Kirim Uji Coba</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
                         <AlertDialog>
                             <AlertDialogTrigger asChild>
                                 <Button variant="secondary" className="w-full md:w-auto" disabled={isMassAttending || isLoading}>

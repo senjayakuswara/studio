@@ -7,6 +7,7 @@
  * - deleteNotificationJob: Deletes a job from the notification queue.
  * - sendMonthlyRecapToParent: Sends a monthly recap to a student's parent.
  * - sendClassMonthlyRecap: Sends a monthly recap for an entire class to a group.
+ * - sendGenericNotification: Sends a generic message to a recipient.
  */
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
@@ -46,7 +47,7 @@ export type NotificationJob = {
     id: string;
     payload: WebhookPayload;
     status: 'pending' | 'success' | 'failed';
-    type: 'attendance' | 'recap';
+    type: 'attendance' | 'recap' | 'test';
     metadata: Record<string, any>;
     createdAt: Timestamp;
     updatedAt: Timestamp;
@@ -101,8 +102,14 @@ async function sendToWebhook(payload: WebhookPayload): Promise<{ success: true }
             console.error(`Webhook failed with status ${response.status}:`, errorText);
             throw new Error(`Webhook error (${response.status}): ${errorText}`);
         } else {
-             console.log("Successfully sent payload to webhook.");
-             return { success: true };
+             const result = await response.json();
+             if (result.success) {
+                console.log("Successfully sent payload to webhook.");
+                return { success: true };
+             } else {
+                console.error(`Webhook returned failure:`, result.message);
+                throw new Error(result.message || 'Webhook returned a failure response.');
+             }
         }
     } catch (error: any) {
         console.error("Failed to send to webhook:", error);
@@ -112,7 +119,7 @@ async function sendToWebhook(payload: WebhookPayload): Promise<{ success: true }
 }
 
 // Internal helper to queue a notification
-async function queueNotification(payload: WebhookPayload, type: 'attendance' | 'recap', metadata: Record<string, any>) {
+async function queueNotification(payload: WebhookPayload, type: NotificationJob['type'], metadata: Record<string, any>) {
     try {
         await addDoc(collection(db, "notification_queue"), {
             payload,
@@ -361,4 +368,24 @@ export async function sendClassMonthlyRecap(className: string, grade: string, mo
     }
 }
 
-    
+/**
+ * Sends a generic notification message to a specific recipient.
+ * This is useful for system tests or other administrative messages.
+ * @param recipient The WA number of the recipient.
+ * @param message The message to send.
+ */
+export async function sendGenericNotification(recipient: string, message: string): Promise<void> {
+    const webhookPayload: WebhookPayload = {
+        recipient,
+        message,
+        isGroup: false,
+    };
+
+    try {
+        await sendToWebhook(webhookPayload);
+    } catch (e: any) {
+        console.error(`Failed to send generic notification to ${recipient}, queuing.`, e.message);
+        await queueNotification(webhookPayload, 'test', { recipient });
+        throw e;
+    }
+}
