@@ -28,7 +28,7 @@ let connectionStatus = 'Menunggu koneksi...';
 
 function updateStatus(status) {
     connectionStatus = status;
-    io.emit('statusUpdate', { status: connectionStatus, qr: null }); // QR tidak lagi dikirim ke web
+    io.emit('statusUpdate', { status: connectionStatus });
     console.log(`Status berubah: ${status}`);
 }
 
@@ -80,7 +80,6 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         browser: Browsers.macOS('Desktop'),
-        printQRInTerminal: true, // Akan menampilkan QR di terminal jika tidak ada QR yang diterima
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -152,7 +151,7 @@ app.post('/send', async (req, res) => {
 
 io.on('connection', (socket) => {
     console.log('Client terhubung ke status server');
-    socket.emit('statusUpdate', { status: connectionStatus, qr: null });
+    socket.emit('statusUpdate', { status: connectionStatus });
 });
 
 server.listen(PORT, () => {
