@@ -1,3 +1,4 @@
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const express = require('express');
 const http = require('http');
@@ -58,23 +59,19 @@ async function connectToWhatsApp() {
 
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode === DisconnectReason.connectionLost;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             let reason = `Koneksi ditutup.`;
-            if(statusCode) {
+             if(statusCode) {
                 reason += ` Alasan: ${statusCode}.`;
             }
 
             if (shouldReconnect) {
-                updateStatus(`${reason} Mencoba menghubungkan kembali dalam 5 detik...`);
-                setTimeout(connectToWhatsApp, 5000);
+                updateStatus(`${reason} Mencoba menghubungkan kembali...`);
+                connectToWhatsApp();
             } else {
-                 let instruction = "Koneksi terputus secara permanen.";
+                 let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
                  if (statusCode === DisconnectReason.badSession) {
                     instruction = "Koneksi gagal (Sesi Buruk). Silakan HAPUS folder 'baileys_auth_info' dan mulai ulang server.";
-                 } else if (statusCode === DisconnectReason.loggedOut) {
-                    instruction = "Anda telah keluar dari perangkat. Hapus folder 'baileys_auth_info' dan pindai ulang QR code.";
-                 } else if (statusCode === DisconnectReason.connectionReplaced) {
-                    instruction = "Koneksi digantikan, sesi baru dibuka di tempat lain. Tutup server ini.";
                  }
                  console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
                  updateStatus(instruction);
