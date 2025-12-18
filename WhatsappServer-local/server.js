@@ -99,23 +99,15 @@ async function connectToWhatsApp() {
 
         if (connection === 'close') {
             const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-            
-            const nonReconnectableErrors = [
-                DisconnectReason.loggedOut,
-                DisconnectReason.badSession,
-                DisconnectReason.connectionClosed,
-                DisconnectReason.connectionReplaced,
-                DisconnectReason.multideviceMismatch
-            ];
-
-            const shouldReconnect = !nonReconnectableErrors.includes(statusCode);
+            // PERBAIKAN LOGIKA: Hanya coba sambung ulang jika error bersifat sementara (connectionLost)
+            const shouldReconnect = statusCode === DisconnectReason.connectionLost;
 
             let reason = `Koneksi ditutup.`;
             if (statusCode) {
                 reason += ` Alasan: ${statusCode}.`;
             }
             
-            updateStatus(`${reason} ${shouldReconnect ? 'Mencoba menghubungkan kembali dalam 5 detik...' : ''}`);
+            updateStatus(`${reason} ${shouldReconnect ? 'Mencoba menghubungkan kembali dalam 5 detik...' : 'Koneksi terputus secara permanen.'}`);
             
             if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
@@ -125,6 +117,8 @@ async function connectToWhatsApp() {
                     instruction = "Koneksi gagal (Bad Session). Silakan hapus folder 'baileys_auth_info' dan mulai ulang server.";
                  } else if (statusCode === DisconnectReason.loggedOut) {
                     instruction = "Anda telah keluar dari perangkat. Pindai ulang QR code.";
+                 } else if (statusCode === DisconnectReason.connectionReplaced) {
+                    instruction = "Koneksi digantikan, sesi baru dibuka di tempat lain.";
                  }
                  console.log(instruction);
                  updateStatus(instruction);
