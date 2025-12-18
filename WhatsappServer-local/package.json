@@ -1,6 +1,6 @@
 {
   "name": "abtrack-whatsapp-server",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Handles WhatsApp notifications for AbTrack",
   "main": "server.js",
   "scripts": {
@@ -9,8 +9,6 @@
   "dependencies": {
     "baileys": "^6.7.2",
     "express": "^4.19.2",
-    "qrcode-terminal": "^0.12.0",
-    "socket.io": "^4.7.5",
-    "pino": "^9.2.0"
+    "qrcode-terminal": "^0.12.0"
   }
 }
