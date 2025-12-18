@@ -22,6 +22,8 @@ app.use(express.json());
 let sock;
 let connectionStatus = 'Menunggu koneksi...';
 let lastQR = null;
+const messageQueue = [];
+let isProcessingQueue = false;
 
 function updateStatus(status, qr = null) {
     connectionStatus = status;
@@ -29,6 +31,51 @@ function updateStatus(status, qr = null) {
     console.log(`Status berubah: ${status}`);
     io.emit('statusUpdate', { status, qr });
 }
+
+// Function to get a random delay
+function getRandomDelay(min = 5000, max = 15000) { // 5 to 15 seconds
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function processQueue() {
+    if (isProcessingQueue || messageQueue.length === 0 || connectionStatus !== 'WhatsApp Terhubung!') {
+        isProcessingQueue = false;
+        return;
+    }
+    isProcessingQueue = true;
+
+    const { recipient, message, isGroup, res } = messageQueue.shift();
+    
+    try {
+        console.log(`Mengirim pesan ke: ${recipient}`);
+        const fullRecipientId = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
+
+        if (!isGroup) {
+            const [result] = await sock.onWhatsApp(fullRecipientId);
+            if (!result?.exists) {
+                console.warn(`Penerima ${recipient} tidak terdaftar di WhatsApp. Melewati...`);
+                // Do not respond to the original request, as it was already accepted.
+            } else {
+                 await sock.sendMessage(fullRecipientId, { text: message });
+                 console.log(`Pesan berhasil dikirim ke ${recipient}.`);
+            }
+        } else {
+             await sock.sendMessage(fullRecipientId, { text: message });
+             console.log(`Pesan grup berhasil dikirim.`);
+        }
+        
+    } catch (error) {
+        console.error(`Gagal mengirim pesan ke ${recipient}:`, error);
+    } finally {
+        const delay = getRandomDelay();
+        console.log(`Menunggu ${delay / 1000} detik sebelum pesan berikutnya...`);
+        setTimeout(() => {
+            isProcessingQueue = false;
+            processQueue();
+        }, delay);
+    }
+}
+
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
@@ -38,7 +85,7 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false, // We will handle QR manually
+        printQRInTerminal: false,
         auth: state,
         browser: ['AbTrack', 'Chrome', '1.0.0']
     });
@@ -61,24 +108,29 @@ async function connectToWhatsApp() {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
             let reason = `Koneksi ditutup.`;
-             if(statusCode) {
+            if (statusCode) {
                 reason += ` Alasan: ${statusCode}.`;
             }
 
+            updateStatus(reason);
+
             if (shouldReconnect) {
-                updateStatus(`${reason} Mencoba menghubungkan kembali...`);
+                console.log("Mencoba menghubungkan kembali...");
                 connectToWhatsApp();
             } else {
-                 let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
-                 if (statusCode === DisconnectReason.badSession) {
+                let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
+                if (statusCode === DisconnectReason.badSession) {
                     instruction = "Koneksi gagal (Sesi Buruk). Silakan HAPUS folder 'baileys_auth_info' dan mulai ulang server.";
-                 }
-                 console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
-                 updateStatus(instruction);
+                }
+                console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
+                updateStatus(instruction);
             }
         } else if (connection === 'open') {
             updateStatus('WhatsApp Terhubung!');
             console.log("WhatsApp Terhubung!");
+            if(!isProcessingQueue) {
+                processQueue();
+            }
         }
     });
 }
@@ -89,34 +141,23 @@ io.on('connection', (socket) => {
 });
 
 
-app.post('/send', async (req, res) => {
+app.post('/send', (req, res) => {
     const { recipient, message, isGroup = false } = req.body;
 
     if (!recipient || !message) {
         return res.status(400).json({ success: false, error: 'Recipient dan message diperlukan.' });
     }
 
-    if (sock && connectionStatus === 'WhatsApp Terhubung!') {
-        try {
-            const fullRecipientId = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
-            
-            // For groups, we assume the ID is correct. For individuals, we check.
-            if (!isGroup) {
-                const [result] = await sock.onWhatsApp(fullRecipientId);
-                if (!result?.exists) {
-                    return res.status(404).json({ success: false, error: `Penerima ${recipient} tidak terdaftar di WhatsApp.` });
-                }
-            }
+    // Add to queue
+    messageQueue.push({ recipient, message, isGroup, res });
+    console.log(`Pesan untuk ${recipient} ditambahkan ke antrean. Total antrean: ${messageQueue.length}`);
+    
+    // Immediately respond to the client that the message is queued
+    res.status(202).json({ success: true, message: 'Pesan telah diterima dan dimasukkan ke dalam antrean.' });
 
-            await sock.sendMessage(fullRecipientId, { text: message });
-            res.status(200).json({ success: true, message: 'Pesan berhasil dikirim.' });
-
-        } catch (error) {
-            console.error('Gagal mengirim pesan:', error);
-            res.status(500).json({ success: false, error: 'Gagal mengirim pesan di server.' });
-        }
-    } else {
-        res.status(503).json({ success: false, error: 'WhatsApp tidak terhubung.' });
+    // Start processing the queue if it's not already running
+    if (!isProcessingQueue) {
+        processQueue();
     }
 });
 
