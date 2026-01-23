@@ -6,7 +6,7 @@ import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, upda
 import { Html5Qrcode, type CameraDevice } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
+import { notifyOnAttendance } from "@/ai/flows/notification-flow"
 import {
   Card,
   CardContent,
@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MoreHorizontal, ShieldAlert, CheckCircle2, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode, MessageSquareWarning } from "lucide-react"
+import { MoreHorizontal, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
 
@@ -100,7 +100,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [isScannerOn, setIsScannerOn] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
-    const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" | "warning" } | null>(null);
+    const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" } | null>(null);
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
     const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
     const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
@@ -151,30 +151,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
 
-    const playSound = useCallback((type: 'success' | 'error' | 'warning') => {
+    const playSound = useCallback((type: 'success' | 'error') => {
         try {
-            const soundFile = type === 'success' ? '/sounds/success.wav' : type === 'warning' ? '/sounds/warning.wav' : '/sounds/error.wav';
+            const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
             audio.play().catch(e => console.error("Error playing sound:", e));
         } catch(e) {
             console.error("Could not play sound:", e);
         }
     }, []);
-
-    const serializableRecordForNotification = (record: AttendanceRecord): SerializableAttendanceRecord => {
-        return {
-            id: record.id ?? undefined,
-            studentId: record.studentId,
-            nisn: record.nisn,
-            studentName: record.studentName,
-            classId: record.classId,
-            status: record.status as any, 
-            timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
-            timestampPulang: record.timestampPulang?.toDate().toISOString() ?? null,
-            recordDate: record.recordDate.toDate().toISOString(),
-            parentWaNumber: record.parentWaNumber,
-        }
-    }
 
     useEffect(() => {
         async function fetchData() {
@@ -231,11 +216,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                             const attendanceSnapshot = await getDocs(attendanceQuery);
                             attendanceSnapshot.forEach(doc => {
                                 const data = doc.data() as Omit<AttendanceRecord, 'id'>;
-                                const studentInfo = studentList.find(s => s.id === data.studentId);
                                 initialAttendanceData[data.studentId] = {
                                     id: doc.id,
                                     ...data,
-                                    parentWaNumber: studentInfo?.parentWaNumber
                                 } as AttendanceRecord;
                             });
                         }
@@ -331,7 +314,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
     
             recentlyScanned.current.add(student.nisn);
-            setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 10000); // 10 second cooldown
+            setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 3000); 
     
             let tempRecordForDb: Omit<AttendanceRecord, 'id'> & { id?: string };
             let isAbsenMasuk = false;
@@ -353,9 +336,10 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 
                 tempRecordForDb = {
                     studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
-                    parentWaNumber: student.parentWaNumber, status,
+                    status,
                     timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
                     recordDate: Timestamp.fromDate(startOfDay(now)),
+                    parentWaNumber: student.parentWaNumber
                 };
             } else if (!existingRecord.timestampPulang) {
                 tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
@@ -366,15 +350,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 return;
             }
     
-            let notificationFailed = false;
-            try {
-                await notifyOnAttendance(serializableRecordForNotification(tempRecordForDb as AttendanceRecord));
-            } catch (error) {
-                 notificationFailed = true;
-                 console.error("Notification failed but was queued:", error);
-                 addLog(`Notifikasi untuk ${student.nama} gagal & diantrekan.`, 'warning');
-            }
-
             let docId = existingRecord?.id;
             if (isAbsenMasuk) {
                 if(docId) {
@@ -387,19 +362,20 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                  await updateDoc(doc(db, "attendance", docId), { timestampPulang: tempRecordForDb.timestampPulang });
             }
 
-            const finalRecord = { ...tempRecordForDb, id: docId };
-            setAttendanceData(prev => ({...prev, [student.id]: finalRecord as AttendanceRecord }));
+            const finalRecord = { ...tempRecordForDb, id: docId } as AttendanceRecord;
+            setAttendanceData(prev => ({...prev, [student.id]: finalRecord }));
             
-            if (notificationFailed) {
-                addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'} ${student.nama} BERHASIL, tapi notifikasi GAGAL & diantrekan.`, 'warning');
-                setHighlightedNisn({ nisn: student.nisn, type: 'warning' });
-                playSound('warning');
-            } else {
-                addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
-                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                playSound('success');
-            }
+            addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
+            setHighlightedNisn({ nisn: student.nisn, type: 'success' });
+            playSound('success');
             
+            await notifyOnAttendance({
+                ...finalRecord,
+                timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() || null,
+                timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() || null,
+                recordDate: finalRecord.recordDate.toDate().toISOString(),
+            });
+
             cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
 
         } catch (error) {
@@ -466,12 +442,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         
         const payload: Omit<AttendanceRecord, 'id' | 'timestampPulang'> & { timestampPulang: Timestamp | null } = {
             studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
-            parentWaNumber: student.parentWaNumber,
             status,
             timestampMasuk: null,
             timestampPulang: null,
             recordDate: existingRecord?.recordDate || Timestamp.fromDate(startOfDay(now)),
-            notes: `Manual input: ${status}`
+            notes: `Manual input: ${status}`,
+            parentWaNumber: student.parentWaNumber
         };
 
         try {
@@ -486,6 +462,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const newRecord = { ...payload, id: docId } as AttendanceRecord;
             setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
+            
+            await notifyOnAttendance({
+                ...newRecord,
+                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() || null,
+                timestampPulang: newRecord.timestampPulang?.toDate().toISOString() || null,
+                recordDate: newRecord.recordDate.toDate().toISOString(),
+            });
 
         } catch (error) {
             console.error("Error updating manual attendance: ", error);
@@ -586,126 +569,120 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         />
                     </CardContent>
                 </Card>
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Log Aktivitas</CardTitle>
+                        <CardDescription>Catatan pemindaian hari ini.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="h-[250px] overflow-y-auto rounded-md border p-2 space-y-2">
+                            {logMessages.length > 0 ? (
+                                logMessages.map((log, i) => (
+                                    <div key={i} className="flex items-start gap-2 text-sm">
+                                        <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
+                                        {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
+                                        {log.type === 'error' && <XCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
+                                        {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                        <span className="flex-1">{log.message}</span>
+                                    </div>
+                                ))
+                            ) : (
+                                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                    Belum ada aktivitas.
+                                </div>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
-                <CardHeader>
-                <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
-                <CardDescription>
-                    Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
-                </CardDescription>
-                </CardHeader>
-                <CardContent>
-                <div className="border rounded-md max-h-[600px] overflow-y-auto">
-                        <Table>
-                        <TableHeader className="sticky top-0 bg-background">
-                            <TableRow>
-                            <TableHead className="w-[120px]">NISN</TableHead>
-                            <TableHead>Nama Siswa</TableHead>
-                            <TableHead>Kelas</TableHead>
-                            <TableHead className="w-[120px] text-center">Status</TableHead>
-                            <TableHead className="w-[120px] text-center">Jam Masuk</TableHead>
-                            <TableHead className="w-[120px] text-center">Jam Pulang</TableHead>
-                            <TableHead className="w-[50px] text-right">Aksi</TableHead>
+        <Card>
+            <CardHeader>
+            <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
+            <CardDescription>
+                Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
+            </CardDescription>
+            </CardHeader>
+            <CardContent>
+            <div className="border rounded-md max-h-[600px] overflow-y-auto">
+                    <Table>
+                    <TableHeader className="sticky top-0 bg-background">
+                        <TableRow>
+                        <TableHead className="w-[120px]">NISN</TableHead>
+                        <TableHead>Nama Siswa</TableHead>
+                        <TableHead>Kelas</TableHead>
+                        <TableHead className="w-[120px] text-center">Status</TableHead>
+                        <TableHead className="w-[120px] text-center">Jam Masuk</TableHead>
+                        <TableHead className="w-[120px] text-center">Jam Pulang</TableHead>
+                        <TableHead className="w-[50px] text-right">Aksi</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {isLoading ? (
+                        [...Array(10)].map((_, i) => (
+                            <TableRow key={i}>
+                                <TableCell colSpan={7}><Skeleton className="h-5 w-full" /></TableCell>
                             </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {isLoading ? (
-                            [...Array(10)].map((_, i) => (
-                                <TableRow key={i}>
-                                    <TableCell colSpan={7}><Skeleton className="h-5 w-full" /></TableCell>
-                                </TableRow>
-                            ))
-                            ) : sortedStudents.length > 0 ? (
-                                sortedStudents.map((student) => {
-                                    const record = getAttendanceRecord(student.id);
-                                    const studentClass = classMap.get(student.classId);
-                                    const status = record.status || 'Belum Absen';
-                                    return (
-                                        <TableRow 
-                                          key={student.id} 
-                                          data-status={status}
-                                          className={cn({
-                                              'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
-                                              'animate-flash-error': highlightedNisn?.nisn === student.nisn && (highlightedNisn?.type === 'error' || highlightedNisn?.type === 'warning'),
-                                          })}
-                                        >
-                                            <TableCell>{student.nisn}</TableCell>
-                                            <TableCell className="font-medium">{student.nama}</TableCell>
-                                            <TableCell>{studentClass?.name || 'N/A'}</TableCell>
-                                            <TableCell className="text-center">
-                                                <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
-                                            </TableCell>
-                                            <TableCell className="text-center font-mono">
-                                                {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
-                                            </TableCell>
-                                            <TableCell className="text-center font-mono">
-                                                {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                                            <span className="sr-only">Aksi Manual</span>
-                                                            <MoreHorizontal className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Sakit')}>Tandai Sakit</DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Izin')}>Tandai Izin</DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Dispen')}>Tandai Dispen</DropdownMenuItem>
-                                                        <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive focus:text-destructive">Tandai Alfa</DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </TableCell>
-                                        </TableRow>
-                                    )
-                                })
-                            ) : (
-                                <TableRow>
-                                    <TableCell colSpan={7} className="h-24 text-center">
-                                        Tidak ada siswa terdaftar untuk Kelas {grade}.
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                        </Table>
-                    </div>
-                </CardContent>
-            </Card>
-            
-            <Card>
-                <CardHeader>
-                    <CardTitle>Log Aktivitas</CardTitle>
-                    <CardDescription>Catatan pemindaian hari ini.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="h-[550px] overflow-y-auto rounded-md border p-2 space-y-2">
-                        {logMessages.length > 0 ? (
-                            logMessages.map((log, i) => (
-                                <div key={i} className="flex items-start gap-2 text-sm">
-                                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
-                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
-                                    {log.type === 'error' && <ShieldAlert className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
-                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                    {log.type === 'warning' && <MessageSquareWarning className="h-4 w-4 shrink-0 text-yellow-500 mt-0.5" />}
-                                    <span className="flex-1">{log.message}</span>
-                                </div>
-                            ))
+                        ))
+                        ) : sortedStudents.length > 0 ? (
+                            sortedStudents.map((student) => {
+                                const record = getAttendanceRecord(student.id);
+                                const studentClass = classMap.get(student.classId);
+                                const status = record.status || 'Belum Absen';
+                                return (
+                                    <TableRow 
+                                      key={student.id} 
+                                      data-status={status}
+                                      className={cn({
+                                          'animate-flash-success': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'success',
+                                          'animate-flash-error': highlightedNisn?.nisn === student.nisn && highlightedNisn?.type === 'error',
+                                      })}
+                                    >
+                                        <TableCell>{student.nisn}</TableCell>
+                                        <TableCell className="font-medium">{student.nama}</TableCell>
+                                        <TableCell>{studentClass?.name || 'N/A'}</TableCell>
+                                        <TableCell className="text-center">
+                                            <Badge variant={status ? statusBadgeVariant[status] : "outline"}>{status}</Badge>
+                                        </TableCell>
+                                        <TableCell className="text-center font-mono">
+                                            {record.timestampMasuk ? format(record.timestampMasuk.toDate(), "HH:mm:ss") : "--:--:--"}
+                                        </TableCell>
+                                        <TableCell className="text-center font-mono">
+                                            {record.timestampPulang ? format(record.timestampPulang.toDate(), "HH:mm:ss") : "--:--:--"}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                                        <span className="sr-only">Aksi Manual</span>
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Sakit')}>Tandai Sakit</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Izin')}>Tandai Izin</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Dispen')}>Tandai Dispen</DropdownMenuItem>
+                                                    <DropdownMenuItem onClick={() => handleManualAttendance(student.id, 'Alfa')} className="text-destructive focus:text-destructive">Tandai Alfa</DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </TableCell>
+                                    </TableRow>
+                                )
+                            })
                         ) : (
-                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                                Belum ada aktivitas.
-                            </div>
+                            <TableRow>
+                                <TableCell colSpan={7} className="h-24 text-center">
+                                    Tidak ada siswa terdaftar untuk Kelas {grade}.
+                                </TableCell>
+                            </TableRow>
                         )}
-                    </div>
-                </CardContent>
-            </Card>
-        </div>
+                    </TableBody>
+                    </Table>
+                </div>
+            </CardContent>
+        </Card>
     </div>
     </>
   )
 }
-
-    

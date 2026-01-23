@@ -1,168 +1,209 @@
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const pino = require('pino');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getFirestore } = require('firebase-admin/firestore');
+const fs = require('fs');
+const path = require('path');
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "*", // Allow all origins for simplicity
-    }
-});
-
+// --- SETUP ---
 const PORT = process.env.PORT || 3000;
-console.log("Menjalankan server...");
 
-app.use(express.json());
+// --- Firebase Admin SDK ---
+let db;
+try {
+    const serviceAccountPath = path.join(__dirname, 'credentials.json');
+    if (!fs.existsSync(serviceAccountPath)) {
+        throw new Error("credentials.json tidak ditemukan. Pastikan Anda telah menempatkan file kunci service account di folder ini.");
+    }
+    const serviceAccount = require(serviceAccountPath);
+    initializeApp({
+        credential: cert(serviceAccount)
+    });
+    db = getFirestore();
+    const projectId = process.env.GCLOUD_PROJECT || serviceAccount.project_id;
+    console.log(`[FIREBASE] Mencoba terhubung ke project Firestore: ${projectId}`);
+} catch (error) {
+    console.error("[CRITICAL] Gagal terhubung ke Firebase Admin:", error.message);
+    process.exit(1);
+}
 
-let sock;
-let connectionStatus = 'Menunggu koneksi...';
-let lastQR = null;
-const messageQueue = [];
-let isProcessingQueue = false;
+// --- STATE MANAGEMENT ---
+let client;
+let qrCodeValue = null;
+let connectionStatus = 'Server Dimulai...';
+let processingQueue = false;
+const jobQueue = [];
 
-function updateStatus(status, qr = null) {
+// --- UTILITY FUNCTIONS ---
+const log = (message, type = 'info') => {
+    const timestamp = new Date().toLocaleTimeString('id-ID');
+    console.log(`[${timestamp}] ${message}`);
+};
+
+const updateStatus = (status, qr = null) => {
     connectionStatus = status;
-    lastQR = qr;
-    console.log(`Status berubah: ${status}`);
-    io.emit('statusUpdate', { status, qr });
+    qrCodeValue = qr;
+    log(`Status berubah: ${status}`, 'status');
+};
+
+function getRandomDelay() {
+    // 5 to 15 seconds
+    return Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
 }
 
-// Function to get a random delay
-function getRandomDelay(min = 8000, max = 20000) { // 8 to 20 seconds
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+async function sendMessageWithTimeout(recipientId, message, timeout = 30000) {
+    return new Promise(async (resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Waktu pengiriman habis setelah ${timeout / 1000} detik.`));
+        }, timeout);
+
+        try {
+            const result = await client.sendMessage(recipientId, message);
+            clearTimeout(timer);
+            resolve(result);
+        } catch (error) {
+            clearTimeout(timer);
+            reject(error);
+        }
+    });
 }
 
+// --- CORE LOGIC ---
 async function processQueue() {
-    if (isProcessingQueue || messageQueue.length === 0 || connectionStatus !== 'WhatsApp Terhubung!') {
-        isProcessingQueue = false;
+    if (processingQueue || jobQueue.length === 0) {
         return;
     }
-    isProcessingQueue = true;
 
-    const { recipient, message, isGroup, res } = messageQueue.shift();
-    
+    if (connectionStatus !== 'WhatsApp Terhubung!') {
+        log('WhatsApp tidak terhubung, pemrosesan ditunda.', 'warning');
+        return;
+    }
+
+    processingQueue = true;
+    const job = jobQueue.shift();
+    const jobRef = db.collection('notification_queue').doc(job.id);
+    const studentRef = job.metadata?.studentId ? db.collection('students').doc(job.metadata.studentId) : null;
+
+    log(`Memproses tugas untuk: ${job.payload.recipient}...`);
+
     try {
-        console.log(`Mengirim pesan ke: ${recipient}`);
-        const fullRecipientId = isGroup ? recipient : `${recipient.replace(/\D/g, '')}@s.whatsapp.net`;
+        const recipientId = `${String(job.payload.recipient).replace(/\D/g, '')}@c.us`;
+        const isRegistered = await client.isRegisteredUser(recipientId);
 
-        if (!isGroup) {
-            const [result] = await sock.onWhatsApp(fullRecipientId);
-            if (!result?.exists) {
-                console.warn(`Penerima ${recipient} tidak terdaftar di WhatsApp. Melewati...`);
-                // Do not respond to the original request, as it was already accepted.
-            } else {
-                 await sock.sendMessage(fullRecipientId, { text: message });
-                 console.log(`Pesan berhasil dikirim ke ${recipient}.`);
-            }
-        } else {
-             await sock.sendMessage(fullRecipientId, { text: message });
-             console.log(`Pesan grup berhasil dikirim.`);
+        if (!isRegistered) {
+            throw new Error('Nomor tidak terdaftar di WhatsApp.');
         }
+
+        await sendMessageWithTimeout(recipientId, job.payload.message);
         
+        await jobRef.update({ status: 'success', updatedAt: new Date(), errorMessage: '' });
+        log(`Pesan berhasil dikirim ke ${job.payload.recipient}.`, 'success');
+        
+        // If the number was previously invalid, mark it as valid now
+        if (studentRef) {
+            await studentRef.update({ parentWaStatus: 'valid' });
+        }
+
     } catch (error) {
-        console.error(`Gagal mengirim pesan ke ${recipient}:`, error);
-    } finally {
-        const delay = getRandomDelay();
-        console.log(`Menunggu ${delay / 1000} detik sebelum pesan berikutnya...`);
-        setTimeout(() => {
-            isProcessingQueue = false;
-            processQueue();
-        }, delay);
+        log(`Gagal mengirim pesan ke ${job.payload.recipient}: ${error.message}`, 'error');
+        await jobRef.update({ status: 'failed', errorMessage: error.message, updatedAt: new Date() });
+        
+        // Mark student's WA number as invalid if the error indicates a registration issue
+        const isInvalidNumberError = /tidak terdaftar|not registered|not a valid/i.test(error.message);
+        if (studentRef && isInvalidNumberError) {
+            await studentRef.update({ parentWaStatus: 'invalid' });
+            log(`Nomor ${job.payload.recipient} ditandai sebagai tidak valid untuk siswa ID: ${job.metadata.studentId}`);
+        }
     }
+
+    const delay = getRandomDelay();
+    log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
+
+    setTimeout(() => {
+        processingQueue = false;
+        processQueue(); // Process next item
+    }, delay);
 }
 
 
-async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info');
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Menggunakan Baileys v${version.join('.')}, Latest: ${isLatest}`);
+function listenForJobs() {
+    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc');
 
-    sock = makeWASocket({
-        version,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false,
-        auth: state,
-        browser: ['AbTrack', 'Chrome', '1.0.0']
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            lastQR = qr;
-            console.log("------------------------------------------------");
-            console.log("Pindai QR Code di bawah ini dengan WhatsApp Anda:");
-            qrcode.generate(qr, { small: true });
-            console.log("------------------------------------------------");
-            updateStatus('Membutuhkan Scan QR dari Terminal', qr);
+    q.onSnapshot(snapshot => {
+        if (!processingQueue) { // Initial connection confirmation
+            log('[FIREBASE] Berhasil terhubung dan mendengarkan antrean notifikasi.');
+        }
+        if (snapshot.empty) {
+            log('Tidak ada tugas notifikasi baru.');
+            return;
         }
 
-        if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            let reason = `Koneksi ditutup.`;
-            if (statusCode) {
-                reason += ` Alasan: ${statusCode}.`;
-            }
-
-            if (shouldReconnect) {
-                reason += " Mencoba menghubungkan kembali...";
-                console.log("Mencoba menghubungkan kembali...");
-                connectToWhatsApp();
-            } else {
-                 let instruction = "Koneksi terputus secara permanen karena Anda keluar dari perangkat.";
-                if (statusCode === DisconnectReason.badSession) {
-                    instruction = "Koneksi gagal (Sesi Buruk). Silakan HAPUS folder 'baileys_auth_info' dan mulai ulang server.";
+        const newJobs = [];
+        snapshot.docChanges().forEach(change => {
+            if (change.type === 'added') {
+                const jobData = { id: change.doc.id, ...change.doc.data() };
+                // Prevent adding duplicates if listener fires multiple times
+                if (!jobQueue.some(j => j.id === jobData.id)) {
+                    newJobs.push(jobData);
                 }
-                console.log(`\n!!! PERINGATAN: ${instruction} !!!\n`);
-                reason = instruction;
             }
-            updateStatus(reason);
-            
-        } else if (connection === 'open') {
-            updateStatus('WhatsApp Terhubung!');
-            console.log("WhatsApp Terhubung!");
-            if(!isProcessingQueue) {
-                processQueue();
-            }
+        });
+
+        if (newJobs.length > 0) {
+            jobQueue.push(...newJobs);
+            log(`${newJobs.length} tugas baru ditambahkan ke antrean. Total antrean: ${jobQueue.length}`);
+            processQueue(); // Start processing if not already
         }
+    }, err => {
+        log(`Error mendengarkan Firestore: ${err}`, 'error');
     });
 }
 
-io.on('connection', (socket) => {
-    console.log('Client terhubung ke status server');
-    socket.emit('statusUpdate', { status: connectionStatus, qr: lastQR });
-});
+function initializeWhatsApp() {
+    log('Menginisialisasi WhatsApp Client...');
+    client = new Client({
+        authStrategy: new LocalAuth(),
+        puppeteer: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--unhandled-rejections=strict']
+        }
+    });
 
+    client.on('qr', qr => {
+        log("Pindai QR Code di bawah ini dengan WhatsApp Anda:", 'qr');
+        qrcode.generate(qr, { small: true });
+        updateStatus('Membutuhkan Scan QR dari Terminal', qr);
+    });
 
-app.post('/send', (req, res) => {
-    const { recipient, message, isGroup = false } = req.body;
+    client.on('ready', () => {
+        updateStatus('WhatsApp Terhubung!');
+        log('Mendengarkan tugas notifikasi dari Firestore...');
+        listenForJobs(); // Start listening for jobs once ready
+    });
 
-    if (!recipient || !message) {
-        return res.status(400).json({ success: false, error: 'Recipient dan message diperlukan.' });
-    }
+    client.on('auth_failure', msg => {
+        const reason = `Autentikasi gagal: ${msg}. Hapus folder .wwebjs_auth dan mulai ulang.`;
+        log(reason, 'error');
+        updateStatus(reason);
+    });
 
-    // Add to queue
-    messageQueue.push({ recipient, message, isGroup, res });
-    console.log(`Pesan untuk ${recipient} ditambahkan ke antrean. Total antrean: ${messageQueue.length}`);
-    
-    // Immediately respond to the client that the message is queued
-    res.status(202).json({ success: true, message: 'Pesan telah diterima dan dimasukkan ke dalam antrean.' });
+    client.on('disconnected', (reason) => {
+        const message = `Koneksi WhatsApp terputus: ${reason}.`;
+        log(message, 'error');
+        updateStatus(message);
+    });
 
-    // Start processing the queue if it's not already running
-    if (!isProcessingQueue) {
-        processQueue();
-    }
-});
+    client.initialize().catch(err => {
+        log(`Gagal menginisialisasi client WhatsApp: ${err}`, 'error');
+        updateStatus("Inisialisasi Gagal. Periksa log.");
+    });
+}
 
-server.listen(PORT, () => {
-    console.log(`Server HTTP berjalan di http://localhost:${PORT}`);
-    connectToWhatsApp();
-});
+// --- SERVER START ---
+console.log(`====================================================`);
+console.log(`  AbTrack WhatsApp Server (Firestore Mode)`);
+console.log(`  Server ini akan secara otomatis memproses notifikasi`);
+console.log(`  dari antrean di database Firestore.`);
+console.log(`====================================================`);
+initializeWhatsApp();

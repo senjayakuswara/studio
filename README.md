@@ -1,46 +1,21 @@
 # AbTrack - Aplikasi Absensi Cerdas
 
-Ini adalah aplikasi absensi cerdas yang dibangun dengan Next.js, Firebase, dan ShadCN. Aplikasi ini memungkinkan manajemen absensi siswa secara real-time dengan notifikasi WhatsApp.
+Ini adalah aplikasi web lengkap untuk manajemen absensi siswa, dibangun dengan Next.js, Firebase, dan ShadCN UI.
 
 ## Fitur Utama
 
--   **E-Absensi:** Halaman khusus untuk scan QR/barcode siswa masuk dan pulang.
--   **Manajemen Data:** CRUD (Create, Read, Update, Delete) untuk data siswa dan kelas.
--   **Laporan & Rekapitulasi:** Cetak laporan harian dan bulanan dalam format PDF.
--   **Notifikasi WhatsApp:** Mengirim notifikasi absensi real-time dan rekap bulanan ke orang tua dan grup wali kelas.
--   **Pengaturan Fleksibel:** Sesuaikan jam sekolah, hari libur, desain laporan, dan tema aplikasi.
+-   **Dashboard Real-time:** Pantau statistik kehadiran harian dan mingguan.
+-   **E-Absensi dengan QR Code:** Siswa dapat melakukan absensi masuk dan pulang dengan memindai QR code unik mereka.
+-   **Manajemen Data Terpusat:** Kelola data siswa, kelas, jam sekolah, dan hari libur dari satu tempat.
+-   **Sistem Notifikasi WhatsApp:** Kirim notifikasi absensi ke orang tua secara *real-time* atau terjadwal.
+-   **Laporan Komprehensif:** Cetak laporan absensi harian, rekapitulasi bulanan, hingga surat peringatan secara otomatis.
 
-## Pengaturan Server Notifikasi Lokal (Penting!)
+## Arsitektur Notifikasi WhatsApp
 
-Aplikasi ini menggunakan server lokal untuk mengirim notifikasi WhatsApp. Ini harus dijalankan di komputer Anda agar notifikasi berfungsi.
+Sistem ini menggunakan server notifikasi lokal yang berjalan di komputer Anda untuk mengirim pesan WhatsApp.
 
-### Persiapan (Lakukan Sekali Saja)
+-   **Basis:** Menggunakan pustaka `whatsapp-web.js` untuk mengotomatiskan WhatsApp Web.
+-   **Integrasi Firestore:** Aplikasi web tidak langsung mengirim pesan. Ia membuat "tugas notifikasi" di database Firestore. Server lokal akan mengambil tugas ini dari database, mengirim pesannya, lalu memperbarui statusnya.
+-   **Keandalan:** Arsitektur ini memastikan tidak ada notifikasi yang hilang, bahkan jika server lokal sedang tidak aktif.
 
-1.  Pastikan Anda memiliki Node.js terinstal di komputer Anda.
-2.  Unduh Ngrok dari [https://ngrok.com/download](https://ngrok.com/download). Unzip file tersebut dan letakkan file `ngrok.exe` di dalam folder `WhatsappServer-local`.
-3.  Buka Command Prompt atau Terminal di dalam folder `WhatsappServer-local`.
-4.  Jalankan perintah: `npm install`. Tunggu hingga prosesnya selesai.
-
-### Alur Kerja Harian (Setiap Kali Ingin Menggunakan Notifikasi)
-
-1.  **Jalankan Server WhatsApp:**
-    *   Buka Command Prompt/Terminal di dalam folder `WhatsappServer-local`.
-    *   Jalankan perintah: `node server.js`.
-    *   Biarkan jendela ini berjalan. Saat pertama kali, buka browser Anda ke `http://localhost:3000` untuk memindai QR code.
-
-2.  **Jalankan Ngrok:**
-    *   Buka folder `WhatsappServer-local` di File Explorer.
-    *   Klik dua kali file `start_ngrok.bat`.
-    *   Biarkan jendela kedua ini berjalan.
-
-3.  **Salin URL Ngrok:**
-    *   Dari jendela Ngrok yang baru muncul, salin URL yang diberikan (contoh: `https://xxxx-xxxx.ngrok-free.app`).
-
-4.  **Perbarui di Aplikasi Web:**
-    *   Buka aplikasi web AbTrack Anda.
-    *   Navigasikan ke `Pengaturan` -> `Aplikasi`.
-    *   Tempel URL Ngrok yang baru ke dalam kolom **"URL Webhook Notifikasi"**.
-    *   Lakukan tes pengiriman pesan untuk memastikan semuanya berfungsi.
-    *   Klik **"Simpan Semua Pengaturan"**.
-
-Kedua jendela (server WhatsApp dan Ngrok) harus tetap berjalan selama Anda ingin notifikasi berfungsi.
+Untuk menjalankan server notifikasi, lihat panduan di dalam folder `WhatsappServer-local/README.md`.

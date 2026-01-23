@@ -1,28 +1,18 @@
 
 'use server';
 /**
- * @fileOverview Handles all student and parent notifications via an external webhook.
- * - notifyOnAttendance: Sends a real-time attendance notification.
- * - processSingleNotification: Processes a single job from the notification queue.
- * - deleteNotificationJob: Deletes a job from the notification queue.
- * - sendMonthlyRecapToParent: Sends a monthly recap to a student's parent.
- * - sendClassMonthlyRecap: Sends a monthly recap for an entire class to a group.
- * - sendGenericNotification: Sends a generic message to a recipient.
+ * @fileOverview Handles queuing notifications to Firestore.
+ * - notifyOnAttendance: Queues a real-time attendance notification.
+ * - queueMonthlyRecap: Queues a monthly recap for a student's parent.
+ * - queueClassMonthlyRecap: Queues a monthly recap for an entire class to a group.
  */
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { format } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
 
 // Types
-type AppConfig = {
-    appName?: string;
-    logoUrl?: string;
-    notificationWebhookUrl?: string;
-    groupWaId?: string;
-};
 type Class = { id: string; name: string; grade: string };
 export type SerializableAttendanceRecord = {
   id?: string
@@ -40,14 +30,13 @@ export type SerializableAttendanceRecord = {
 type WebhookPayload = {
     recipient: string;
     message: string;
-    isGroup: boolean;
 }
 
 export type NotificationJob = {
     id: string;
     payload: WebhookPayload;
     status: 'pending' | 'success' | 'failed';
-    type: 'attendance' | 'recap' | 'test';
+    type: 'attendance' | 'recap';
     metadata: Record<string, any>;
     createdAt: Timestamp;
     updatedAt: Timestamp;
@@ -56,99 +45,65 @@ export type NotificationJob = {
 
 type MonthlySummaryData = {
     studentInfo: { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; },
-    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D', 'L'
+    attendance: { [day: number]: string },
     summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
 }
-type MonthlySummary = {
-    [studentId: string]: MonthlySummaryData
-}
 
-
-// Internal helper to get app config from Firestore
-async function getAppConfig(): Promise<AppConfig | null> {
-    try {
-        const docRef = doc(db, "settings", "appConfig");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            return docSnap.data() as AppConfig;
-        }
-        return null;
-    } catch (error) {
-        console.error("Error fetching App config:", error);
-        return null;
-    }
-}
-
-// Internal helper to send a payload to the external webhook
-async function sendToWebhook(payload: WebhookPayload): Promise<{ success: true } | { success: false, error: string }> {
-    const config = await getAppConfig();
-    const webhookUrl = config?.notificationWebhookUrl;
-    
-    if (!webhookUrl) {
-        const errorMsg = "Notification webhook URL is not set.";
-        console.warn(errorMsg);
-        return { success: false, error: errorMsg };
-    }
-
-    try {
-        const response = await fetch(`${webhookUrl}/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Webhook failed with status ${response.status}:`, errorText);
-            throw new Error(`Webhook error (${response.status}): ${errorText}`);
-        } else {
-             const result = await response.json();
-             if (result.success) {
-                console.log("Successfully sent payload to webhook.");
-                return { success: true };
-             } else {
-                console.error(`Webhook returned failure:`, result.message);
-                throw new Error(result.message || 'Webhook returned a failure response.');
-             }
-        }
-    } catch (error: any) {
-        console.error("Failed to send to webhook:", error);
-        // Throw an error with a user-friendly message
-        throw new Error(error.message || 'Gagal terhubung ke webhook. Pastikan server lokal dan Ngrok berjalan, dan URL webhook sudah benar.');
-    }
-}
+const footerVariations = [
+    "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas._",
+    "_Ini adalah pesan otomatis, mohon tidak membalas pesan ini._",
+    "_Notifikasi otomatis dari sistem E-Absensi._",
+    "_Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
+];
 
 // Internal helper to queue a notification
-async function queueNotification(payload: WebhookPayload, type: NotificationJob['type'], metadata: Record<string, any>) {
+async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<{ success: boolean, error?: string }> {
+    if (!recipient) {
+        const errorMsg = "Nomor tujuan tidak ditemukan.";
+        console.warn(errorMsg, metadata);
+        return { success: false, error: errorMsg };
+    }
+    
+    // Select a random footer
+    const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
+    const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
+
+    const jobPayload = {
+        payload: { recipient, message: finalMessage },
+        type,
+        metadata,
+        status: 'pending' as const,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        errorMessage: '',
+    };
+
     try {
-        await addDoc(collection(db, "notification_queue"), {
-            payload,
-            type,
-            metadata,
-            status: 'pending',
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-        });
-    } catch (e) {
+        await addDoc(collection(db, "notification_queue"), jobPayload);
+        return { success: true };
+    } catch (e: any) {
         console.error("CRITICAL: Failed to queue notification", e);
+        return { success: false, error: e.message };
     }
 }
 
 
 /**
- * Sends a real-time attendance notification. If sending fails, it queues the notification.
- * This function will now throw an error if the webhook is not configured or fails,
- * allowing the calling function to handle it (e.g., by rejecting the attendance scan).
+ * Queues a real-time attendance notification to Firestore.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const studentWaNumber = record.parentWaNumber;
     if (!studentWaNumber) {
         console.log(`No WA number for ${record.studentName}, skipping notification.`);
-        return; // No number, so no notification, but not an error.
+        return; // No number, so no notification.
     }
 
     const classSnap = await getDoc(doc(db, "classes", record.classId));
+    if (!classSnap.exists()) {
+        console.error(`Class with ID ${record.classId} not found.`);
+        return;
+    }
     const classInfo = classSnap.data() as Class;
     
     let timestampStr: string | null = null;
@@ -157,31 +112,22 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 
     if (record.timestampPulang) {
         timestampStr = record.timestampPulang;
-        title = `✅ Absensi Pulang`;
-        finalStatus = 'Pulang';
+        title = `Absensi Pulang`;
+        finalStatus = 'Pulang Sekolah';
     } else if (record.timestampMasuk) {
         timestampStr = record.timestampMasuk;
-        title = `➡️ Absensi Masuk`;
-        if(record.status === 'Hadir') {
-            finalStatus = 'Hadir (Tepat Waktu)';
-        } else if (record.status === 'Terlambat') {
-            finalStatus = 'Hadir (Terlambat)';
-        } else {
-            finalStatus = record.status;
-        }
+        title = `Absensi Masuk`;
+        finalStatus = record.status;
     } else {
-        // This case handles manual attendance (Sakit, Izin, Alfa) and mass attendance
         timestampStr = record.recordDate; 
-        title = `ℹ️ Informasi Absensi`;
+        title = `Informasi Absensi`;
         finalStatus = record.status;
     }
-    
-    const timeZone = 'Asia/Jakarta';
-    const dateObj = new Date(timestampStr);
-    const zonedDate = toZonedTime(dateObj, timeZone);
 
-    const formattedDate = format(zonedDate, "eeee, dd MMMM yyyy", { locale: localeID, timeZone });
-    
+    const wibDate = new Date(timestampStr); 
+    const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID });
+
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
         `*${title}: ${formattedDate}*`,
@@ -189,71 +135,34 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `👤 *Nama*      : ${record.studentName}`,
         `🆔 *NISN*      : ${record.nisn}`,
         `📚 *Kelas*     : ${classInfo.name}`,
+        `⏰ *Jam*       : ${formattedTime}`,
+        `👋 *Status*    : *${finalStatus}*`,
     ];
-
-    // Only add the time if it's a real scan (masuk or pulang) or mass attendance
-    if (record.timestampMasuk || record.timestampPulang) {
-        const formattedTime = format(zonedDate, "HH:mm:ss", { locale: localeID, timeZone });
-        messageLines.push(`⏰ *Jam*       : ${formattedTime} WIB`);
-    }
-    
-    messageLines.push(`👋 *Status*    : *${finalStatus}*`);
-    messageLines.push("", "--------------------------------");
-    messageLines.push("ℹ️ _Pesan ini dikirim oleh sistem dan tidak untuk dibalas._");
-    messageLines.push("📲 _Mohon simpan nomor ini untuk menerima informasi absensi selanjutnya._");
-    messageLines.push("🚫 *_PENTING:_* _Jangan memblokir nomor ini agar notifikasi tetap berjalan lancar._");
-
     
     const message = messageLines.join("\n");
-    const webhookPayload: WebhookPayload = { 
-        recipient: studentWaNumber, 
-        message, 
-        isGroup: false,
-    };
     
-    try {
-        await sendToWebhook(webhookPayload);
-    } catch (e: any) {
-        console.error("Direct notification failed, queuing now.", e.message);
-        await queueNotification(webhookPayload, 'attendance', { studentName: record.studentName, nisn: record.nisn });
-        // Re-throw the error so the calling function knows it failed and can show the UI warning.
-        throw e;
-    }
+    await queueNotification(studentWaNumber, message, 'attendance', { studentName: record.studentName, nisn: record.nisn, studentId: record.studentId });
 }
 
-
 /**
- * Processes a single notification job from the queue.
+ * Retries a failed notification job by resetting its status to 'pending'.
  * @param jobId The ID of the notification job in Firestore.
  */
-export async function processSingleNotification(jobId: string): Promise<{ success: boolean; error?: string }> {
-    const jobRef = doc(db, "notification_queue", jobId);
+export async function retryNotificationJob(jobId: string): Promise<{ success: boolean; error?: string }> {
     try {
-        const jobSnap = await getDoc(jobRef);
-        if (!jobSnap.exists()) {
-            throw new Error("Job not found.");
-        }
-        const job = jobSnap.data() as Omit<NotificationJob, 'id'>;
-
-        await sendToWebhook(job.payload);
-
+        const jobRef = doc(db, "notification_queue", jobId);
         await updateDoc(jobRef, {
-            status: 'success',
+            status: 'pending',
             updatedAt: Timestamp.now(),
-            errorMessage: '',
+            errorMessage: 'Retrying...',
         });
         return { success: true };
-
     } catch (e: any) {
-        await updateDoc(jobRef, {
-            status: 'failed',
-            updatedAt: Timestamp.now(),
-            errorMessage: e.message || "An unknown error occurred.",
-        }).catch(updateErr => console.error("Failed to even update the job to failed status:", updateErr));
-
+        console.error(`Failed to retry job ${jobId}`, e);
         return { success: false, error: e.message };
     }
 }
+
 
 /**
  * Deletes a notification job from the queue.
@@ -265,12 +174,12 @@ export async function deleteNotificationJob(jobId: string): Promise<void> {
 }
 
 /**
- * Sends a monthly attendance recap to a parent.
+ * Queues a monthly attendance recap to a parent.
  * @param studentData The student's monthly summary data.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
  */
-export async function sendMonthlyRecapToParent(studentData: MonthlySummaryData, month: number, year: number): Promise<void> {
+export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData, month: number, year: number): Promise<void> {
     const waNumber = studentData.studentInfo.parentWaNumber;
     if (!waNumber) {
         console.log(`No WA number for ${studentData.studentInfo.nama}, skipping parent recap.`);
@@ -288,99 +197,15 @@ export async function sendMonthlyRecapToParent(studentData: MonthlySummaryData, 
         `*Nama Siswa*: ${studentInfo.nama}`,
         `*NISN*: ${studentInfo.nisn}`,
         "",
-        "📊 *Rincian Kehadiran:*",
-        `  - ✅ Hadir       : ${totalHadir} hari`,
-        `  - 🕒 Terlambat   : ${summary.T} hari`,
-        `  - 🤒 Sakit       : ${summary.S} hari`,
-        `  - ✉️ Izin        : ${summary.I} hari`,
-        `  - ❌ Tanpa Keterangan (Alfa) : ${summary.A} hari`,
-        `  - 🏃 Dispensasi  : ${summary.D} hari`,
-        "",
-        "ℹ️ _Pesan ini adalah rekapitulasi otomatis. Untuk informasi lebih lanjut, silakan hubungi pihak sekolah._"
+        "*Rincian Kehadiran:*",
+        `  - Hadir       : ${totalHadir} hari`,
+        `  - Terlambat   : ${summary.T} hari`,
+        `  - Sakit       : ${summary.S} hari`,
+        `  - Izin        : ${summary.I} hari`,
+        `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
+        `  - Dispensasi  : ${summary.D} hari`,
     ];
 
     const message = messageLines.join('\n');
-    const webhookPayload: WebhookPayload = { recipient: waNumber, message, isGroup: false };
-
-    try {
-        await sendToWebhook(webhookPayload);
-    } catch (e: any) {
-        console.warn(`Failed to send monthly recap for ${studentInfo.nama}, queuing.`, e.message);
-        await queueNotification(webhookPayload, 'recap', { studentName: studentInfo.nama, month, year });
-    }
-}
-
-
-/**
- * Sends a summary of a class's monthly attendance to a group.
- * @param className The name of the class.
- * @param grade The grade of the class.
- * @param month The month of the recap (0-11).
- * @param year The year of the recap.
- * @param summaryData The full summary data for all students in the report.
- */
-export async function sendClassMonthlyRecap(className: string, grade: string, month: number, year: number, summaryData: MonthlySummary): Promise<void> {
-    const config = await getAppConfig();
-    const groupWaId = config?.groupWaId;
-
-    if (!groupWaId) {
-        console.log("Group WA ID not set, skipping class recap.");
-        return;
-    }
-
-    const monthName = format(new Date(year, month), "MMMM yyyy", { locale: localeID });
-    
-    const studentsWithAbsences = Object.values(summaryData)
-        .filter(s => s.summary.A > 0 || s.summary.S > 0 || s.summary.I > 0)
-        .sort((a,b) => b.summary.A - a.summary.A);
-
-    const messageLines = [
-        "🏫 *Rekap Absensi Bulanan (Ringkas)*",
-        `*Kelas*: ${className} (${grade})`,
-        `*Periode*: ${monthName}`,
-        "--------------------------------",
-    ];
-
-    if (studentsWithAbsences.length === 0) {
-        messageLines.push("✅ Alhamdulillah, semua siswa di kelas ini hadir penuh selama sebulan terakhir. Terima kasih atas kerja samanya!");
-    } else {
-        messageLines.push("⚠️ Berikut adalah siswa dengan catatan ketidakhadiran (Sakit, Izin, Alfa):");
-        studentsWithAbsences.forEach(s => {
-            const summaryParts: string[] = [];
-            if (s.summary.S > 0) summaryParts.push(`${s.summary.S} S`);
-            if (s.summary.I > 0) summaryParts.push(`${s.summary.I} I`);
-            if (s.summary.A > 0) summaryParts.push(`${s.summary.A} A`);
-            messageLines.push(`- *${s.studentInfo.nama}*: ${summaryParts.join(', ')}`);
-        });
-        messageLines.push("\n_S = Sakit, I = Izin, A = Alfa._")
-    }
-    
-    messageLines.push("\n_Laporan ini dikirim untuk wali kelas. Mohon untuk menindaklanjuti siswa dengan jumlah Alfa yang signifikan._")
-    
-    const message = messageLines.join('\n');
-    const webhookPayload: WebhookPayload = { recipient: groupWaId, message, isGroup: true };
-    
-    try {
-        await sendToWebhook(webhookPayload);
-    } catch (e: any) {
-        console.warn(`Failed to send class monthly recap for ${className}, queuing.`, e.message);
-        await queueNotification(webhookPayload, 'recap', { className, month, year });
-    }
-}
-
-/**
- * Sends a generic notification message to a specific recipient by QUEUING it.
- * This is useful for system tests or other administrative messages.
- * @param recipient The WA number of the recipient.
- * @param message The message to send.
- */
-export async function sendGenericNotification(recipient: string, message: string): Promise<void> {
-    const webhookPayload: WebhookPayload = {
-        recipient,
-        message,
-        isGroup: false,
-    };
-
-    // Always queue test messages for controlled sending
-    await queueNotification(webhookPayload, 'test', { recipient });
+    await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
 }

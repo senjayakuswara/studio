@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award, ShieldAlert } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -68,6 +68,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
@@ -80,6 +81,7 @@ const studentSchema = z.object({
     message: "Nomor WhatsApp harus berupa angka 10-15 digit (contoh: 6281234567890)."
   }),
   status: z.enum(["Aktif", "Lulus", "Pindah"]).optional().default("Aktif"),
+  parentWaStatus: z.string().optional(),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
@@ -110,7 +112,6 @@ export default function SiswaPage() {
 
   const classObjectMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
   
-  // Create a more robust lookup map that ignores case and whitespace
   const classLookupMap = useMemo(() => {
     const map = new Map<string, string>();
     classes.forEach(c => {
@@ -158,7 +159,7 @@ export default function SiswaPage() {
         id: doc.id,
         ...doc.data(),
       })) as Class[]
-      setClasses(classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`)));
+      setClasses(classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${b.name}`)));
 
     } catch (error) {
       console.error("Error fetching data: ", error)
@@ -196,7 +197,13 @@ export default function SiswaPage() {
           return;
         }
         const studentRef = doc(db, "students", editingStudent.id);
-        await updateDoc(studentRef, values);
+        
+        const updatePayload: Partial<Student> = { ...values };
+        if (editingStudent.parentWaNumber !== values.parentWaNumber) {
+            updatePayload.parentWaStatus = null; // Reset status on number change
+        }
+
+        await updateDoc(studentRef, updatePayload as any);
         toast({ title: "Sukses", description: "Data siswa berhasil diperbarui." });
       } else {
         if (existingStudentId) {
@@ -378,7 +385,6 @@ export default function SiswaPage() {
             const worksheet = workbook.Sheets[sheetName];
             const json: any[] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
             
-            // Remove header row
             json.shift();
 
             const studentNisnMap = new Map(students.map(s => [s.nisn, s]));
@@ -482,13 +488,18 @@ export default function SiswaPage() {
         
         studentsToProcess.forEach(student => {
             const { id, importStatus, ...studentData } = student;
-            const dataToSave = { ...studentData, parentWaNumber: studentData.parentWaNumber || "" };
-            if (importStatus === 'Baru') {
-                const docRef = doc(collection(db, "students"));
-                batch.set(docRef, dataToSave);
-            } else if (importStatus === 'Diperbarui' && id) {
+            let dataToSave: Partial<Student> = { ...studentData, parentWaNumber: studentData.parentWaNumber || "" };
+            
+            if (importStatus === 'Diperbarui' && id) {
+                const existingStudent = students.find(s => s.id === id);
+                if (existingStudent && existingStudent.parentWaNumber !== dataToSave.parentWaNumber) {
+                    dataToSave.parentWaStatus = null; // Reset status
+                }
                 const docRef = doc(db, "students", id);
-                batch.update(docRef, dataToSave);
+                batch.update(docRef, dataToSave as any);
+            } else if (importStatus === 'Baru') {
+                const docRef = doc(collection(db, "students"));
+                batch.set(docRef, dataToSave as any);
             }
         });
 
@@ -523,7 +534,6 @@ export default function SiswaPage() {
     form.reset(student)
     setIsFormDialogOpen(true)
   }
-
 
   return (
     <div className="flex flex-col gap-6">
@@ -913,8 +923,8 @@ export default function SiswaPage() {
                     <TableHead>Nama</TableHead>
                     <TableHead>Nama Kelas</TableHead>
                     <TableHead>Tingkat</TableHead>
-                    <TableHead>Jenis Kelamin</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>No. WA Ortu</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -944,10 +954,26 @@ export default function SiswaPage() {
                             <TableCell className="font-medium">{student.nama}</TableCell>
                             <TableCell>{classInfo ? classInfo.name : 'Kelas Dihapus'}</TableCell>
                             <TableCell>{classInfo ? classInfo.grade : 'N/A'}</TableCell>
-                            <TableCell>{student.jenisKelamin}</TableCell>
                             <TableCell>
                                 <Badge variant={status === 'Lulus' ? 'secondary' : status === 'Pindah' ? 'outline' : 'default'}>{status}</Badge>
                             </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                  {student.parentWaNumber || '-'}
+                                  {student.parentWaStatus === 'invalid' && (
+                                    <TooltipProvider>
+                                      <Tooltip>
+                                        <TooltipTrigger>
+                                          <ShieldAlert className="h-4 w-4 text-destructive" />
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p>Nomor ini tidak terdaftar di WhatsApp saat pengecekan terakhir.</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  )}
+                                </div>
+                              </TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
                                 <DropdownMenuTrigger asChild>

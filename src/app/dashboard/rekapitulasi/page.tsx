@@ -8,10 +8,9 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Download, Loader2, Send, Printer, Search } from "lucide-react"
+import { Download, Loader2, Printer, Search } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
-import { sendClassMonthlyRecap, sendMonthlyRecapToParent } from "@/ai/flows/notification-flow"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -109,7 +108,6 @@ export default function RekapitulasiPage() {
     const [holidays, setHolidays] = useState<Holiday[]>([]);
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
-    const [isSending, setIsSending] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
     const { toast } = useToast()
     
@@ -164,12 +162,12 @@ export default function RekapitulasiPage() {
         fetchInitialData();
     }, [toast]);
 
-    const generateSummaryData = async (forPDF: boolean): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
+    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
         if (!selectedTarget) {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat." });
             return null;
         }
-        if (forPDF) setIsGenerating(true); else setIsSending(true);
+        setIsGenerating(true);
 
         try {
             let classIdsToQuery: string[] = [];
@@ -212,7 +210,7 @@ export default function RekapitulasiPage() {
                 const classA = studentClassMap.get(a.classId);
                 const classB = studentClassMap.get(b.classId);
                 const classAKey = classA ? `${classA.grade}-${classA.name}` : '';
-                const classBKey = classB ? `${classB.grade}-${classB.name}` : '';
+                const classBKey = classB ? `${classB.grade}-${b.name}` : '';
                 if (classAKey !== classBKey) return classAKey.localeCompare(classBKey);
                 return a.nama.localeCompare(b.nama);
             });
@@ -286,7 +284,7 @@ export default function RekapitulasiPage() {
              toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat memproses data absensi." });
              return null;
         } finally {
-            if (forPDF) setIsGenerating(false); else setIsSending(false);
+            setIsGenerating(false);
         }
     }
 
@@ -295,48 +293,10 @@ export default function RekapitulasiPage() {
             toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
             return;
         }
-        const data = await generateSummaryData(true);
+        const data = await generateSummaryData();
         if (data) {
             generateMonthlyPdf(data.summary, data.students, selectedTarget, data.holidayDateStrings);
         }
-    }
-
-    const handleSendWhatsappReport = async () => {
-        const data = await generateSummaryData(false);
-        if (!data || Object.keys(data.summary).length === 0) {
-            toast({ title: "Tidak Ada Data", description: "Tidak ada data untuk dikirim." });
-            return;
-        }
-        
-        toast({ title: "Memulai Pengiriman...", description: `Mengirim ${Object.keys(data.summary).length} rekap via WhatsApp...` });
-
-        // Get Group ID for class recap
-        const appConfigDoc = await getDoc(doc(db, "settings", "appConfig"));
-        const groupWaId = appConfigDoc.exists() ? appConfigDoc.data().groupWaId : null;
-
-        for (const studentData of Object.values(data.summary)) {
-            await sendMonthlyRecapToParent(studentData, selectedMonth, selectedYear);
-        }
-        
-        if ((selectedTarget.startsWith("grade-") || classes.some(c => c.id === selectedTarget)) && groupWaId) {
-            let className = "";
-            let grade = "";
-            if (selectedTarget.startsWith("grade-")) {
-                grade = selectedTarget.split('-')[1];
-                className = `Semua Kelas ${grade}`;
-            } else {
-                const classInfo = classes.find(c => c.id === selectedTarget);
-                if (classInfo) {
-                    className = classInfo.name;
-                    grade = classInfo.grade;
-                }
-            }
-            if (className) {
-                await sendClassMonthlyRecap(className, grade, selectedMonth, selectedYear, data.summary);
-            }
-        }
-        
-        toast({ title: "Pengiriman Selesai", description: "Semua perintah notifikasi rekapitulasi telah dikirim ke server lokal." });
     }
 
     const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string, holidayDateStrings: Set<string>) => {
@@ -773,11 +733,7 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleSendWhatsappReport} disabled={isGenerating || isLoading || !selectedTarget || isSending}>
-                                    {isSending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    {isSending ? 'Mengirim...' : 'Kirim Rekap via WhatsApp'}
-                                </Button>
-                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget || isSending}>
+                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
                                 </Button>
