@@ -156,7 +156,25 @@ function listenForJobs() {
             processQueue(); // Start processing if not already
         }
     }, err => {
-        log(`Error mendengarkan Firestore: ${err}`, 'error');
+        const errorMessage = String(err);
+        if (errorMessage.includes("requires an index")) {
+            log("================================= ERROR DATABASE =================================", 'error');
+            log("Query Firestore memerlukan Index. Ini adalah setup satu kali yang wajib.", 'error');
+            log("Silakan salin dan buka URL di bawah ini di browser Anda untuk membuatnya:", 'error');
+            
+            const urlMatch = errorMessage.match(/(https?:\/\/[^\s]+)/);
+            if (urlMatch) {
+                log(urlMatch[0], 'qr');
+            } else {
+                log("Tidak dapat mengekstrak URL. Silakan cek log error lengkap di atas.", 'error');
+            }
+            log("Setelah halaman terbuka, cukup klik tombol 'Buat Indeks' atau 'Create Index'.", 'info');
+            log("Setelah indeks selesai dibuat (perlu beberapa menit), restart server ini.", 'info');
+            log("================================================================================", 'error');
+
+        } else {
+             log(`Error mendengarkan Firestore: ${err}`, 'error');
+        }
     });
 }
 

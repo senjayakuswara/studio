@@ -246,7 +246,7 @@ export default function AbsensiPage() {
 
     return recordsToFilter
       .filter(record => filterClass === "all" || record.classId === filterClass)
-      .filter(record => record.studentName.toLowerCase().includes(filterName.toLowerCase()))
+      .filter(record => (record.studentName || '').toLowerCase().includes(filterName.toLowerCase()))
       .filter(record => filterStatus === "all" || record.status === filterStatus)
   }, [allStudents, attendanceRecords, studentsBelumAbsen, filterClass, filterName, filterStatus, classes])
   
