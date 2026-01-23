@@ -3,8 +3,9 @@
 /**
  * @fileOverview Handles queuing notifications to Firestore.
  * - notifyOnAttendance: Queues a real-time attendance notification.
- * - queueMonthlyRecap: Queues a monthly recap for a student's parent.
- * - queueClassMonthlyRecap: Queues a monthly recap for an entire class to a group.
+ * - retryNotificationJob: Retries a failed notification job.
+ * - deleteNotificationJob: Deletes a job from the notification queue.
+ * - queueMonthlyRecapToParent: Queues a monthly recap for a student's parent.
  */
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
@@ -57,14 +58,14 @@ const footerVariations = [
 ];
 
 // Internal helper to queue a notification
-async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<{ success: boolean, error?: string }> {
+async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<void> {
     if (!recipient) {
         const errorMsg = "Nomor tujuan tidak ditemukan.";
         console.warn(errorMsg, metadata);
-        return { success: false, error: errorMsg };
+        // Do not throw error here, just skip if no number
+        return;
     }
     
-    // Select a random footer
     const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
     const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
 
@@ -80,10 +81,10 @@ async function queueNotification(recipient: string, message: string, type: 'atte
 
     try {
         await addDoc(collection(db, "notification_queue"), jobPayload);
-        return { success: true };
     } catch (e: any) {
-        console.error("CRITICAL: Failed to queue notification", e);
-        return { success: false, error: e.message };
+        console.error("CRITICAL: Failed to queue notification to Firestore", e);
+        // Re-throw the error to be caught by the calling server action, which will propagate to the client
+        throw new Error("Gagal menambahkan notifikasi ke dalam antrean database.");
     }
 }
 
@@ -122,6 +123,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
+    }
+
+    // Defensive check for timestamp string
+    if (!timestampStr) {
+        console.error("Could not determine timestamp for notification.", record);
+        return;
     }
 
     const wibDate = new Date(timestampStr); 

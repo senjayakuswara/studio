@@ -259,22 +259,16 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }, 2500);
         };
         
+        let student: Student | undefined;
         try {
             if (!schoolHours) {
-                addLog("Error: Pengaturan jam belum dimuat.", "error");
-                playSound('error');
-                cleanup('error', undefined, "Pengaturan Jam Belum Dimuat");
-                return;
+                throw new Error("Pengaturan jam sekolah belum dimuat.");
             }
     
-            const student = allStudents.find(s => s.nisn === trimmedNisn);
+            student = allStudents.find(s => s.nisn === trimmedNisn);
     
             if (!student) {
-                addLog(`NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`, 'error');
-                setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-                playSound('error');
-                cleanup('error', undefined, "Siswa Tidak Ditemukan");
-                return;
+                throw new Error(`Siswa dengan NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`);
             }
     
             const existingRecord = attendanceData[student.id];
@@ -284,33 +278,16 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
     
             if (existingRecord && existingRecord.timestampMasuk && !existingRecord.timestampPulang && now < jamPulangTime) {
-                addLog(`Siswa ${student.nama} sudah absen masuk hari ini.`, 'info');
-                playSound('error');
-                cleanup('info', student, "Sudah Absen Masuk");
-                return;
+                throw new Error("Siswa sudah tercatat absen masuk hari ini.");
             }
             if (existingRecord && existingRecord.timestampPulang) {
-                addLog(`Siswa ${student.nama} sudah absen masuk dan pulang hari ini.`, 'info');
-                playSound('error');
-                cleanup('info', student, "Sudah Absen Masuk & Pulang");
-                return;
+                throw new Error("Siswa sudah tercatat absen masuk dan pulang hari ini.");
             }
-    
             if (student.grade !== grade) {
-                const studentClass = classMap.get(student.classId)
-                addLog(`Siswa ${student.nama} (${studentClass?.name} - ${student.grade}) salah ruang absen.`, 'error');
-                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                playSound('error');
-                cleanup('error', student, "Salah Ruang Absen");
-                return;
+                throw new Error(`Siswa salah ruang absen. Seharusnya di Kelas ${student.grade}.`);
             }
-    
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
-                addLog(`Siswa ${student.nama} berstatus ${existingRecord.status}. Tidak bisa absen.`, "error");
-                setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                playSound('error');
-                cleanup('error', student, `Status: ${existingRecord.status}`);
-                return;
+                throw new Error(`Siswa berstatus ${existingRecord.status}. Tidak bisa melakukan absensi.`);
             }
     
             recentlyScanned.current.add(student.nisn);
@@ -322,11 +299,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!existingRecord || !existingRecord.timestampMasuk) {
                 isAbsenMasuk = true;
                 if (now > jamPulangTime) {
-                    addLog(`Waktu absen masuk sudah berakhir untuk ${student.nama}.`, 'error');
-                    setHighlightedNisn({ nisn: student.nisn, type: 'error' });
-                    playSound('error');
-                    cleanup('error', student, "Waktu Masuk Berakhir");
-                    return;
+                    throw new Error("Waktu absen masuk sudah berakhir.");
                 }
     
                 const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
@@ -344,10 +317,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             } else if (!existingRecord.timestampPulang) {
                 tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
             } else {
-                addLog(`Siswa ${student.nama} sudah absen penuh.`, 'info');
-                playSound('error');
-                cleanup('info', student, "Sudah Absen Penuh");
-                return;
+                throw new Error("Siswa sudah tercatat absen penuh.");
             }
     
             let docId = existingRecord?.id;
@@ -365,7 +335,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const finalRecord = { ...tempRecordForDb, id: docId } as AttendanceRecord;
             setAttendanceData(prev => ({...prev, [student.id]: finalRecord }));
             
-            addLog(`Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`, 'success');
+            const logMessage = `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`;
+            addLog(logMessage, 'success');
             setHighlightedNisn({ nisn: student.nisn, type: 'success' });
             playSound('success');
             
@@ -378,14 +349,19 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
 
-        } catch (error) {
-            console.error("Error handling scan:", error);
-            addLog(`Gagal memproses NISN ${trimmedNisn}.`, 'error');
+        } catch (error: any) {
+            const errorMessage = error.message || "Terjadi kesalahan sistem.";
+            addLog(`${student ? student.nama + ': ' : ''}${errorMessage}`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
             playSound('error');
-            cleanup('error', undefined, "Terjadi Kesalahan Sistem");
+            toast({
+                variant: "destructive",
+                title: "Absensi Gagal",
+                description: errorMessage,
+            })
+            cleanup('error', student, errorMessage);
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound]);
+    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, toast]);
     
     const stopScanner = useCallback(async () => {
         if (html5QrCodeRef.current?.isScanning) {
@@ -470,9 +446,14 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 recordDate: newRecord.recordDate.toDate().toISOString(),
             });
 
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error updating manual attendance: ", error);
             addLog(`Gagal menyimpan absensi manual untuk ${student.nama}.`, 'error');
+            toast({
+                variant: "destructive",
+                title: "Gagal Menyimpan Manual",
+                description: error.message || "Terjadi kesalahan saat menyimpan data.",
+            })
         }
     }
 
