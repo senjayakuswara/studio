@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MoreHorizontal, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode } from "lucide-react"
+import { MoreHorizontal, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode, CheckCircle2 } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
 
@@ -151,24 +151,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
 
-    const playSound = useCallback((type: 'success' | 'error') => {
+    const playSound = (type: 'success' | 'error') => {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            // The 'play()' method returns a Promise. We are intentionally not awaiting it.
-            // We attach a .catch() to handle potential NotAllowedError without crashing the app.
-            audio.play().catch(error => {
-                // Log the error for debugging but don't let it crash the component.
-                if (error.name === 'NotAllowedError') {
-                    console.warn("Audio playback was prevented by the browser. This is a non-critical error.");
-                } else {
-                    console.error("An error occurred while playing sound:", error);
-                }
-            });
+            const playPromise = audio.play();
+
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    // Autoplay was prevented.
+                    // This is a non-critical error, so we just log it to the console.
+                    console.warn(`Audio playback failed for ${type}.wav:`, error);
+                });
+            }
         } catch (err) {
-            console.error("Error creating audio object:", err);
+            console.error("Error creating or playing audio object:", err);
         }
-    }, []);
+    };
 
     useEffect(() => {
         async function fetchData() {

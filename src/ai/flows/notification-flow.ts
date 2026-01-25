@@ -102,8 +102,8 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
-        console.error(`Class with ID ${record.classId} not found.`);
-        throw new Error(`Kelas dengan ID ${record.classId} tidak ditemukan.`);
+        console.error(`Class with ID ${record.classId} not found. Skipping notification for ${record.studentName}.`);
+        return;
     }
     const classInfo = classSnap.data() as Class;
     
@@ -128,7 +128,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     // Defensive check for timestamp string
     if (!timestampStr) {
         console.error("Could not determine timestamp for notification.", record);
-        throw new Error("Tidak dapat menentukan waktu untuk notifikasi.");
+        return;
     }
 
     const wibDate = new Date(timestampStr); 

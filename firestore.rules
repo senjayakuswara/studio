@@ -10,6 +10,16 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // --- ANTRIAN NOTIFIKASI ---
+    // Aturan ini mengizinkan aplikasi web untuk membuat tugas notifikasi baru.
+    // Aksi `create` diizinkan secara publik agar Server Action dari Next.js
+    // dapat menambahkan tugas ke antrean tanpa memerlukan konteks autentikasi pengguna.
+    // Aksi lainnya (baca, update, hapus) tetap memerlukan autentikasi admin.
+    match /notification_queue/{jobId} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null;
+    }
+
     // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
     // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
     // yang perlu diakses oleh sistem eksternal seperti bot Telegram atau cron job.
