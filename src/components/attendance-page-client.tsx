@@ -151,13 +151,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
 
-    const playSound = useCallback((type: 'success' | 'error') => {
+    const playSound = useCallback(async (type: 'success' | 'error') => {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            audio.play().catch(e => console.error("Error playing sound:", e));
-        } catch(e) {
-            console.error("Could not play sound:", e);
+            await audio.play();
+        } catch (err) {
+            if (err instanceof Error && err.name === 'NotAllowedError') {
+                console.warn("Audio playback was prevented by the browser. This can happen if the user hasn't interacted with the page yet.");
+                // This is not a critical error, so we fail silently.
+            } else {
+                console.error("An unexpected error occurred while trying to play sound:", err);
+            }
         }
     }, []);
 
@@ -338,7 +343,8 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const logMessage = `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`;
             addLog(logMessage, 'success');
             setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-            playSound('success');
+            
+            await playSound('success');
             
             await notifyOnAttendance({
                 ...finalRecord,
@@ -353,7 +359,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
             addLog(`${student ? student.nama + ': ' : ''}${errorMessage}`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-            playSound('error');
+            await playSound('error');
             toast({
                 variant: "destructive",
                 title: "Absensi Gagal",
@@ -667,3 +673,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+  
