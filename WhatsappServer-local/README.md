@@ -57,3 +57,18 @@ Sangat sederhana. Anda hanya perlu melakukan ini setiap hari sekolah:
     *   **PENTING:** Biarkan jendela terminal ini tetap terbuka selama jam sekolah. Jangan ditutup. Anda bisa me-minimize jendela tersebut. Server ini harus tetap berjalan untuk bisa mengirimkan notifikasi.
 
 Selesai! Server akan secara otomatis memproses semua notifikasi yang dibuat dari aplikasi web Anda. Anda bisa memantau log pengiriman langsung di jendela terminal tersebut.
+
+## Pemecahan Masalah (Troubleshooting)
+
+### Error: `Gagal mengirim pesan... markedUnread` atau Error Tidak Dikenal Lainnya
+
+Ini adalah error yang paling umum dari pustaka `whatsapp-web.js`. Ini biasanya berarti sesi login Anda di server telah rusak (corrupt).
+
+**Solusi Tercepat dan Paling Andal:**
+
+1.  **Hentikan Server:** Tutup jendela terminal tempat `node server.js` berjalan.
+2.  **Hapus Folder Sesi:** Di dalam folder `WhatsappServer-local`, cari dan **hapus** seluruh folder yang bernama `.wwebjs_auth`. Jangan khawatir, ini aman. Folder ini akan dibuat ulang secara otomatis.
+3.  **Jalankan Ulang Server:** Buka kembali terminal, masuk ke folder `WhatsappServer-local`, dan jalankan lagi `node server.js`.
+4.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru. Ini akan membuat sesi yang baru dan bersih.
+
+Setelah langkah-langkah ini, error `markedUnread` seharusnya hilang.
