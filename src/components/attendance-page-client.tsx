@@ -155,19 +155,18 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            const playPromise = audio.play();
-    
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    if (error instanceof Error && error.name === 'NotAllowedError') {
-                        console.warn("Audio playback was prevented by the browser. User interaction might be required.");
-                    } else {
-                        console.error("An unexpected error occurred while trying to play sound:", error);
-                    }
-                });
-            }
+            // The 'play()' method returns a Promise. We are intentionally not awaiting it.
+            // We attach a .catch() to handle potential NotAllowedError without crashing the app.
+            audio.play().catch(error => {
+                // Log the error for debugging but don't let it crash the component.
+                if (error.name === 'NotAllowedError') {
+                    console.warn("Audio playback was prevented by the browser. This is a non-critical error.");
+                } else {
+                    console.error("An error occurred while playing sound:", error);
+                }
+            });
         } catch (err) {
-            console.error("Error creating or playing audio object:", err);
+            console.error("Error creating audio object:", err);
         }
     }, []);
 
@@ -358,12 +357,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                   timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() || null,
                   recordDate: finalRecord.recordDate.toDate().toISOString(),
               });
-            } catch (notificationError) {
+            } catch (notificationError: any) {
               console.error("Notification queueing failed:", notificationError);
               toast({
                   variant: "destructive",
                   title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server.",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server atau log terminal.",
               });
             }
 
@@ -466,12 +465,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                   timestampPulang: newRecord.timestampPulang?.toDate().toISOString() || null,
                   recordDate: newRecord.recordDate.toDate().toISOString(),
               });
-            } catch (notificationError) {
+            } catch (notificationError: any) {
               console.error("Notification queueing failed:", notificationError);
               toast({
                   variant: "destructive",
                   title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server.",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server atau log terminal.",
               });
             }
 
@@ -696,5 +695,3 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-    

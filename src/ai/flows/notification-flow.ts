@@ -103,8 +103,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
         console.error(`Class with ID ${record.classId} not found.`);
-        // Don't throw an error that crashes the client, just log and return.
-        return;
+        throw new Error(`Kelas dengan ID ${record.classId} tidak ditemukan.`);
     }
     const classInfo = classSnap.data() as Class;
     
@@ -129,7 +128,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     // Defensive check for timestamp string
     if (!timestampStr) {
         console.error("Could not determine timestamp for notification.", record);
-        return;
+        throw new Error("Tidak dapat menentukan waktu untuk notifikasi.");
     }
 
     const wibDate = new Date(timestampStr); 
@@ -217,6 +216,3 @@ export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData,
     const message = messageLines.join('\n');
     await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
 }
-
-
-    
