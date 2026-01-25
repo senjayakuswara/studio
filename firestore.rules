@@ -4,16 +4,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // Aturan dasar: Secara default, hanya admin yang sudah login yang bisa melakukan apa pun.
-    // Ini adalah fondasi keamanan kita.
-    match /{document=**} {
-      allow read, write: if request.auth != null;
-    }
-
     // --- ANTRIAN NOTIFIKASI ---
-    // Aturan ini mengizinkan aplikasi web untuk membuat tugas notifikasi baru.
-    // Aksi `create` diizinkan secara publik agar Server Action dari Next.js
-    // dapat menambahkan tugas ke antrean tanpa memerlukan konteks autentikasi pengguna.
+    // Aturan ini harus ada SEBELUM aturan wildcard /{document=**}
+    // Ini mengizinkan Server Action (tanpa user login) untuk membuat tugas notifikasi.
     // Aksi lainnya (baca, update, hapus) tetap memerlukan autentikasi admin.
     match /notification_queue/{jobId} {
       allow create: if true;
@@ -22,7 +15,7 @@ service cloud.firestore {
 
     // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
     // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
-    // yang perlu diakses oleh sistem eksternal seperti bot Telegram atau cron job.
+    // yang perlu diakses oleh sistem eksternal atau halaman publik.
 
     // Izinkan siapa saja membaca (get) konfigurasi aplikasi untuk halaman login.
     match /settings/appConfig {
@@ -60,6 +53,12 @@ service cloud.firestore {
     // Izinkan cron job untuk membaca data hari libur.
     match /holidays/{holidayId} {
       allow read: if true;
+    }
+
+    // Aturan dasar: Secara default, hanya admin yang sudah login yang bisa melakukan apa pun.
+    // Ini harus menjadi aturan paling akhir setelah semua pengecualian.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }
