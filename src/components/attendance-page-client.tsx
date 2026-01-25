@@ -151,20 +151,23 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
 
-    const playSound = useCallback(async (type: 'success' | 'error') => {
+    const playSound = useCallback((type: 'success' | 'error') => {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            await audio.play();
-        } catch (err) {
-            if (err instanceof Error && err.name === 'NotAllowedError') {
-                // This is a known browser restriction, not a critical app error.
-                // Log it for debugging but don't let it crash the app.
-                console.warn("Audio playback was prevented by the browser. This can happen if the user hasn't interacted with the page yet.");
-            } else {
-                // For any other unexpected errors, log them but still don't crash.
-                console.error("An unexpected error occurred while trying to play sound:", err);
+            const playPromise = audio.play();
+    
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    if (error instanceof Error && error.name === 'NotAllowedError') {
+                        console.warn("Audio playback was prevented by the browser. User interaction might be required.");
+                    } else {
+                        console.error("An unexpected error occurred while trying to play sound:", error);
+                    }
+                });
             }
+        } catch (err) {
+            console.error("Error creating or playing audio object:", err);
         }
     }, []);
 
@@ -346,7 +349,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(logMessage, 'success');
             setHighlightedNisn({ nisn: student.nisn, type: 'success' });
             
-            await playSound('success');
+            playSound('success');
             
             try {
               await notifyOnAttendance({
@@ -370,7 +373,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
             addLog(`${student ? student.nama + ': ' : ''}${errorMessage}`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-            await playSound('error');
+            playSound('error');
             toast({
                 variant: "destructive",
                 title: "Absensi Gagal",
@@ -693,7 +696,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-  
 
     
