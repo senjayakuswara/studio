@@ -155,16 +155,13 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            const playPromise = audio.play();
-
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    // Autoplay was prevented.
-                    // This is a non-critical error, so we just log it to the console.
-                    console.warn(`Audio playback failed for ${type}.wav:`, error);
-                });
-            }
+            // play() returns a promise which can be rejected if autoplay is not allowed.
+            // We catch this to prevent an unhandled promise rejection error.
+            audio.play().catch(error => {
+                console.warn(`Audio playback for ${type}.wav was blocked by the browser:`, error);
+            });
         } catch (err) {
+            // This catches errors during new Audio() creation, which is less likely.
             console.error("Error creating or playing audio object:", err);
         }
     };

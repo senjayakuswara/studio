@@ -16,7 +16,14 @@ service cloud.firestore {
       allow read, update, delete: if request.auth != null;
     }
 
-    // 2. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
+    // 2. Izinkan Server Action untuk MEMBACA nama kelas untuk pesan notifikasi.
+    //    'get' lebih aman daripada 'read' karena tidak mengizinkan 'list' (query semua).
+    match /classes/{classId} {
+      allow get: if true;
+      allow list, write: if request.auth != null;
+    }
+
+    // 3. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
     //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi
     //    sebelum admin berhasil masuk.
     match /settings/appConfig {
@@ -26,7 +33,7 @@ service cloud.firestore {
     // --- ATURAN UTAMA (MENANGKAP SEMUA) ---
     // Aturan ini harus menjadi yang PALING AKHIR.
     // Ia secara otomatis memberikan akses penuh (baca & tulis) ke SEMUA koleksi
-    // (students, classes, attendance, settings, dll.) HANYA JIKA pengguna sudah login.
+    // (students, attendance, settings, dll.) HANYA JIKA pengguna sudah login.
     // Inilah yang memberikan admin akses penuh ke semua fitur aplikasi.
     match /{document=**} {
       allow read, write: if request.auth != null;
