@@ -155,13 +155,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         try {
             const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
             const audio = new Audio(soundFile);
-            // play() returns a promise which can be rejected if autoplay is not allowed.
-            // We catch this to prevent an unhandled promise rejection error.
             audio.play().catch(error => {
+                // Gracefully handle browser autoplay policy errors.
+                // The user experience is not blocked, only the sound is missed.
                 console.warn(`Audio playback for ${type}.wav was blocked by the browser:`, error);
             });
         } catch (err) {
-            // This catches errors during new Audio() creation, which is less likely.
             console.error("Error creating or playing audio object:", err);
         }
     };
@@ -358,7 +357,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
               toast({
                   variant: "destructive",
                   title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server atau log terminal.",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
               });
             }
 
@@ -466,7 +465,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
               toast({
                   variant: "destructive",
                   title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server atau log terminal.",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
               });
             }
 
@@ -691,3 +690,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+    
