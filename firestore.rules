@@ -4,59 +4,30 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // --- ANTRIAN NOTIFIKASI ---
-    // Aturan ini harus ada SEBELUM aturan wildcard /{document=**}
-    // Ini mengizinkan Server Action (tanpa user login) untuk membuat tugas notifikasi.
-    // Aksi lainnya (baca, update, hapus) tetap memerlukan autentikasi admin.
+    // --- ATURAN PENGECUALIAN (AKSES TANPA LOGIN) ---
+    // Aturan di bawah ini adalah pengecualian yang sangat spesifik
+    // untuk proses yang berjalan tanpa konteks login admin.
+
+    // 1. Izinkan Server Action untuk MEMBUAT tugas notifikasi.
+    //    Ini penting agar halaman E-Absensi bisa mengantrekan notifikasi WhatsApp.
+    //    Aksi lainnya (baca, update, hapus) tetap memerlukan login.
     match /notification_queue/{jobId} {
       allow create: if true;
       allow read, update, delete: if request.auth != null;
     }
 
-    // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
-    // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
-    // yang perlu diakses oleh sistem eksternal atau halaman publik.
-
-    // Izinkan siapa saja membaca (get) konfigurasi aplikasi untuk halaman login.
+    // 2. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
+    //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi
+    //    sebelum admin berhasil masuk.
     match /settings/appConfig {
       allow get: if true;
     }
 
-    // Izinkan bot Telegram/cron jobs membaca (get) konfigurasinya.
-    match /settings/telegramConfig {
-      allow get: if true;
-    }
-    
-    // Izinkan fitur sinkronisasi manual untuk membaca dan menulis status terakhirnya.
-    match /settings/telegramState {
-      allow read, write: if true;
-    }
-
-    // Izinkan bot/cron jobs membaca data kelas. 'read' diperlukan untuk query.
-    match /classes/{classId} {
-      allow read: if true;
-    }
-    
-    // Izinkan bot/cron jobs membaca data siswa. 'read' diperlukan untuk query.
-    match /students/{studentId} {
-      allow read: if true;
-      // PENTING: Hanya izinkan bot untuk MENGUBAH field `parentChatId`.
-      // Ini melindungi data siswa lainnya dari perubahan yang tidak sah.
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentChatId']);
-    }
-
-    // Izinkan cron job untuk membaca data absensi untuk rekapitulasi.
-    match /attendance/{attendanceId} {
-      allow read: if true;
-    }
-
-    // Izinkan cron job untuk membaca data hari libur.
-    match /holidays/{holidayId} {
-      allow read: if true;
-    }
-
-    // Aturan dasar: Secara default, hanya admin yang sudah login yang bisa melakukan apa pun.
-    // Ini harus menjadi aturan paling akhir setelah semua pengecualian.
+    // --- ATURAN UTAMA (MENANGKAP SEMUA) ---
+    // Aturan ini harus menjadi yang PALING AKHIR.
+    // Ia secara otomatis memberikan akses penuh (baca & tulis) ke SEMUA koleksi
+    // (students, classes, attendance, settings, dll.) HANYA JIKA pengguna sudah login.
+    // Inilah yang memberikan admin akses penuh ke semua fitur aplikasi.
     match /{document=**} {
       allow read, write: if request.auth != null;
     }
