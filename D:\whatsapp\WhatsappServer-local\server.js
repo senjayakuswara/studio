@@ -84,7 +84,13 @@ async function processQueue() {
         }
         const recipientId = `${recipientNumber}@c.us`;
 
-        await client.sendMessage(recipientId, job.payload.message);
+        // "Magic Bullet": Promise.race for a 30-second timeout
+        const sendMessagePromise = client.sendMessage(recipientId, job.payload.message);
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Pengiriman pesan timeout setelah 30 detik')), 30000)
+        );
+
+        await Promise.race([sendMessagePromise, timeoutPromise]);
         
         await jobRef.update({ status: 'success', updatedAt: new Date(), errorMessage: '' });
         log(`Pesan berhasil dikirim ke ${recipientNumber}.`, 'success');
@@ -95,24 +101,27 @@ async function processQueue() {
         }
 
     } catch (error) {
-        log(`Gagal mengirim pesan ke ${recipientNumber}: ${error.message}`, 'error');
-        await jobRef.update({ status: 'failed', errorMessage: error.message, updatedAt: new Date() });
+        const errorMessage = error.message || 'Terjadi error tidak diketahui';
+        log(`Gagal mengirim pesan ke ${recipientNumber}: ${errorMessage}`, 'error');
+        await jobRef.update({ status: 'failed', errorMessage: errorMessage, updatedAt: new Date() });
         
         // Mark student's WA number as invalid if the error indicates a registration issue
-        const isInvalidNumberError = /tidak terdaftar|not registered|not a valid|recipient is not on whatsapp/i.test(error.message);
+        const isInvalidNumberError = /tidak terdaftar|not registered|not a valid|recipient is not on whatsapp/i.test(errorMessage);
         if (studentRef && isInvalidNumberError) {
             await studentRef.update({ parentWaStatus: 'invalid' });
             log(`Nomor ${recipientNumber} ditandai sebagai tidak valid untuk siswa ID: ${job.metadata.studentId}`);
         }
+    } finally {
+        // This 'finally' block is crucial. It will run whether the try block succeeded or failed.
+        // This prevents the queue from getting stuck.
+        const delay = getRandomDelay();
+        log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
+
+        setTimeout(() => {
+            processingQueue = false;
+            processQueue(); // Process next item
+        }, delay);
     }
-
-    const delay = getRandomDelay();
-    log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
-
-    setTimeout(() => {
-        processingQueue = false;
-        processQueue(); // Process next item
-    }, delay);
 }
 
 
@@ -181,8 +190,9 @@ function initializeWhatsApp() {
                 '--disable-accelerated-2d-canvas',
                 '--no-first-run',
                 '--no-zygote',
+                '--single-process', // <- this one doesn't works in Windows
                 '--disable-gpu'
-            ]
+            ].filter(arg => process.platform !== 'win32' || arg !== '--single-process') // Filter out --single-process on Windows
         }
     });
 
@@ -208,6 +218,9 @@ function initializeWhatsApp() {
         const message = `Koneksi WhatsApp terputus: ${reason}.`;
         log(message, 'error');
         updateStatus(message);
+        // Optional: try to re-initialize
+        // log('Mencoba menginisialisasi ulang dalam 30 detik...');
+        // setTimeout(initializeWhatsApp, 30000);
     });
 
     client.initialize().catch(err => {
