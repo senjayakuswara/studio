@@ -26,6 +26,7 @@ export type SerializableAttendanceRecord = {
   timestampPulang: string | null
   recordDate: string
   parentWaNumber?: string;
+  parentWaStatus?: 'valid' | 'invalid' | null;
 };
 
 // This type mirrors the structure in the Node.js server
@@ -36,6 +37,7 @@ export type NotificationJobPayload = {
     retryCount: number;
     createdAt: Timestamp;
     processedAt: Timestamp | null;
+    lockedAt: Timestamp | null;
     error: string | null;
     type: 'attendance' | 'recap';
     metadata: Record<string, any>;
@@ -75,6 +77,7 @@ async function queueNotification(recipient: string, message: string, type: 'atte
         retryCount: 0,
         createdAt: Timestamp.now(),
         processedAt: null,
+        lockedAt: null,
         error: null,
         type,
         metadata,
@@ -147,7 +150,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     
     const message = messageLines.join("\n");
     
-    await queueNotification(studentWaNumber, message, 'attendance', { studentName: record.studentName, nisn: record.nisn, studentId: record.studentId });
+    await queueNotification(studentWaNumber, message, 'attendance', { studentId: record.studentId, studentName: record.studentName, nisn: record.nisn });
 }
 
 /**
