@@ -73,19 +73,21 @@ async function processQueue() {
     const job = jobQueue.shift();
     const jobRef = db.collection('notification_queue').doc(job.id);
     const studentRef = job.metadata?.studentId ? db.collection('students').doc(job.metadata.studentId) : null;
-
-    log(`Memproses tugas untuk: ${job.payload.recipient}...`);
+    
+    let recipientNumber = String(job.payload.recipient).replace(/\D/g, '');
+    log(`Memproses tugas untuk: ${recipientNumber}...`);
 
     try {
-        const recipientId = `${String(job.payload.recipient).replace(/\D/g, '')}@c.us`;
-        
-        // Pengecekan isRegisteredUser() dihapus karena tidak andal dan bisa menyebabkan server hang.
-        // Langsung coba kirim, dan biarkan blok catch menangani jika nomor tidak terdaftar.
-        // Panggilan `sendMessage` sekarang lebih langsung untuk meningkatkan stabilitas.
+        // Normalize phone number: convert '08' to '628'
+        if (recipientNumber.startsWith('0')) {
+            recipientNumber = '62' + recipientNumber.substring(1);
+        }
+        const recipientId = `${recipientNumber}@c.us`;
+
         await client.sendMessage(recipientId, job.payload.message);
         
         await jobRef.update({ status: 'success', updatedAt: new Date(), errorMessage: '' });
-        log(`Pesan berhasil dikirim ke ${job.payload.recipient}.`, 'success');
+        log(`Pesan berhasil dikirim ke ${recipientNumber}.`, 'success');
         
         // If the number was previously invalid, mark it as valid now
         if (studentRef) {
@@ -93,14 +95,14 @@ async function processQueue() {
         }
 
     } catch (error) {
-        log(`Gagal mengirim pesan ke ${job.payload.recipient}: ${error.message}`, 'error');
+        log(`Gagal mengirim pesan ke ${recipientNumber}: ${error.message}`, 'error');
         await jobRef.update({ status: 'failed', errorMessage: error.message, updatedAt: new Date() });
         
         // Mark student's WA number as invalid if the error indicates a registration issue
-        const isInvalidNumberError = /tidak terdaftar|not registered|not a valid/i.test(error.message);
+        const isInvalidNumberError = /tidak terdaftar|not registered|not a valid|recipient is not on whatsapp/i.test(error.message);
         if (studentRef && isInvalidNumberError) {
             await studentRef.update({ parentWaStatus: 'invalid' });
-            log(`Nomor ${job.payload.recipient} ditandai sebagai tidak valid untuk siswa ID: ${job.metadata.studentId}`);
+            log(`Nomor ${recipientNumber} ditandai sebagai tidak valid untuk siswa ID: ${job.metadata.studentId}`);
         }
     }
 
@@ -171,8 +173,8 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            // Menghapus argumen yang berpotensi tidak stabil untuk meningkatkan keandalan
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            // Optimized arguments for stability in various environments
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         }
     });
 
