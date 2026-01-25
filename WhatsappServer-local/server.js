@@ -58,23 +58,6 @@ function getRandomDelay() {
     return Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
 }
 
-async function sendMessageWithTimeout(recipientId, message, timeout = 30000) {
-    return new Promise(async (resolve, reject) => {
-        const timer = setTimeout(() => {
-            reject(new Error(`Waktu pengiriman habis setelah ${timeout / 1000} detik.`));
-        }, timeout);
-
-        try {
-            const result = await client.sendMessage(recipientId, message);
-            clearTimeout(timer);
-            resolve(result);
-        } catch (error) {
-            clearTimeout(timer);
-            reject(error);
-        }
-    });
-}
-
 // --- CORE LOGIC ---
 async function processQueue() {
     if (processingQueue || jobQueue.length === 0) {
@@ -98,8 +81,8 @@ async function processQueue() {
         
         // Pengecekan isRegisteredUser() dihapus karena tidak andal dan bisa menyebabkan server hang.
         // Langsung coba kirim, dan biarkan blok catch menangani jika nomor tidak terdaftar.
-
-        await sendMessageWithTimeout(recipientId, job.payload.message);
+        // Panggilan `sendMessage` sekarang lebih langsung untuk meningkatkan stabilitas.
+        await client.sendMessage(recipientId, job.payload.message);
         
         await jobRef.update({ status: 'success', updatedAt: new Date(), errorMessage: '' });
         log(`Pesan berhasil dikirim ke ${job.payload.recipient}.`, 'success');
@@ -188,7 +171,8 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--unhandled-rejections=strict']
+            // Menghapus argumen yang berpotensi tidak stabil untuk meningkatkan keandalan
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         }
     });
 
