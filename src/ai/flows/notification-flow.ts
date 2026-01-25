@@ -28,20 +28,21 @@ export type SerializableAttendanceRecord = {
   parentWaNumber?: string;
 };
 
-type WebhookPayload = {
-    recipient: string;
+// This type mirrors the structure in the Node.js server
+export type NotificationJobPayload = {
+    phone: string;
     message: string;
-}
-
-export type NotificationJob = {
-    id: string;
-    payload: WebhookPayload;
-    status: 'pending' | 'success' | 'failed';
+    status: 'pending' | 'processing' | 'sent' | 'failed';
+    retryCount: number;
+    createdAt: Timestamp;
+    processedAt: Timestamp | null;
+    error: string | null;
     type: 'attendance' | 'recap';
     metadata: Record<string, any>;
-    createdAt: Timestamp;
-    updatedAt: Timestamp;
-    errorMessage?: string;
+}
+
+export type NotificationJob = NotificationJobPayload & {
+    id: string;
 }
 
 type MonthlySummaryData = {
@@ -57,33 +58,32 @@ const footerVariations = [
     "_Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
 ];
 
-// Internal helper to queue a notification
+// Internal helper to queue a notification, now matching the new Firestore structure
 async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<void> {
     if (!recipient) {
-        const errorMsg = "Nomor tujuan tidak ditemukan.";
-        console.warn(errorMsg, metadata);
-        // Do not throw error here, just skip if no number
+        console.warn("Nomor tujuan tidak ditemukan. Melewati notifikasi.", metadata);
         return;
     }
     
     const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
     const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
 
-    const jobPayload = {
-        payload: { recipient, message: finalMessage },
+    const jobPayload: Omit<NotificationJobPayload, 'id'> = {
+        phone: recipient,
+        message: finalMessage,
+        status: 'pending',
+        retryCount: 0,
+        createdAt: Timestamp.now(),
+        processedAt: null,
+        error: null,
         type,
         metadata,
-        status: 'pending' as const,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        errorMessage: '',
     };
 
     try {
         await addDoc(collection(db, "notification_queue"), jobPayload);
     } catch (e: any) {
         console.error("CRITICAL: Failed to queue notification to Firestore", e);
-        // Re-throw the error to be caught by the calling server action, which will propagate to the client
         throw new Error("Gagal menambahkan notifikasi ke dalam antrean database.");
     }
 }
@@ -97,12 +97,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const studentWaNumber = record.parentWaNumber;
     if (!studentWaNumber) {
         console.log(`No WA number for ${record.studentName}, skipping notification.`);
-        return; // No number, so no notification.
+        return;
     }
 
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
-        console.error(`Class with ID ${record.classId} not found. Skipping notification for ${record.studentName}.`);
+        console.error(`Class with ID ${record.classId} not found.`);
         return;
     }
     const classInfo = classSnap.data() as Class;
@@ -125,7 +125,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         finalStatus = record.status;
     }
 
-    // Defensive check for timestamp string
     if (!timestampStr) {
         console.error("Could not determine timestamp for notification.", record);
         return;
@@ -160,8 +159,8 @@ export async function retryNotificationJob(jobId: string): Promise<{ success: bo
         const jobRef = doc(db, "notification_queue", jobId);
         await updateDoc(jobRef, {
             status: 'pending',
-            updatedAt: Timestamp.now(),
-            errorMessage: 'Retrying...',
+            retryCount: 0, // Reset retry count for manual retry
+            error: 'Retrying manually...',
         });
         return { success: true };
     } catch (e: any) {
