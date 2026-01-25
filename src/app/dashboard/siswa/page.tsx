@@ -200,7 +200,7 @@ export default function SiswaPage() {
         
         const updatePayload: Partial<Student> = { ...values };
         if (editingStudent.parentWaNumber !== values.parentWaNumber) {
-            updatePayload.parentWaStatus = null; // Reset status on number change
+            updatePayload.parentWaStatus = 'valid'; // Reset status on number change
         }
 
         await updateDoc(studentRef, updatePayload as any);
@@ -493,7 +493,7 @@ export default function SiswaPage() {
             if (importStatus === 'Diperbarui' && id) {
                 const existingStudent = students.find(s => s.id === id);
                 if (existingStudent && existingStudent.parentWaNumber !== dataToSave.parentWaNumber) {
-                    dataToSave.parentWaStatus = null; // Reset status
+                    dataToSave.parentWaStatus = 'valid'; // Reset status
                 }
                 const docRef = doc(db, "students", id);
                 batch.update(docRef, dataToSave as any);
