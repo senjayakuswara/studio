@@ -14,9 +14,15 @@ let db;
 try {
     const serviceAccountPath = path.join(__dirname, 'credentials.json');
     if (!fs.existsSync(serviceAccountPath)) {
-        throw new Error("credentials.json tidak ditemukan. Pastikan Anda telah menempatkan file kunci service account di folder ini.");
+        throw new Error("File credentials.json tidak ditemukan. Pastikan Anda telah menempatkan file kunci service account di folder ini.");
     }
     const serviceAccount = require(serviceAccountPath);
+
+    // Validasi isi file credentials.json
+    if (!serviceAccount || !serviceAccount.project_id) {
+        throw new Error("File credentials.json tidak valid atau masih berupa placeholder. Pastikan Anda telah menggantinya dengan file kredensial asli yang diunduh dari Firebase Console.");
+    }
+
     initializeApp({
         credential: cert(serviceAccount)
     });
