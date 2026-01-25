@@ -158,9 +158,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             await audio.play();
         } catch (err) {
             if (err instanceof Error && err.name === 'NotAllowedError') {
+                // This is a known browser restriction, not a critical app error.
+                // Log it for debugging but don't let it crash the app.
                 console.warn("Audio playback was prevented by the browser. This can happen if the user hasn't interacted with the page yet.");
-                // This is not a critical error, so we fail silently.
             } else {
+                // For any other unexpected errors, log them but still don't crash.
                 console.error("An unexpected error occurred while trying to play sound:", err);
             }
         }
@@ -346,12 +348,21 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             
             await playSound('success');
             
-            await notifyOnAttendance({
-                ...finalRecord,
-                timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() || null,
-                timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() || null,
-                recordDate: finalRecord.recordDate.toDate().toISOString(),
-            });
+            try {
+              await notifyOnAttendance({
+                  ...finalRecord,
+                  timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() || null,
+                  timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() || null,
+                  recordDate: finalRecord.recordDate.toDate().toISOString(),
+              });
+            } catch (notificationError) {
+              console.error("Notification queueing failed:", notificationError);
+              toast({
+                  variant: "destructive",
+                  title: "Gagal Mengantrekan Notifikasi",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server.",
+              });
+            }
 
             cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
 
@@ -367,7 +378,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             })
             cleanup('error', student, errorMessage);
         }
-    }, [schoolHours, allStudents, grade, classMap, attendanceData, addLog, playSound, toast]);
+    }, [schoolHours, allStudents, grade, attendanceData, addLog, playSound, toast]);
     
     const stopScanner = useCallback(async () => {
         if (html5QrCodeRef.current?.isScanning) {
@@ -445,12 +456,21 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             
-            await notifyOnAttendance({
-                ...newRecord,
-                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() || null,
-                timestampPulang: newRecord.timestampPulang?.toDate().toISOString() || null,
-                recordDate: newRecord.recordDate.toDate().toISOString(),
-            });
+            try {
+              await notifyOnAttendance({
+                  ...newRecord,
+                  timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() || null,
+                  timestampPulang: newRecord.timestampPulang?.toDate().toISOString() || null,
+                  recordDate: newRecord.recordDate.toDate().toISOString(),
+              });
+            } catch (notificationError) {
+              console.error("Notification queueing failed:", notificationError);
+              toast({
+                  variant: "destructive",
+                  title: "Gagal Mengantrekan Notifikasi",
+                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa koneksi server.",
+              });
+            }
 
         } catch (error: any) {
             console.error("Error updating manual attendance: ", error);
@@ -675,3 +695,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 }
 
   
+
+    

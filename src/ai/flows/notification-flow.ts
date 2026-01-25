@@ -103,6 +103,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
         console.error(`Class with ID ${record.classId} not found.`);
+        // Don't throw an error that crashes the client, just log and return.
         return;
     }
     const classInfo = classSnap.data() as Class;
@@ -216,3 +217,6 @@ export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData,
     const message = messageLines.join('\n');
     await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
 }
+
+
+    
