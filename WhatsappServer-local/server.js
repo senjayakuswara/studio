@@ -14,12 +14,12 @@ let db;
 try {
     const serviceAccountPath = path.join(__dirname, 'credentials.json');
     if (!fs.existsSync(serviceAccountPath)) {
-        throw new Error("File credentials.json tidak ditemukan. Pastikan Anda telah menempatkan file kunci service account di folder ini.");
+        throw new Error("File credentials.json tidak ditemukan. Pastikan Anda telah menempatkan file kunci service account dari Firebase Console di folder ini.");
     }
     const serviceAccount = require(serviceAccountPath);
 
     // Validasi isi file credentials.json
-    if (!serviceAccount || !serviceAccount.project_id) {
+    if (!serviceAccount || !serviceAccount.project_id || serviceAccount.project_id.includes("YOUR_PROJECT_ID")) {
         throw new Error("File credentials.json tidak valid atau masih berupa placeholder. Pastikan Anda telah menggantinya dengan file kredensial asli yang diunduh dari Firebase Console.");
     }
 
@@ -95,11 +95,9 @@ async function processQueue() {
 
     try {
         const recipientId = `${String(job.payload.recipient).replace(/\D/g, '')}@c.us`;
-        const isRegistered = await client.isRegisteredUser(recipientId);
-
-        if (!isRegistered) {
-            throw new Error('Nomor tidak terdaftar di WhatsApp.');
-        }
+        
+        // Pengecekan isRegisteredUser() dihapus karena tidak andal dan bisa menyebabkan server hang.
+        // Langsung coba kirim, dan biarkan blok catch menangani jika nomor tidak terdaftar.
 
         await sendMessageWithTimeout(recipientId, job.payload.message);
         
@@ -150,7 +148,7 @@ function listenForJobs() {
             if (change.type === 'added') {
                 const jobData = { id: change.doc.id, ...change.doc.data() };
                 // Prevent adding duplicates if listener fires multiple times
-                if (!jobQueue.some(j => j.id === jobData.id)) {
+                if (!jobQueue.some(j => j.id === jobData.id) && !processingQueue) {
                     newJobs.push(jobData);
                 }
             }

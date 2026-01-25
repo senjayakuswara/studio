@@ -153,15 +153,36 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
     const playSound = (type: 'success' | 'error') => {
         try {
-            const soundFile = type === 'success' ? '/sounds/success.wav' : '/sounds/error.wav';
-            const audio = new Audio(soundFile);
-            audio.play().catch(error => {
-                // Gracefully handle browser autoplay policy errors.
-                // The user experience is not blocked, only the sound is missed.
-                console.warn(`Audio playback for ${type}.wav was blocked by the browser:`, error);
-            });
-        } catch (err) {
-            console.error("Error creating or playing audio object:", err);
+            // @ts-ignore
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (!audioContext) {
+                console.warn("Web Audio API is not supported in this browser.");
+                return;
+            }
+
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            if (type === 'success') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime); // Lower volume
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.5);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.5);
+            } else { // error
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(220, audioContext.currentTime); // A3 note
+                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime); // Lower volume
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.3);
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            }
+        } catch (e) {
+            console.error("Could not play sound due to an error:", e);
         }
     };
 
@@ -357,7 +378,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
               toast({
                   variant: "destructive",
                   title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
+                  description: notificationError.message || "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
               });
             }
 
@@ -690,5 +711,3 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-    
