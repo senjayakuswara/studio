@@ -1,0 +1,33 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // --- ANTRIAN NOTIFIKASI ---
+    // Aturan ini harus ada SEBELUM aturan wildcard /{document=**}
+    // Ini mengizinkan Server Action (tanpa user login) untuk membuat tugas notifikasi.
+    // Aksi lainnya (baca, update, hapus) tetap memerlukan autentikasi admin.
+    match /notification_queue/{jobId} {
+      allow create: if true;
+      allow read, update, delete: if request.auth != null;
+    }
+
+    // --- PENGECUALIAN AKSES PUBLIK (TANPA LOGIN) ---
+    // Aturan di bawah ini adalah pengecualian yang aman untuk fitur-fitur
+    // yang perlu diakses oleh sistem eksternal atau halaman publik.
+
+    // Izinkan siapa saja membaca (get) konfigurasi aplikasi untuk halaman login.
+    match /settings/appConfig {
+      allow get: if true;
+    }
+
+    // --- ATURAN DASAR (MENANGKAP SEMUA) ---
+    // Aturan ini harus menjadi aturan paling akhir.
+    // Secara default, hanya admin yang sudah login yang bisa melakukan apa pun.
+    // Ini mencakup semua koleksi lain seperti 'students', 'classes', 'attendance', dll.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
