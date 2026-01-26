@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 8000;
 const BATCH_LIMIT = 1;
 const MAX_RETRIES = 1;
 const STALE_JOB_TIMEOUT_MINUTES = 2; 
-const SEND_MESSAGE_TIMEOUT_MS = 30000; // 30 detik timeout untuk pengiriman
+const SEND_MESSAGE_TIMEOUT_MS = 45000; // Timeout pengiriman pesan dinaikkan menjadi 45 detik
 
 let db;
 let client;
@@ -94,16 +94,10 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            // Konfigurasi Puppeteer yang stabil
+            // Konfigurasi Puppeteer yang paling umum dan stabil
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process', // <-- Coba dalam mode single process
-                '--disable-gpu'
             ],
         },
     });
@@ -162,25 +156,26 @@ async function appendToSheet(data) {
 }
 
 /**
- * [DIRUBAH] Fungsi pengiriman pesan yang disederhanakan secara radikal.
- * Menghapus semua pre-check (isRegisteredUser, getChatById) dan langsung mencoba mengirim.
- * Ini untuk menghindari bug state internal di whatsapp-web.js.
+ * [DIRUBAH] Fungsi pengiriman pesan dengan teknik "pemanasan" chat
+ * untuk mencegah error `markedUnread`.
  */
 async function sendWhatsAppMessage(recipientNumber, message) {
     const sanitizedNumber = recipientNumber.replace(/\D/g, '');
     const finalNumber = sanitizedNumber.startsWith('0') ? '62' + sanitizedNumber.substring(1) : sanitizedNumber;
     const recipientId = `${finalNumber}@c.us`;
-
-    log(`Mengirim pesan ke ${recipientId}...`);
     
-    // Langsung panggil sendMessage, dibungkus dengan timeout.
+    // 1. "Pemanasan" chat. Ini adalah langkah krusial untuk mencegah error.
+    log(`Memanaskan chat untuk ${recipientId}...`);
+    await client.getChatById(recipientId);
+
+    // 2. Kirim pesan setelah pemanasan.
+    log(`Mengirim pesan ke ${recipientId}...`);
     const sendMessagePromise = client.sendMessage(recipientId, message);
     
     const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Waktu pengiriman habis (30 detik).')), SEND_MESSAGE_TIMEOUT_MS)
+        setTimeout(() => reject(new Error(`Waktu pengiriman habis (${SEND_MESSAGE_TIMEOUT_MS / 1000} detik).`)), SEND_MESSAGE_TIMEOUT_MS)
     );
 
-    // Promise.race akan menyelesaikan promise mana yang lebih dulu selesai (kirim atau timeout)
     await Promise.race([sendMessagePromise, timeoutPromise]);
 }
 
@@ -192,14 +187,11 @@ async function processJob(job) {
         log(`Mengunci tugas ${job.id} sebagai 'processing'.`);
         await jobRef.update({ status: 'processing', lockedAt: Timestamp.now() });
         
-        // Coba kirim pesan
         await sendWhatsAppMessage(job.phone, job.message);
         
-        // Jika berhasil
         log(`Pesan ke ${job.phone} berhasil dikirim.`, 'success');
         await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null });
 
-        // Update status nomor WA siswa menjadi valid
         if (job.metadata?.studentId) {
             await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'valid' });
         }
@@ -216,7 +208,7 @@ async function processJob(job) {
         } else {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
-            // Jika error karena nomor tidak ada, tandai sebagai tidak valid
+            
             if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
             }
@@ -227,23 +219,19 @@ async function processJob(job) {
 
 function listenForNotificationJobs() {
     log(`Mendengarkan tugas notifikasi dari Firestore...`);
-    // Query hanya untuk tugas yang 'pending', ambil 1 per 1, urutkan dari yang paling lama.
     const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(BATCH_LIMIT);
 
     q.onSnapshot(snapshot => {
-        // Cek flag global, jika sedang memproses atau WA belum siap, jangan lakukan apa-apa.
         if (isProcessingQueue || !isWhatsAppReady) return;
 
         snapshot.docChanges().forEach(async (change) => {
-            // Hanya bereaksi pada dokumen BARU yang ditambahkan ke hasil query
             if (change.type === 'added') {
-                isProcessingQueue = true; // Kunci proses
+                isProcessingQueue = true;
                 const jobData = { id: change.doc.id, ...change.doc.data() };
                 log(`Tugas baru ditemukan: ${jobData.id}`);
                 try {
                     await processJob(jobData);
                 } finally {
-                    // Setelah selesai (sukses atau gagal), tunggu jeda acak lalu buka kunci
                     const delay = getRandomDelay();
                     log(`Menunggu jeda ${delay / 1000} detik...`);
                     setTimeout(() => { isProcessingQueue = false; }, delay);
@@ -255,7 +243,6 @@ function listenForNotificationJobs() {
     });
 }
 
-// Fungsi Fail-Safe untuk membersihkan tugas yang macet
 async function cleanupStaleJobs() {
     log('[FAIL-SAFE] Menjalankan pembersihan tugas macet...');
     const staleTime = Timestamp.fromMillis(Date.now() - STALE_JOB_TIMEOUT_MINUTES * 60 * 1000);
@@ -275,9 +262,8 @@ async function cleanupStaleJobs() {
             const newRetryCount = (job.retryCount || 0) + 1;
             const errorMsg = '[FAIL-SAFE] Direset dari status macet (timeout).';
             
-            // Jika masih bisa di-retry, kembalikan ke pending. Jika tidak, tandai failed.
             if (newRetryCount <= MAX_RETRIES) {
-                batch.update(doc.ref, { status: 'pending', retryCount: newRetryCount, error: errorMsg });
+                batch.update(doc.ref, { status: 'pending', retryCount: newRetryCount, error: errorMsg, lockedAt: null });
             } else {
                 batch.update(doc.ref, { status: 'failed', error: `Gagal permanen: ${errorMsg}` });
             }

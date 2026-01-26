@@ -55,8 +55,9 @@ Ini hampir selalu berarti **sesi login Anda di server telah rusak (corrupt)**. S
 **Solusi Cepat dan Paling Andal:**
 
 1.  **Hentikan Server:** Tutup jendela terminal.
-2.  **Hapus Folder Sesi:** Di dalam folder `WhatsappServer-local`, cari dan **HAPUS** seluruh folder yang bernama `.wwebjs_auth`. Ini 100% aman.
-3.  **Jalankan Ulang Server:** Buka kembali terminal dan jalankan `node server.js`.
-4.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru.
+2.  **Instalasi Ulang (Jika diperlukan):** Jika Anda baru saja mendapatkan perubahan `package.json`, jalankan `npm install` terlebih dahulu.
+3.  **Hapus Folder Sesi:** Di dalam folder `WhatsappServer-local`, cari dan **HAPUS** seluruh folder yang bernama `.wwebjs_auth`. Ini 100% aman.
+4.  **Jalankan Ulang Server:** Buka kembali terminal dan jalankan `node server.js`.
+5.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru.
 
 Lakukan langkah ini setiap kali Anda menghadapi masalah pengiriman yang tidak bisa dijelaskan. Ini akan menyelesaikan 99% masalah.
