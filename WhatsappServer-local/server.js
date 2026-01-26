@@ -19,8 +19,8 @@ const config = require('./config.json');
 const PORT = process.env.PORT || 8000;
 const BATCH_LIMIT = 1;
 const MAX_RETRIES = 1;
-const STALE_JOB_TIMEOUT_MINUTES = 2;
-const SEND_MESSAGE_TIMEOUT_MS = 30000;
+const STALE_JOB_TIMEOUT_MINUTES = 2; 
+const SEND_MESSAGE_TIMEOUT_MS = 30000; // 30 detik timeout untuk pengiriman
 
 let db;
 let client;
@@ -46,6 +46,7 @@ const log = (message, type = 'info') => {
 };
 
 function getRandomDelay() {
+    // Jeda antara 5 hingga 15 detik
     return Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
 }
 
@@ -93,7 +94,17 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+            // Konfigurasi Puppeteer yang stabil
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process', // <-- Coba dalam mode single process
+                '--disable-gpu'
+            ],
         },
     });
 
@@ -108,6 +119,7 @@ function initializeWhatsApp() {
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
         io.emit('status', 'WhatsApp Terhubung!');
+        // Hanya mulai mendengarkan antrean setelah WhatsApp benar-benar siap
         listenForNotificationJobs();
     });
 
@@ -118,13 +130,14 @@ function initializeWhatsApp() {
     });
 
     client.on('disconnected', reason => {
-        log(`Koneksi WhatsApp terputus: ${reason}.`, 'error');
+        log(`Koneksi WhatsApp terputus: ${reason}. Coba menghubungkan kembali...`, 'error');
         io.emit('status', 'Koneksi Terputus');
         isWhatsAppReady = false;
-        client.initialize().catch(err => log(`Gagal restart otomatis: ${err}`, 'error'));
+        // Coba inisialisasi ulang jika terputus
+        client.initialize().catch(err => log(`Gagal restart otomatis: ${err.message}`, 'error'));
     });
 
-    client.initialize().catch(err => log(`Gagal inisialisasi client: ${err}`, 'error'));
+    client.initialize().catch(err => log(`Gagal inisialisasi client: ${err.message}`, 'error'));
 }
 
 // =================================================================================
@@ -148,25 +161,26 @@ async function appendToSheet(data) {
     }
 }
 
+/**
+ * [DIRUBAH] Fungsi pengiriman pesan yang disederhanakan secara radikal.
+ * Menghapus semua pre-check (isRegisteredUser, getChatById) dan langsung mencoba mengirim.
+ * Ini untuk menghindari bug state internal di whatsapp-web.js.
+ */
 async function sendWhatsAppMessage(recipientNumber, message) {
     const sanitizedNumber = recipientNumber.replace(/\D/g, '');
     const finalNumber = sanitizedNumber.startsWith('0') ? '62' + sanitizedNumber.substring(1) : sanitizedNumber;
     const recipientId = `${finalNumber}@c.us`;
 
-    const isRegistered = await client.isRegisteredUser(recipientId);
-    if (!isRegistered) {
-        throw new Error("Nomor tidak terdaftar di WhatsApp.");
-    }
-    
-    log(`Memanaskan chat untuk ${recipientId}...`);
-    await client.getChatById(recipientId);
-    
     log(`Mengirim pesan ke ${recipientId}...`);
+    
+    // Langsung panggil sendMessage, dibungkus dengan timeout.
     const sendMessagePromise = client.sendMessage(recipientId, message);
+    
     const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Waktu pengiriman habis (30 detik).')), SEND_MESSAGE_TIMEOUT_MS)
     );
 
+    // Promise.race akan menyelesaikan promise mana yang lebih dulu selesai (kirim atau timeout)
     await Promise.race([sendMessagePromise, timeoutPromise]);
 }
 
@@ -178,11 +192,14 @@ async function processJob(job) {
         log(`Mengunci tugas ${job.id} sebagai 'processing'.`);
         await jobRef.update({ status: 'processing', lockedAt: Timestamp.now() });
         
+        // Coba kirim pesan
         await sendWhatsAppMessage(job.phone, job.message);
         
+        // Jika berhasil
         log(`Pesan ke ${job.phone} berhasil dikirim.`, 'success');
         await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null });
 
+        // Update status nomor WA siswa menjadi valid
         if (job.metadata?.studentId) {
             await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'valid' });
         }
@@ -199,7 +216,8 @@ async function processJob(job) {
         } else {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
-            if (job.metadata?.studentId && (errorMessage.includes("tidak terdaftar") || errorMessage.includes("not a user"))) {
+            // Jika error karena nomor tidak ada, tandai sebagai tidak valid
+            if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
             }
         }
@@ -209,19 +227,23 @@ async function processJob(job) {
 
 function listenForNotificationJobs() {
     log(`Mendengarkan tugas notifikasi dari Firestore...`);
+    // Query hanya untuk tugas yang 'pending', ambil 1 per 1, urutkan dari yang paling lama.
     const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(BATCH_LIMIT);
 
     q.onSnapshot(snapshot => {
+        // Cek flag global, jika sedang memproses atau WA belum siap, jangan lakukan apa-apa.
         if (isProcessingQueue || !isWhatsAppReady) return;
 
         snapshot.docChanges().forEach(async (change) => {
+            // Hanya bereaksi pada dokumen BARU yang ditambahkan ke hasil query
             if (change.type === 'added') {
-                isProcessingQueue = true;
+                isProcessingQueue = true; // Kunci proses
                 const jobData = { id: change.doc.id, ...change.doc.data() };
                 log(`Tugas baru ditemukan: ${jobData.id}`);
                 try {
                     await processJob(jobData);
                 } finally {
+                    // Setelah selesai (sukses atau gagal), tunggu jeda acak lalu buka kunci
                     const delay = getRandomDelay();
                     log(`Menunggu jeda ${delay / 1000} detik...`);
                     setTimeout(() => { isProcessingQueue = false; }, delay);
@@ -233,6 +255,7 @@ function listenForNotificationJobs() {
     });
 }
 
+// Fungsi Fail-Safe untuk membersihkan tugas yang macet
 async function cleanupStaleJobs() {
     log('[FAIL-SAFE] Menjalankan pembersihan tugas macet...');
     const staleTime = Timestamp.fromMillis(Date.now() - STALE_JOB_TIMEOUT_MINUTES * 60 * 1000);
@@ -248,7 +271,16 @@ async function cleanupStaleJobs() {
         log(`[FAIL-SAFE] Ditemukan ${snapshot.size} tugas macet. Mereset...`, 'warn');
         const batch = db.batch();
         snapshot.forEach(doc => {
-            batch.update(doc.ref, { status: 'failed', error: '[FAIL-SAFE] Direset dari status macet.' });
+            const job = doc.data();
+            const newRetryCount = (job.retryCount || 0) + 1;
+            const errorMsg = '[FAIL-SAFE] Direset dari status macet (timeout).';
+            
+            // Jika masih bisa di-retry, kembalikan ke pending. Jika tidak, tandai failed.
+            if (newRetryCount <= MAX_RETRIES) {
+                batch.update(doc.ref, { status: 'pending', retryCount: newRetryCount, error: errorMsg });
+            } else {
+                batch.update(doc.ref, { status: 'failed', error: `Gagal permanen: ${errorMsg}` });
+            }
         });
         await batch.commit();
         log(`[FAIL-SAFE] ${snapshot.size} tugas macet berhasil direset.`, 'success');
@@ -279,7 +311,10 @@ async function main() {
         log(`Server Express berjalan di port ${PORT}`, 'success');
     });
 
+    // Jalankan pembersihan tugas macet setiap 2 menit
     setInterval(cleanupStaleJobs, STALE_JOB_TIMEOUT_MINUTES * 60 * 1000);
 }
 
 main();
+
+    
