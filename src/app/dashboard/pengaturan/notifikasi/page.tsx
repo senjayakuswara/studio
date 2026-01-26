@@ -71,11 +71,11 @@ export default function NotifikasiPage() {
 
     const handleDelete = async (jobId: string) => {
         setIsProcessingAction(jobId);
-        try {
-            await deleteNotificationJob(jobId);
+        const result = await deleteNotificationJob(jobId);
+        if (result.success) {
             toast({ title: "Dihapus", description: "Notifikasi telah dihapus dari antrean." });
-        } catch (error) {
-            toast({ variant: "destructive", title: "Gagal Menghapus" });
+        } else {
+            toast({ variant: "destructive", title: "Gagal Menghapus", description: result.error });
         }
         setIsProcessingAction(null);
     };

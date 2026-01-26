@@ -179,9 +179,15 @@ export async function retryNotificationJob(jobId: string): Promise<{ success: bo
  * Deletes a notification job from the queue.
  * @param jobId The ID of the notification job in Firestore.
  */
-export async function deleteNotificationJob(jobId: string): Promise<void> {
-    const jobRef = doc(db, "notification_queue", jobId);
-    await deleteDoc(jobRef);
+export async function deleteNotificationJob(jobId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const jobRef = doc(db, "notification_queue", jobId);
+        await deleteDoc(jobRef);
+        return { success: true };
+    } catch (e: any) {
+        console.error(`Failed to delete job ${jobId}`, e);
+        return { success: false, error: e.message };
+    }
 }
 
 /**
