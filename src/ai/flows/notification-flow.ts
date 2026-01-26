@@ -3,8 +3,6 @@
 /**
  * @fileOverview Handles queuing notifications to Firestore.
  * - notifyOnAttendance: Queues a real-time attendance notification.
- * - retryNotificationJob: Retries a failed notification job.
- * - deleteNotificationJob: Deletes a job from the notification queue.
  * - queueMonthlyRecapToParent: Queues a monthly recap for a student's parent.
  */
 
@@ -153,41 +151,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const message = messageLines.join("\n");
     
     await queueNotification(studentWaNumber, message, 'attendance', { studentId: record.studentId, studentName: record.studentName, nisn: record.nisn });
-}
-
-/**
- * Retries a failed notification job by resetting its status to 'pending'.
- * @param jobId The ID of the notification job in Firestore.
- */
-export async function retryNotificationJob(jobId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-        const jobRef = doc(db, "notification_queue", jobId);
-        await updateDoc(jobRef, {
-            status: 'pending',
-            retryCount: 0, // Reset retry count for manual retry
-            error: 'Retrying manually...',
-        });
-        return { success: true };
-    } catch (e: any) {
-        console.error(`Failed to retry job ${jobId}`, e);
-        return { success: false, error: e.message };
-    }
-}
-
-
-/**
- * Deletes a notification job from the queue.
- * @param jobId The ID of the notification job in Firestore.
- */
-export async function deleteNotificationJob(jobId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-        const jobRef = doc(db, "notification_queue", jobId);
-        await deleteDoc(jobRef);
-        return { success: true };
-    } catch (e: any) {
-        console.error(`Failed to delete job ${jobId}`, e);
-        return { success: false, error: e.message };
-    }
 }
 
 /**

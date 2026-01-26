@@ -2,12 +2,12 @@
 "use client"
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, limit } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot, limit, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { format, formatDistanceToNow } from "date-fns";
 import { id as localeID } from "date-fns/locale";
-import { retryNotificationJob, deleteNotificationJob, type NotificationJob } from "@/ai/flows/notification-flow";
+import { type NotificationJob } from "@/ai/flows/notification-flow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -60,22 +60,28 @@ export default function NotifikasiPage() {
 
     const handleRetry = async (jobId: string) => {
         setIsProcessingAction(jobId);
-        const result = await retryNotificationJob(jobId);
-        if (result.success) {
+        try {
+            const jobRef = doc(db, "notification_queue", jobId);
+            await updateDoc(jobRef, {
+                status: 'pending',
+                retryCount: 0, // Reset retry count for manual retry
+                error: 'Retrying manually...',
+            });
             toast({ title: "Tugas Dikirim Ulang", description: "Notifikasi telah ditambahkan kembali ke antrean." });
-        } else {
-            toast({ variant: "destructive", title: "Gagal", description: result.error });
+        } catch (e: any) {
+             toast({ variant: "destructive", title: "Gagal", description: e.message });
         }
         setIsProcessingAction(null);
     };
 
     const handleDelete = async (jobId: string) => {
         setIsProcessingAction(jobId);
-        const result = await deleteNotificationJob(jobId);
-        if (result.success) {
+        try {
+            const jobRef = doc(db, "notification_queue", jobId);
+            await deleteDoc(jobRef);
             toast({ title: "Dihapus", description: "Notifikasi telah dihapus dari antrean." });
-        } else {
-            toast({ variant: "destructive", title: "Gagal Menghapus", description: result.error });
+        } catch (e: any) {
+            toast({ variant: "destructive", title: "Gagal Menghapus", description: e.message });
         }
         setIsProcessingAction(null);
     };
