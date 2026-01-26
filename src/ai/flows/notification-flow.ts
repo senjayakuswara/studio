@@ -10,8 +10,8 @@
 
 import { doc, getDoc, addDoc, collection, updateDoc, deleteDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns";
 import { id as localeID } from "date-fns/locale";
+import { formatInTimeZone } from "date-fns-tz";
 
 // Types
 type Class = { id: string; name: string; grade: string };
@@ -133,9 +133,11 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         return;
     }
 
-    const wibDate = new Date(timestampStr); 
-    const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID });
-    const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID });
+    const wibDate = new Date(timestampStr); // This correctly parses the UTC ISO string
+    const timeZone = "Asia/Jakarta"; // WIB timezone
+
+    const formattedDate = formatInTimeZone(wibDate, timeZone, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = formatInTimeZone(wibDate, timeZone, "HH:mm:ss", { locale: localeID });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
@@ -197,7 +199,7 @@ export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData,
 
     const { summary, studentInfo } = studentData;
     const totalHadir = summary.H + summary.T;
-    const monthName = format(new Date(year, month), "MMMM yyyy", { locale: localeID });
+    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
 
     const messageLines = [
         "🏫 *SMAS PGRI Naringgul*",
