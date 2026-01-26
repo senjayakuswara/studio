@@ -109,6 +109,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null);
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+    const audioContextRef = useRef<AudioContext | null>(null);
     const { toast } = useToast()
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
@@ -127,12 +128,11 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     }, [])
 
     useEffect(() => {
-        // Check for secure context as it's a common reason for camera failure.
         if (window.location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
             const message = "Kamera mungkin tidak berfungsi karena halaman ini tidak aman (bukan HTTPS).";
             addLog(message, "warning");
             setCameraError(message);
-            return; // Stop further execution if context is not secure
+            return;
         }
 
         Html5Qrcode.getCameras()
@@ -170,14 +170,22 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             scannerInputRef.current?.focus();
         }
     }, [isProcessing]);
-
-    const playSound = (type: 'success' | 'error') => {
+    
+    const playSound = useCallback(async (type: 'success' | 'error') => {
         try {
-            // @ts-ignore
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (!audioContextRef.current) {
+                // @ts-ignore
+                audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            const audioContext = audioContextRef.current;
             if (!audioContext) {
-                console.warn("Web Audio API is not supported in this browser.");
+                console.warn("Web Audio API is not supported.");
                 return;
+            }
+
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
             }
 
             const oscillator = audioContext.createOscillator();
@@ -188,23 +196,24 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             if (type === 'success') {
                 oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
-                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime); // Lower volume
+                oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.5);
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + 0.5);
-            } else { // error
+            } else {
                 oscillator.type = 'square';
-                oscillator.frequency.setValueAtTime(220, audioContext.currentTime); // A3 note
-                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime); // Lower volume
+                oscillator.frequency.setValueAtTime(220, audioContext.currentTime);
+                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.3);
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + 0.3);
             }
         } catch (e) {
             console.error("Could not play sound due to an error:", e);
+            addLog("Gagal memutar suara notifikasi.", "warning");
         }
-    };
+    }, [addLog]);
 
     useEffect(() => {
         async function fetchData() {
@@ -384,7 +393,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             addLog(logMessage, 'success');
             setHighlightedNisn({ nisn: student.nisn, type: 'success' });
             
-            playSound('success');
+            await playSound('success');
             
             try {
               await notifyOnAttendance({
@@ -408,7 +417,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
             addLog(`${student ? student.nama + ': ' : ''}${errorMessage}`, 'error');
             setHighlightedNisn({ nisn: trimmedNisn, type: 'error' });
-            playSound('error');
+            await playSound('error');
             toast({
                 variant: "destructive",
                 title: "Absensi Gagal",
