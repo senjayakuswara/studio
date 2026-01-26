@@ -25,7 +25,6 @@ let db;
 let client;
 let googleSheetsClient;
 let isWhatsAppReady = false;
-let isProcessingQueue = false;
 
 const app = express();
 app.use(cors());
@@ -108,7 +107,8 @@ function initializeWhatsApp() {
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
         io.emit('status', 'WhatsApp Terhubung!');
-        listenForNotificationJobs();
+        // Memulai pemroses antrean yang baru
+        processQueue();
     });
 
     client.on('auth_failure', msg => {
@@ -211,45 +211,46 @@ async function processJob(job) {
     }
 }
 
-// [REWORK] Logika listener antrean yang baru dan lebih tangguh
-function listenForNotificationJobs() {
-    log(`Mendengarkan tugas notifikasi dari Firestore...`);
-    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(1);
+// [REWORK] Logika antrean rekursif yang baru dan lebih tangguh
+async function processQueue() {
+    // 1. Berhenti memproses jika WhatsApp tidak siap
+    if (!isWhatsAppReady) {
+        log("Koneksi WhatsApp terputus, pemrosesan antrean dihentikan sementara.", "warn");
+        setTimeout(processQueue, 15000); // Cek kembali status koneksi dalam 15 detik
+        return;
+    }
 
-    q.onSnapshot(snapshot => {
-        // Guard: Jangan lakukan apa-apa jika antrean sedang diproses, WA belum siap, atau tidak ada tugas
-        if (snapshot.empty || isProcessingQueue || !isWhatsAppReady) {
+    // 2. Ambil SATU tugas paling lama yang masih pending
+    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(1);
+    
+    try {
+        const snapshot = await q.get();
+
+        // 3. Jika tidak ada tugas, tunggu dan cek lagi nanti
+        if (snapshot.empty) {
+            setTimeout(processQueue, 5000); // Tidak ada tugas, cek lagi dalam 5 detik
             return;
         }
 
-        // 1. Kunci antrean agar tidak ada proses lain yang berjalan
-        isProcessingQueue = true; 
-        
+        // 4. Jika ada tugas, proses
         const jobDoc = snapshot.docs[0];
         const jobData = { id: jobDoc.id, ...jobDoc.data() };
         
-        log(`Tugas baru ditemukan: ${jobData.id}`);
+        log(`Memproses tugas: ${jobData.id}`);
+        await processJob(jobData);
 
-        // 2. Proses tugas. `finally` akan selalu dijalankan setelahnya.
-        processJob(jobData)
-            .finally(() => {
-                // 3. Setelah tugas selesai (berhasil atau gagal), tunggu jeda acak
-                const delay = getRandomDelay();
-                log(`Menunggu jeda ${delay / 1000} detik...`);
-                
-                // 4. Setelah jeda selesai, buka kembali kunci antrean.
-                //    Ini akan memicu onSnapshot untuk mengambil tugas berikutnya jika ada.
-                setTimeout(() => { 
-                    isProcessingQueue = false; 
-                }, delay);
-            });
+        // 5. Setelah selesai, tunggu jeda acak sebelum memanggil diri sendiri lagi
+        const delay = getRandomDelay();
+        log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
+        setTimeout(processQueue, delay);
 
-    }, err => {
-        log(`Error mendengarkan Firestore: ${err.message}`, 'error');
-        // Jika listener error, pastikan kita membuka kunci agar bisa mencoba lagi
-        isProcessingQueue = false;
-    });
+    } catch (error) {
+        log(`Terjadi error pada loop pemrosesan antrean: ${error.message}`, 'error');
+        // Jika terjadi error pada loop utama, tunggu lebih lama sebelum mencoba lagi
+        setTimeout(processQueue, 30000);
+    }
 }
+
 
 async function cleanupStaleJobs() {
     log('[FAIL-SAFE] Menjalankan pembersihan tugas macet...');
