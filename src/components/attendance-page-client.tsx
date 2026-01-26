@@ -117,21 +117,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         return [...allStudents].sort((a, b) => a.nama.localeCompare(b.nama));
     }, [allStudents]);
 
-    useEffect(() => {
-        Html5Qrcode.getCameras()
-            .then(devices => {
-                if (devices && devices.length) {
-                    setAvailableCameras(devices);
-                    if (!selectedCameraId) {
-                        setSelectedCameraId(devices[0].id);
-                    }
-                }
-            })
-            .catch(err => {
-                console.error("Gagal mendapatkan perangkat kamera.", err);
-            });
-    }, [selectedCameraId]);
-
     const addLog = useCallback((message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
             timestamp: format(new Date(), "HH:mm:ss"),
@@ -140,6 +125,41 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
+
+    useEffect(() => {
+        // Check for secure context as it's a common reason for camera failure.
+        if (window.location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+            const message = "Kamera mungkin tidak berfungsi karena halaman ini tidak aman (bukan HTTPS).";
+            addLog(message, "warning");
+            setCameraError(message);
+            return; // Stop further execution if context is not secure
+        }
+
+        Html5Qrcode.getCameras()
+            .then(devices => {
+                if (devices && devices.length) {
+                    setAvailableCameras(devices);
+                    if (!selectedCameraId) {
+                        setSelectedCameraId(devices[0].id); 
+                    }
+                } else {
+                    const message = "Tidak ada perangkat kamera yang ditemukan.";
+                    setCameraError(message);
+                    addLog(message, "error");
+                }
+            })
+            .catch(err => {
+                let message = "Gagal mengakses perangkat kamera.";
+                if (err.name === "NotAllowedError") {
+                    message = "Izin kamera ditolak. Harap aktifkan izin kamera untuk situs ini di pengaturan browser Anda.";
+                } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                    message = "Tidak ada perangkat kamera yang ditemukan di perangkat ini.";
+                }
+                console.error("Gagal mendapatkan perangkat kamera.", err);
+                setCameraError(message);
+                addLog(message, "error");
+            });
+    }, [selectedCameraId, addLog]);
 
     const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || {};
@@ -408,7 +428,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
         html5QrCodeRef.current = null;
         setIsScannerOn(false);
-        setCameraError(null);
     }, []);
 
     const startScanner = useCallback(async () => {
@@ -431,7 +450,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             );
             addLog(`Scanner QR diaktifkan.`, "success");
         } catch (err: any) {
-            const errorMessage = err?.message || 'Gagal memulai kamera.';
+            let errorMessage = err?.message || 'Gagal memulai kamera.';
+            if (err.name === 'NotAllowedError') {
+                errorMessage = "Izin kamera ditolak. Harap izinkan akses di browser Anda.";
+            } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+                 errorMessage = "Kamera yang dipilih tidak ditemukan.";
+            }
             setCameraError(errorMessage);
             addLog(`Error kamera: ${errorMessage}`, "error");
             await stopScanner();
@@ -542,7 +566,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardContent className="flex flex-col items-center gap-4">
                      <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
                         <div id="qr-reader" className="w-full h-full" />
-                         {!isScannerOn && (
+                         {!isScannerOn && !cameraError && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
                                 <QrCode className="h-10 w-10 text-muted-foreground" />
                                 <p className="mt-2 text-sm text-muted-foreground">Scanner QR tidak aktif.</p>
@@ -556,7 +580,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         )}
                     </div>
                      <div className="w-full flex gap-2">
-                        <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={isScannerOn}>
+                        <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={isScannerOn || !!cameraError || availableCameras.length === 0}>
                             <SelectTrigger className="w-full">
                                 <SelectValue placeholder="Pilih Perangkat Kamera..." />
                             </SelectTrigger>
@@ -566,7 +590,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Button className="w-full" onClick={() => isScannerOn ? stopScanner() : startScanner()} disabled={!selectedCameraId} variant={isScannerOn ? 'destructive' : 'default'}>
+                        <Button className="w-full" onClick={() => isScannerOn ? stopScanner() : startScanner()} disabled={!selectedCameraId || !!cameraError} variant={isScannerOn ? 'destructive' : 'default'}>
                             {isScannerOn ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
                             {isScannerOn ? 'Matikan Scanner' : 'Nyalakan Scanner'}
                         </Button>
