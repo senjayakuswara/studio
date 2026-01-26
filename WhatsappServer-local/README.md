@@ -1,55 +1,59 @@
-# AbTrack - Server Notifikasi WhatsApp (Mode Firestore)
+# AbTrack - Server Notifikasi WhatsApp (v5.0 - Arsitektur Express.js)
 
-Ini adalah panduan untuk menjalankan server notifikasi WhatsApp yang terintegrasi dengan database Firestore aplikasi Anda.
+Ini adalah panduan untuk menjalankan server notifikasi WhatsApp yang telah dirombak total untuk keandalan maksimum, dengan integrasi Express.js, Socket.IO, dan logging ke Google Sheets.
 
-## Konsep Dasar
+## Konsep Arsitektur Baru
 
-Server ini bekerja dengan cara yang lebih cerdas dan andal:
-1.  **Aplikasi Web Menambah Tugas:** Ketika notifikasi perlu dikirim (misalnya, saat siswa absen), aplikasi web Anda tidak langsung mencoba mengirim WA. Sebaliknya, ia hanya menulis "tugas" baru ke dalam koleksi `notification_queue` di database Firestore Anda dengan status `pending`.
-2.  **Server Lokal Menarik Tugas:** Server lokal ini secara terus-menerus memantau koleksi `notification_queue`. Ketika ia melihat ada tugas baru, ia akan mengambilnya.
-3.  **Mengirim & Melaporkan:** Server akan mencoba mengirim pesan WhatsApp. Setelah selesai, ia akan memperbarui status tugas di Firestore menjadi `success` atau `failed`.
-4.  **Kontrol Penuh:** Anda bisa memantau seluruh proses ini secara *real-time* melalui menu **Pengaturan > Notifikasi** di aplikasi web Anda.
-
-**Keuntungan:**
--   **Tidak Ada Pesan Hilang:** Jika server ini mati, tugas akan aman menunggu di database.
--   **Tangguh:** Server dirancang untuk tidak macet. Jika pengiriman gagal, statusnya akan diperbarui, dan Anda bisa mencoba mengirim ulang dari aplikasi web.
--   **Tidak Perlu `ngrok`:** Server ini bekerja secara mandiri.
+Server ini sekarang bukan lagi skrip sederhana, melainkan aplikasi Node.js yang lebih tangguh:
+1.  **Basis Express.js & Socket.IO:** Server berjalan di atas Express.js dan membuka koneksi Socket.IO. Ini memungkinkan pemantauan status *real-time* dari aplikasi web di masa depan (misalnya, melihat apakah WA terhubung langsung dari dasbor).
+2.  **Antrean Firestore Fail-Safe:** Aplikasi web tetap hanya menulis "tugas" ke koleksi `notification_queue`. Server lokal akan mengambilnya satu per satu, dengan mekanisme anti-macet dan pemulihan otomatis jika terjadi *timeout*.
+3.  **Logging ke Google Sheets:** Setiap notifikasi yang **berhasil** terkirim akan secara otomatis dicatat dalam baris baru di Google Sheet yang Anda tentukan, memberikan jejak audit yang kuat.
+4.  **Keandalan Maksimum:** Dengan "pemanasan" chat dan timeout pengiriman, error `markedUnread` dan server "terdiam" telah diatasi secara fundamental.
 
 ## Setup Awal (Hanya Dilakukan Sekali)
 
-1.  **Buka Terminal:** Buka Command Prompt, PowerShell, atau Terminal.
-2.  **Masuk ke Folder Server:** Gunakan perintah `cd` untuk menavigasi ke dalam folder `WhatsappServer-local` di proyek Anda.
-3.  **Jalankan Instalasi:** Jalankan perintah ini:
-    ```
-    npm install
-    ```
-    Tunggu hingga proses selesai.
+1.  **Instalasi Dependensi:**
+    *   Buka Terminal (CMD/PowerShell).
+    *   Navigasi ke folder `WhatsappServer-local` (`cd path/to/WhatsappServer-local`).
+    *   Jalankan: `npm install`.
+
+2.  **Siapkan Kredensial Firebase:**
+    *   Pastikan file `credentials.json` dari Firebase Console Anda sudah ada di dalam folder ini.
+
+3.  **Siapkan Kredensial Google Sheets (PENTING untuk Logging):**
+    *   Buka Google Cloud Console.
+    *   Pastikan Anda berada di proyek yang sama dengan Firebase Anda.
+    *   Navigasi ke **APIs & Services > Library**. Cari dan **aktifkan "Google Sheets API"**.
+    *   Navigasi ke **APIs & Services > Credentials**.
+    *   Klik **Create Credentials > Service Account**.
+    *   Beri nama (misal: "whatsapp-sheets-logger"), klik **Create and Continue**, lalu **Done**.
+    *   Temukan service account yang baru dibuat, klik ikon pensil (Edit).
+    *   Pergi ke tab **Keys > Add Key > Create new key**. Pilih **JSON** dan klik **Create**.
+    *   Sebuah file JSON akan terunduh. **Ganti namanya menjadi `sheets-credentials.json`** dan letakkan di dalam folder `WhatsappServer-local` ini.
+    *   Buka Google Sheet yang ingin Anda gunakan untuk log. Klik **Share**, dan bagikan akses "Editor" ke alamat email service account yang baru Anda buat (terlihat di detail service account).
+
+4.  **Konfigurasi Spreadsheet:**
+    *   Buka file `config.json`.
+    *   Ganti `"YOUR_SPREADSHEET_ID_HERE"` dengan ID spreadsheet Anda (dari URL Google Sheet).
 
 ## Alur Kerja Harian
 
-1.  **Buka Terminal & Masuk ke Folder Server.**
-2.  **Jalankan Server:**
-    ```
-    node server.js
-    ```
-3.  **Pindai QR Code (Jika Diperlukan):**
-    *   Saat pertama kali, atau jika sesi berakhir, sebuah QR code akan muncul.
-    *   Buka WhatsApp di HP Anda > **Setelan > Perangkat Tertaut > Tautkan Perangkat**, lalu pindai QR code tersebut.
-    *   Setelah berhasil, terminal akan menampilkan: `WhatsApp Terhubung!`.
-
-4.  **Biarkan Tetap Berjalan:** Jendela terminal ini harus tetap terbuka selama jam sekolah.
+1.  Buka Terminal & masuk ke folder `WhatsappServer-local`.
+2.  Jalankan server: `node server.js`
+3.  **Pindai QR Code:** Saat pertama kali, pindai QR code yang muncul menggunakan WhatsApp di HP Anda.
+4.  Biarkan terminal tetap berjalan. Terminal akan menampilkan log pengiriman secara *real-time*.
 
 ## Pemecahan Masalah (WAJIB DIBACA JIKA NOTIFIKASI GAGAL)
 
 ### Error Paling Umum: `Gagal mengirim pesan... markedUnread` atau Server Macet
 
-Ini adalah error yang paling sering terjadi pada `whatsapp-web.js`. Ini hampir selalu berarti **sesi login Anda di server telah rusak (corrupt)**. Tidak ada perubahan kode yang bisa memperbaikinya, solusinya adalah **mereset sesi login secara manual**.
+Ini hampir selalu berarti **sesi login Anda di server telah rusak (corrupt)**. Solusinya adalah **mereset sesi login secara manual**.
 
-**Solusi Cepat dan Paling Andal (Wajib Dilakukan Sekarang):**
+**Solusi Cepat dan Paling Andal:**
 
-1.  **Hentikan Server:** Tutup jendela terminal tempat `node server.js` berjalan.
-2.  **Hapus Folder Sesi:** Di dalam folder `WhatsappServer-local` Anda, cari dan **HAPUS** seluruh folder yang bernama `.wwebjs_auth`. Jangan khawatir, ini 100% aman. Folder ini akan dibuat ulang secara otomatis.
-3.  **Jalankan Ulang Server:** Buka kembali terminal, masuk ke folder `WhatsappServer-local`, dan jalankan lagi `node server.js`.
-4.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru. Ini akan membuat sesi yang baru dan bersih.
+1.  **Hentikan Server:** Tutup jendela terminal.
+2.  **Hapus Folder Sesi:** Di dalam folder `WhatsappServer-local`, cari dan **HAPUS** seluruh folder yang bernama `.wwebjs_auth`. Ini 100% aman.
+3.  **Jalankan Ulang Server:** Buka kembali terminal dan jalankan `node server.js`.
+4.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru.
 
-Setelah langkah-langkah ini, error `markedUnread` seharusnya hilang dan notifikasi akan terkirim dengan andal. Lakukan langkah-langkah ini setiap kali Anda menghadapi masalah pengiriman yang tidak bisa dijelaskan.
+Lakukan langkah ini setiap kali Anda menghadapi masalah pengiriman yang tidak bisa dijelaskan.
