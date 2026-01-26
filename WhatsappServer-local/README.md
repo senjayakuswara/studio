@@ -37,12 +37,14 @@ Server ini sekarang bukan lagi skrip sederhana, melainkan aplikasi Node.js yang 
     *   Buka file `config.json`.
     *   Ganti `"YOUR_SPREADSHEET_ID_HERE"` dengan ID spreadsheet Anda (dari URL Google Sheet).
 
-## Alur Kerja Harian
+## Alur Kerja Harian (Cara Menjalankan Server)
+
+Ini adalah langkah yang Anda lakukan setiap hari. Sangat sederhana:
 
 1.  Buka Terminal & masuk ke folder `WhatsappServer-local`.
-2.  Jalankan server: `node server.js`
-3.  **Pindai QR Code:** Saat pertama kali, pindai QR code yang muncul menggunakan WhatsApp di HP Anda.
-4.  Biarkan terminal tetap berjalan. Terminal akan menampilkan log pengiriman secara *real-time*.
+2.  Jalankan server dengan perintah: `node server.js`
+3.  **Pindai QR Code:** Jika ini pertama kalinya, pindai QR code yang muncul menggunakan WhatsApp di HP Anda.
+4.  **Selesai.** Biarkan jendela terminal tetap berjalan di latar belakang. Ia akan menangani semuanya secara otomatis.
 
 ## Pemecahan Masalah (WAJIB DIBACA JIKA NOTIFIKASI GAGAL)
 
@@ -57,4 +59,4 @@ Ini hampir selalu berarti **sesi login Anda di server telah rusak (corrupt)**. S
 3.  **Jalankan Ulang Server:** Buka kembali terminal dan jalankan `node server.js`.
 4.  **Pindai Ulang QR Code:** Anda akan diminta untuk memindai QR code baru.
 
-Lakukan langkah ini setiap kali Anda menghadapi masalah pengiriman yang tidak bisa dijelaskan.
+Lakukan langkah ini setiap kali Anda menghadapi masalah pengiriman yang tidak bisa dijelaskan. Ini akan menyelesaikan 99% masalah.
