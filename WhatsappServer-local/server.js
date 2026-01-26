@@ -94,11 +94,7 @@ function initializeWhatsApp() {
         authStrategy: new LocalAuth(),
         puppeteer: {
             headless: true,
-            // Konfigurasi Puppeteer yang paling umum dan stabil
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-            ],
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
         },
     });
 
@@ -113,7 +109,6 @@ function initializeWhatsApp() {
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
         io.emit('status', 'WhatsApp Terhubung!');
-        // Hanya mulai mendengarkan antrean setelah WhatsApp benar-benar siap
         listenForNotificationJobs();
     });
 
@@ -127,7 +122,6 @@ function initializeWhatsApp() {
         log(`Koneksi WhatsApp terputus: ${reason}. Coba menghubungkan kembali...`, 'error');
         io.emit('status', 'Koneksi Terputus');
         isWhatsAppReady = false;
-        // Coba inisialisasi ulang jika terputus
         client.initialize().catch(err => log(`Gagal restart otomatis: ${err.message}`, 'error'));
     });
 
@@ -155,20 +149,14 @@ async function appendToSheet(data) {
     }
 }
 
-/**
- * [DIRUBAH] Fungsi pengiriman pesan dengan teknik "pemanasan" chat
- * untuk mencegah error `markedUnread`.
- */
 async function sendWhatsAppMessage(recipientNumber, message) {
     const sanitizedNumber = recipientNumber.replace(/\D/g, '');
     const finalNumber = sanitizedNumber.startsWith('0') ? '62' + sanitizedNumber.substring(1) : sanitizedNumber;
     const recipientId = `${finalNumber}@c.us`;
     
-    // 1. "Pemanasan" chat. Ini adalah langkah krusial untuk mencegah error.
     log(`Memanaskan chat untuk ${recipientId}...`);
     await client.getChatById(recipientId);
 
-    // 2. Kirim pesan setelah pemanasan.
     log(`Mengirim pesan ke ${recipientId}...`);
     const sendMessagePromise = client.sendMessage(recipientId, message);
     
@@ -183,23 +171,34 @@ async function processJob(job) {
     if (!job || !job.id) return;
     const jobRef = db.collection('notification_queue').doc(job.id);
     
+    // [PERBAIKAN] Logika cerdas untuk menemukan nomor telepon dan pesan
+    const phoneNumber = job.phone || (job.payload ? job.payload.recipient : undefined);
+    const messageContent = job.message || (job.payload ? job.payload.message : undefined);
+
+    if (!phoneNumber || !messageContent) {
+        const errorMsg = "Tugas notifikasi tidak memiliki format yang benar (tidak ada nomor telepon atau pesan).";
+        log(`Gagal memproses tugas ${job.id}: ${errorMsg}`, 'error');
+        await jobRef.update({ status: 'failed', error: errorMsg, processedAt: Timestamp.now() });
+        return;
+    }
+
     try {
         log(`Mengunci tugas ${job.id} sebagai 'processing'.`);
         await jobRef.update({ status: 'processing', lockedAt: Timestamp.now() });
         
-        await sendWhatsAppMessage(job.phone, job.message);
+        await sendWhatsAppMessage(phoneNumber, messageContent);
         
-        log(`Pesan ke ${job.phone} berhasil dikirim.`, 'success');
+        log(`Pesan ke ${phoneNumber} berhasil dikirim.`, 'success');
         await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null });
 
         if (job.metadata?.studentId) {
             await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'valid' });
         }
-        await appendToSheet([new Date().toISOString(), job.phone, job.metadata?.studentName || '', 'sent', job.message]);
+        await appendToSheet([new Date().toISOString(), phoneNumber, job.metadata?.studentName || '', 'sent', messageContent]);
 
     } catch (error) {
         const errorMessage = error.message || 'Terjadi error tidak diketahui.';
-        log(`Gagal memproses tugas ${job.id} untuk ${job.phone}: ${errorMessage}`, 'error');
+        log(`Gagal memproses tugas ${job.id} untuk ${phoneNumber}: ${errorMessage}`, 'error');
 
         const newRetryCount = (job.retryCount || 0) + 1;
         if (newRetryCount <= MAX_RETRIES) {
@@ -209,12 +208,11 @@ async function processJob(job) {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
             
-            // Tandai nomor WA tidak valid jika error spesifik ini muncul
             if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
             }
         }
-        await appendToSheet([new Date().toISOString(), job.phone, job.metadata?.studentName || '', 'failed', errorMessage]);
+        await appendToSheet([new Date().toISOString(), phoneNumber, job.metadata?.studentName || '', 'failed', errorMessage]);
     }
 }
 
