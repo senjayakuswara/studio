@@ -217,7 +217,7 @@ async function processJob(job) {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
             // Jika error karena nomor tidak ada, tandai sebagai tidak valid
-            if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user"))) {
+            if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
             }
         }
@@ -311,10 +311,8 @@ async function main() {
         log(`Server Express berjalan di port ${PORT}`, 'success');
     });
 
-    // Jalankan pembersihan tugas macet setiap 2 menit
-    setInterval(cleanupStaleJobs, STALE_JOB_TIMEOUT_MINUTES * 60 * 1000);
+    // Jalankan pembersihan tugas macet setiap 1 menit
+    setInterval(cleanupStaleJobs, 60 * 1000);
 }
 
 main();
-
-    

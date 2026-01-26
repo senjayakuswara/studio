@@ -70,7 +70,7 @@ async function queueNotification(recipient: string, message: string, type: 'atte
     const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
     const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
 
-    const jobPayload: Omit<NotificationJobPayload, 'id'> = {
+    const jobPayload: Omit<NotificationJob, 'id'> = {
         phone: recipient,
         message: finalMessage,
         status: 'pending',
