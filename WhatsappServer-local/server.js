@@ -209,6 +209,7 @@ async function processJob(job) {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
             
+            // Tandai nomor WA tidak valid jika error spesifik ini muncul
             if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
             }
