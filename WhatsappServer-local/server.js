@@ -17,7 +17,6 @@ const config = require('./config.json');
 // =================================================================================
 
 const PORT = process.env.PORT || 8000;
-const BATCH_LIMIT = 1;
 const MAX_RETRIES = 1;
 const STALE_JOB_TIMEOUT_MINUTES = 2; 
 const SEND_MESSAGE_TIMEOUT_MS = 45000; // Timeout pengiriman pesan dinaikkan menjadi 45 detik
@@ -154,9 +153,6 @@ async function sendWhatsAppMessage(recipientNumber, message) {
     const finalNumber = sanitizedNumber.startsWith('0') ? '62' + sanitizedNumber.substring(1) : sanitizedNumber;
     const recipientId = `${finalNumber}@c.us`;
     
-    log(`Memanaskan chat untuk ${recipientId}...`);
-    await client.getChatById(recipientId);
-
     log(`Mengirim pesan ke ${recipientId}...`);
     const sendMessagePromise = client.sendMessage(recipientId, message);
     
@@ -171,14 +167,13 @@ async function processJob(job) {
     if (!job || !job.id) return;
     const jobRef = db.collection('notification_queue').doc(job.id);
     
-    // [PERBAIKAN] Logika cerdas untuk menemukan nomor telepon dan pesan
     const phoneNumber = job.phone || (job.payload ? job.payload.recipient : undefined);
     const messageContent = job.message || (job.payload ? job.payload.message : undefined);
 
     if (!phoneNumber || !messageContent) {
         const errorMsg = "Tugas notifikasi tidak memiliki format yang benar (tidak ada nomor telepon atau pesan).";
         log(`Gagal memproses tugas ${job.id}: ${errorMsg}`, 'error');
-        await jobRef.update({ status: 'failed', error: errorMsg, processedAt: Timestamp.now() });
+        await jobRef.update({ status: 'failed', error: errorMsg, processedAt: Timestamp.now(), lockedAt: null });
         return;
     }
 
@@ -189,7 +184,7 @@ async function processJob(job) {
         await sendWhatsAppMessage(phoneNumber, messageContent);
         
         log(`Pesan ke ${phoneNumber} berhasil dikirim.`, 'success');
-        await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null });
+        await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null, lockedAt: null });
 
         if (job.metadata?.studentId) {
             await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'valid' });
@@ -203,10 +198,10 @@ async function processJob(job) {
         const newRetryCount = (job.retryCount || 0) + 1;
         if (newRetryCount <= MAX_RETRIES) {
             log(`Tugas ${job.id} akan dicoba kembali (percobaan ke-${newRetryCount}).`);
-            await jobRef.update({ status: 'pending', retryCount: newRetryCount, error: `Percobaan gagal: ${errorMessage}` });
+            await jobRef.update({ status: 'pending', retryCount: newRetryCount, error: `Percobaan gagal: ${errorMessage}`, lockedAt: null });
         } else {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
-            await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}` });
+            await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}`, lockedAt: null });
             
             if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
                  await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
@@ -216,29 +211,43 @@ async function processJob(job) {
     }
 }
 
+// [REWORK] Logika listener antrean yang baru dan lebih tangguh
 function listenForNotificationJobs() {
     log(`Mendengarkan tugas notifikasi dari Firestore...`);
-    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(BATCH_LIMIT);
+    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(1);
 
     q.onSnapshot(snapshot => {
-        if (isProcessingQueue || !isWhatsAppReady) return;
+        // Guard: Jangan lakukan apa-apa jika antrean sedang diproses, WA belum siap, atau tidak ada tugas
+        if (snapshot.empty || isProcessingQueue || !isWhatsAppReady) {
+            return;
+        }
 
-        snapshot.docChanges().forEach(async (change) => {
-            if (change.type === 'added') {
-                isProcessingQueue = true;
-                const jobData = { id: change.doc.id, ...change.doc.data() };
-                log(`Tugas baru ditemukan: ${jobData.id}`);
-                try {
-                    await processJob(jobData);
-                } finally {
-                    const delay = getRandomDelay();
-                    log(`Menunggu jeda ${delay / 1000} detik...`);
-                    setTimeout(() => { isProcessingQueue = false; }, delay);
-                }
-            }
-        });
+        // 1. Kunci antrean agar tidak ada proses lain yang berjalan
+        isProcessingQueue = true; 
+        
+        const jobDoc = snapshot.docs[0];
+        const jobData = { id: jobDoc.id, ...jobDoc.data() };
+        
+        log(`Tugas baru ditemukan: ${jobData.id}`);
+
+        // 2. Proses tugas. `finally` akan selalu dijalankan setelahnya.
+        processJob(jobData)
+            .finally(() => {
+                // 3. Setelah tugas selesai (berhasil atau gagal), tunggu jeda acak
+                const delay = getRandomDelay();
+                log(`Menunggu jeda ${delay / 1000} detik...`);
+                
+                // 4. Setelah jeda selesai, buka kembali kunci antrean.
+                //    Ini akan memicu onSnapshot untuk mengambil tugas berikutnya jika ada.
+                setTimeout(() => { 
+                    isProcessingQueue = false; 
+                }, delay);
+            });
+
     }, err => {
         log(`Error mendengarkan Firestore: ${err.message}`, 'error');
+        // Jika listener error, pastikan kita membuka kunci agar bisa mencoba lagi
+        isProcessingQueue = false;
     });
 }
 
@@ -264,7 +273,7 @@ async function cleanupStaleJobs() {
             if (newRetryCount <= MAX_RETRIES) {
                 batch.update(doc.ref, { status: 'pending', retryCount: newRetryCount, error: errorMsg, lockedAt: null });
             } else {
-                batch.update(doc.ref, { status: 'failed', error: `Gagal permanen: ${errorMsg}` });
+                batch.update(doc.ref, { status: 'failed', error: `Gagal permanen: ${errorMsg}`, lockedAt: null });
             }
         });
         await batch.commit();
