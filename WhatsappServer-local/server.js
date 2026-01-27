@@ -89,7 +89,7 @@ async function initializeGoogleSheets() {
 function initializeWhatsApp() {
     log('Menginisialisasi WhatsApp Client...');
     client = new Client({
-        authStrategy: new LocalAuth(),
+        authStrategy: new LocalAuth({ clientId: "abtrack-server" }),
         puppeteer: {
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
