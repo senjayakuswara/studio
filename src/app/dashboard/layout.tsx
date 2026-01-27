@@ -18,9 +18,7 @@ import {
   Loader2,
   Printer,
   School,
-  Send,
   Settings,
-  Smile,
   Users,
 } from "lucide-react"
 
@@ -261,17 +259,6 @@ export default function DashboardLayout({
                   >
                     <BookCopy />
                     <span>Kelas</span>
-                  </SidebarMenuButton>
-                </Link>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <Link href="/dashboard/pengaturan/notifikasi">
-                  <SidebarMenuButton
-                    tooltip="Antrean Notifikasi"
-                    isActive={isActive("/dashboard/pengaturan/notifikasi")}
-                  >
-                    <Send />
-                    <span>Notifikasi</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

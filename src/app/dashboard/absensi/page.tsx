@@ -76,11 +76,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
-import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
+type Student = { id: string; nisn: string; nama: string; classId: string; }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
   id: string
@@ -99,7 +98,6 @@ type CombinedAttendanceRecord = Partial<AttendanceRecord> & {
   nisn: string;
   classId: string;
   classInfo?: Class,
-  parentWaNumber?: string
 }
 
 type ReportConfig = {
@@ -191,11 +189,9 @@ export default function AbsensiPage() {
       const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
       
       const combinedRecords = records.map(record => {
-        const studentInfo = studentList.find(s => s.id === record.studentId)
         return {
           ...record,
           classInfo: classMap.get(record.classId),
-          parentWaNumber: studentInfo?.parentWaNumber
         }
       }).sort((a,b) => {
           const classA = a.classInfo ? `${a.classInfo.grade}-${a.classInfo.name}` : ''
@@ -241,7 +237,6 @@ export default function AbsensiPage() {
           timestampMasuk: null,
           timestampPulang: null,
           classInfo: classMap.get(student.classId),
-          parentWaNumber: student.parentWaNumber,
         }))
       : attendanceRecords;
 
@@ -268,7 +263,6 @@ export default function AbsensiPage() {
         const deadlineTime = setSeconds(setMinutes(setHours(date, hours), minutes + (parseInt(schoolHours.toleransi) || 0)), 0);
         
         const batch = writeBatch(db);
-        const notificationPromises: Promise<any>[] = [];
         
         studentsToAttend.forEach(student => {
             const newRecord: Omit<AttendanceRecord, 'id'> & {recordDate: Timestamp} = {
@@ -284,27 +278,11 @@ export default function AbsensiPage() {
             };
             const docRef = doc(collection(db, "attendance"));
             batch.set(docRef, newRecord);
-
-            if (student.parentWaNumber) {
-                const serializableRecord: SerializableAttendanceRecord = {
-                    studentId: student.id,
-                    nisn: student.nisn,
-                    studentName: student.nama,
-                    classId: student.classId,
-                    status: "Hadir",
-                    timestampMasuk: deadlineTime.toISOString(),
-                    timestampPulang: null,
-                    recordDate: startOfDay(date).toISOString(),
-                    parentWaNumber: student.parentWaNumber,
-                };
-                notificationPromises.push(notifyOnAttendance(serializableRecord));
-            }
         });
 
         await batch.commit();
-        await Promise.all(notificationPromises);
 
-        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen dan notifikasi telah ditambahkan ke antrean.` });
+        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen.` });
         
         await fetchData(date);
 
@@ -546,7 +524,7 @@ export default function AbsensiPage() {
                                 <AlertDialogHeader>
                                     <AlertDialogTitle>Konfirmasi Absensi Massal</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir' dan menambahkan notifikasi ke antrean. Anda yakin?
+                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir'. Anda yakin?
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
@@ -702,5 +680,3 @@ export default function AbsensiPage() {
     </>
   )
 }
-
-    

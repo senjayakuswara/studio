@@ -6,7 +6,6 @@ import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, upda
 import { Html5Qrcode, type CameraDevice } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { notifyOnAttendance } from "@/ai/flows/notification-flow"
 import {
   Card,
   CardContent,
@@ -46,7 +45,6 @@ type Student = {
     classId: string, 
     grade: string, 
     jenisKelamin: "Laki-laki" | "Perempuan", 
-    parentWaNumber?: string,
     status?: "Aktif" | "Lulus" | "Pindah"
 }
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
@@ -62,7 +60,6 @@ type AttendanceRecord = {
   timestampPulang: Timestamp | null
   recordDate: Timestamp
   notes?: string
-  parentWaNumber?: string
 }
 type LogMessage = {
     timestamp: string
@@ -366,7 +363,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     status,
                     timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
                     recordDate: Timestamp.fromDate(startOfDay(now)),
-                    parentWaNumber: student.parentWaNumber
                 };
             } else if (!existingRecord.timestampPulang) {
                 tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
@@ -395,22 +391,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             
             await playSound('success');
             
-            try {
-              await notifyOnAttendance({
-                  ...finalRecord,
-                  timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() || null,
-                  timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() || null,
-                  recordDate: finalRecord.recordDate.toDate().toISOString(),
-              });
-            } catch (notificationError: any) {
-              console.error("Notification queueing failed:", notificationError);
-              toast({
-                  variant: "destructive",
-                  title: "Gagal Mengantrekan Notifikasi",
-                  description: notificationError.message || "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
-              });
-            }
-
             cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
 
         } catch (error: any) {
@@ -491,7 +471,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             timestampPulang: null,
             recordDate: existingRecord?.recordDate || Timestamp.fromDate(startOfDay(now)),
             notes: `Manual input: ${status}`,
-            parentWaNumber: student.parentWaNumber
         };
 
         try {
@@ -507,21 +486,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             
-            try {
-              await notifyOnAttendance({
-                  ...newRecord,
-                  timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() || null,
-                  timestampPulang: newRecord.timestampPulang?.toDate().toISOString() || null,
-                  recordDate: newRecord.recordDate.toDate().toISOString(),
-              });
-            } catch (notificationError: any) {
-              console.error("Notification queueing failed:", notificationError);
-              toast({
-                  variant: "destructive",
-                  title: "Gagal Mengantrekan Notifikasi",
-                  description: "Absensi berhasil, namun notifikasi gagal ditambahkan ke antrean. Periksa log server.",
-              });
-            }
 
         } catch (error: any) {
             console.error("Error updating manual attendance: ", error);

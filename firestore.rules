@@ -8,22 +8,14 @@ service cloud.firestore {
     // Aturan di bawah ini adalah pengecualian yang sangat spesifik
     // untuk proses yang berjalan tanpa konteks login admin.
 
-    // 1. Izinkan Server Action untuk MEMBUAT tugas notifikasi.
-    //    Ini penting agar halaman E-Absensi bisa mengantrekan notifikasi WhatsApp.
-    //    Aksi lainnya (baca, update, hapus) tetap memerlukan login.
-    match /notification_queue/{jobId} {
-      allow create: if true;
-      allow read, update, delete: if request.auth != null;
-    }
-
-    // 2. Izinkan Server Action untuk MEMBACA nama kelas untuk pesan notifikasi.
+    // 1. Izinkan Server Action untuk MEMBACA nama kelas untuk pesan notifikasi.
     //    'get' lebih aman daripada 'read' karena tidak mengizinkan 'list' (query semua).
     match /classes/{classId} {
       allow get: if true;
       allow list, write: if request.auth != null;
     }
 
-    // 3. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
+    // 2. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
     //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi
     //    sebelum admin berhasil masuk.
     match /settings/appConfig {
@@ -40,5 +32,3 @@ service cloud.firestore {
     }
   }
 }
-
-    

@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award, ShieldAlert } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -64,11 +64,10 @@ import {
     SelectLabel,
 } from "@/components/ui/select"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
@@ -77,11 +76,7 @@ const studentSchema = z.object({
   jenisKelamin: z.enum(["Laki-laki", "Perempuan"], {
     required_error: "Jenis kelamin harus dipilih.",
   }),
-  parentWaNumber: z.string().optional().refine(val => !val || /^\d{10,15}$/.test(val), {
-    message: "Nomor WhatsApp harus berupa angka 10-15 digit (contoh: 6281234567890)."
-  }),
   status: z.enum(["Aktif", "Lulus", "Pindah"]).optional().default("Aktif"),
-  parentWaStatus: z.string().optional(),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
@@ -136,7 +131,6 @@ export default function SiswaPage() {
       nama: "",
       classId: undefined,
       jenisKelamin: undefined,
-      parentWaNumber: "",
       status: "Aktif",
     },
   })
@@ -199,9 +193,6 @@ export default function SiswaPage() {
         const studentRef = doc(db, "students", editingStudent.id);
         
         const updatePayload: Partial<Student> = { ...values };
-        if (editingStudent.parentWaNumber !== values.parentWaNumber) {
-            updatePayload.parentWaStatus = 'valid'; // Reset status on number change
-        }
 
         await updateDoc(studentRef, updatePayload as any);
         toast({ title: "Sukses", description: "Data siswa berhasil diperbarui." });
@@ -322,8 +313,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "No WhatsApp Ortu", "Status"];
-    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "6281234567890", "Aktif"];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Status"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "Aktif"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -349,7 +340,6 @@ export default function SiswaPage() {
             "Tingkat": classInfo?.grade || "N/A",
             "Nama Kelas": classInfo?.name || "Kelas Dihapus",
             "Jenis Kelamin": student.jenisKelamin,
-            "No WhatsApp Ortu": student.parentWaNumber || "",
             "Status": student.status || "Aktif",
         }
     });
@@ -364,7 +354,6 @@ export default function SiswaPage() {
         { wch: 10 }, // Tingkat
         { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
-        { wch: 20 }, // No WhatsApp Ortu
         { wch: 10 }, // Status
     ];
     worksheet['!cols'] = columnWidths;
@@ -409,8 +398,7 @@ export default function SiswaPage() {
                     nama: String(row[1] || "").trim(),
                     classId: classId,
                     jenisKelamin: jenisKelamin,
-                    parentWaNumber: String(row[5] || "").trim().replace(/\D/g, '') || undefined,
-                    status: String(row[6] || "Aktif").trim(),
+                    status: String(row[5] || "Aktif").trim(),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -422,7 +410,6 @@ export default function SiswaPage() {
                         const isIdentical = existingStudent.nama === validStudent.nama &&
                                             existingStudent.classId === validStudent.classId &&
                                             existingStudent.jenisKelamin === validStudent.jenisKelamin &&
-                                            (existingStudent.parentWaNumber || "") === (validStudent.parentWaNumber || "") &&
                                             (existingStudent.status || "Aktif") === (validStudent.status || "Aktif");
 
                         processedStudents.push({ 
@@ -488,13 +475,9 @@ export default function SiswaPage() {
         
         studentsToProcess.forEach(student => {
             const { id, importStatus, ...studentData } = student;
-            let dataToSave: Partial<Student> = { ...studentData, parentWaNumber: studentData.parentWaNumber || "" };
+            let dataToSave: Partial<Student> = { ...studentData };
             
             if (importStatus === 'Diperbarui' && id) {
-                const existingStudent = students.find(s => s.id === id);
-                if (existingStudent && existingStudent.parentWaNumber !== dataToSave.parentWaNumber) {
-                    dataToSave.parentWaStatus = 'valid'; // Reset status
-                }
                 const docRef = doc(db, "students", id);
                 batch.update(docRef, dataToSave as any);
             } else if (importStatus === 'Baru') {
@@ -525,7 +508,7 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, parentWaNumber: "", status: "Aktif" })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, status: "Aktif" })
     setIsFormDialogOpen(true)
   }
 
@@ -677,22 +660,6 @@ export default function SiswaPage() {
                   </FormItem>
                 )}
               />
-              <FormField
-                  control={form.control}
-                  name="parentWaNumber"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Nomor WhatsApp Ortu (Opsional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="cth: 6281234567890" {...field} value={field.value ?? ''} />
-                      </FormControl>
-                      <FormDescription>
-                        Gunakan format internasional (62) tanpa spasi atau simbol.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                <DialogFooter>
                     <Button type="submit" disabled={form.formState.isSubmitting}>
                       {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -924,7 +891,6 @@ export default function SiswaPage() {
                     <TableHead>Nama Kelas</TableHead>
                     <TableHead>Tingkat</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>No. WA Ortu</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
                 </TableHeader>
@@ -957,23 +923,6 @@ export default function SiswaPage() {
                             <TableCell>
                                 <Badge variant={status === 'Lulus' ? 'secondary' : status === 'Pindah' ? 'outline' : 'default'}>{status}</Badge>
                             </TableCell>
-                            <TableCell>
-                                <div className="flex items-center gap-2">
-                                  {student.parentWaNumber || '-'}
-                                  {student.parentWaStatus === 'invalid' && (
-                                    <TooltipProvider>
-                                      <Tooltip>
-                                        <TooltipTrigger>
-                                          <ShieldAlert className="h-4 w-4 text-destructive" />
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          <p>Nomor ini tidak terdaftar di WhatsApp saat pengecekan terakhir.</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                  )}
-                                </div>
-                              </TableCell>
                             <TableCell className="text-right">
                                 <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -998,7 +947,7 @@ export default function SiswaPage() {
                     })
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={8} className="h-24 text-center">
+                        <TableCell colSpan={7} className="h-24 text-center">
                           {students.length > 0 ? "Tidak ada siswa yang cocok dengan filter." : "Belum ada data siswa."}
                         </TableCell>
                     </TableRow>

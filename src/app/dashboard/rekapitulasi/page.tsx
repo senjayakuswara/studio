@@ -38,7 +38,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
+type Student = { id: string; nisn: string; nama: string; classId: string; }
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
 type AttendanceRecord = {
