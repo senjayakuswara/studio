@@ -20,12 +20,13 @@ const PORT = process.env.PORT || 8000;
 const MAX_RETRIES = 1;
 const STALE_JOB_TIMEOUT_MINUTES = 2; 
 const SEND_MESSAGE_TIMEOUT_MS = 45000; // Timeout pengiriman pesan dinaikkan menjadi 45 detik
+const GLOBAL_READY_TIMEOUT_MS = 120000; // 2 menit
 
 let db;
 let client;
 let googleSheetsClient;
 let isWhatsAppReady = false;
-let readyTimeout = null; // Watchdog timer
+let readyTimeout = null; // Watchdog timer GLOBAL
 
 const app = express();
 app.use(cors());
@@ -89,6 +90,19 @@ async function initializeGoogleSheets() {
 
 function initializeWhatsApp() {
     log('Menginisialisasi WhatsApp Client...');
+
+    // Watchdog GLOBAL: Memastikan client tidak macet selamanya saat inisialisasi.
+    clearTimeout(readyTimeout);
+    log(`[WATCHDOG] Memulai timer ${GLOBAL_READY_TIMEOUT_MS / 1000} detik untuk memantau status "ready"...`);
+    readyTimeout = setTimeout(() => {
+        log(`[WATCHDOG] Waktu habis! Client gagal siap dalam ${GLOBAL_READY_TIMEOUT_MS / 1000} detik. Mencoba restart paksa...`, 'error');
+        io.emit('status', 'Koneksi macet, mencoba restart...');
+        if (client) {
+            client.destroy().catch(e => log(`Gagal menghancurkan client: ${e.message}`, 'error'));
+        }
+        setTimeout(initializeWhatsApp, 5000);
+    }, GLOBAL_READY_TIMEOUT_MS);
+
     client = new Client({
         authStrategy: new LocalAuth({ clientId: "abtrack-server" }),
         puppeteer: {
@@ -124,19 +138,6 @@ function initializeWhatsApp() {
     client.on('authenticated', () => {
         log('Autentikasi berhasil!', 'success');
         io.emit('status', 'Autentikasi berhasil, memuat chat...');
-
-        // Start a watchdog timer in case 'ready' event never fires
-        clearTimeout(readyTimeout);
-        log('[WATCHDOG] Memulai timer 90 detik untuk memantau status "ready"...');
-        readyTimeout = setTimeout(() => {
-            log('[WATCHDOG] Waktu habis! Client gagal siap dalam 90 detik. Mencoba restart paksa...', 'error');
-            io.emit('status', 'Koneksi macet, mencoba restart...');
-            if (client) {
-                // Destroy the client and re-initialize
-                client.destroy().catch(e => log(`Gagal menghancurkan client: ${e.message}`, 'error'));
-                setTimeout(initializeWhatsApp, 5000); 
-            }
-        }, 90000); // 90-second timeout
     });
     
     client.on('remote_session_saved', () => {
@@ -144,7 +145,7 @@ function initializeWhatsApp() {
     });
 
     client.on('ready', () => {
-        clearTimeout(readyTimeout); // Success! Cancel the watchdog timer.
+        clearTimeout(readyTimeout); // Watchdog berhasil dibatalkan!
         log('[WATCHDOG] Timer dibatalkan, client sudah siap.', 'info');
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
@@ -153,19 +154,18 @@ function initializeWhatsApp() {
     });
 
     client.on('auth_failure', msg => {
+        clearTimeout(readyTimeout); // Hentikan watchdog jika autentikasi gagal
         log(`Autentikasi gagal: ${msg}. Hapus folder .wwebjs_auth dan mulai ulang.`, 'error');
         io.emit('status', 'Autentikasi Gagal');
         isWhatsAppReady = false;
-        clearTimeout(readyTimeout);
     });
 
     client.on('disconnected', reason => {
+        clearTimeout(readyTimeout); // Hentikan watchdog jika koneksi terputus
         log(`Koneksi WhatsApp terputus: ${reason}. Coba menghubungkan kembali...`, 'error');
         io.emit('status', 'Koneksi Terputus');
         isWhatsAppReady = false;
-        clearTimeout(readyTimeout);
         
-        // Destroy the client and re-initialize for a clean start
         if (client) {
             client.destroy().catch(e => log(`Error saat destroy client: ${e.message}`, 'error'));
         }
@@ -174,8 +174,8 @@ function initializeWhatsApp() {
 
     log('Menjalankan client.initialize()...');
     client.initialize().catch(err => {
+        clearTimeout(readyTimeout); // Hentikan watchdog jika inisialisasi awal gagal
         log(`Gagal inisialisasi client awal: ${err.message}`, 'error');
-        // Retry initialization after a delay if it fails at the start
         setTimeout(initializeWhatsApp, 30000);
     });
 }
