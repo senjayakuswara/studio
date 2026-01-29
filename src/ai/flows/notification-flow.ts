@@ -5,6 +5,7 @@
  * @fileOverview Handles queuing notifications to Firestore for WhatsApp group delivery.
  * - notifyOnAttendance: Queues a real-time attendance notification to a class group.
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
+ * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
  */
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
@@ -173,6 +174,32 @@ export async function retryAllFailedJobs(): Promise<{ success: boolean, count: n
 
     } catch (e: any) {
         console.error(`Failed to retry all failed jobs`, e);
+        return { success: false, count: 0, error: e.message };
+    }
+}
+
+/**
+ * Deletes all pending and processing notification jobs from the queue.
+ */
+export async function deleteAllPendingAndProcessingJobs(): Promise<{ success: boolean, count: number, error?: string }> {
+    try {
+        const q = query(collection(db, "notification_queue"), where("status", "in", ["pending", "processing"]));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            return { success: true, count: 0 };
+        }
+
+        const batch = writeBatch(db);
+        snapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        await batch.commit();
+        return { success: true, count: snapshot.size };
+
+    } catch (e: any) {
+        console.error(`Failed to delete all pending/processing jobs`, e);
         return { success: false, count: 0, error: e.message };
     }
 }

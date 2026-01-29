@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react"
 import { collection, query, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore"
 import { format, formatDistanceToNow } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Trash2, Send, Loader2, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react"
+import { Trash2, Send, Loader2, AlertCircle, CheckCircle2, RefreshCw, XCircle } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
-import { retryAllFailedJobs } from "@/ai/flows/notification-flow"
+import { retryAllFailedJobs, deleteAllPendingAndProcessingJobs } from "@/ai/flows/notification-flow"
 
 type NotificationJob = {
     id: string;
@@ -54,6 +54,7 @@ export default function NotifikasiPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null);
     const [isRetryingAll, setIsRetryingAll] = useState(false);
+    const [isCancellingAll, setIsCancellingAll] = useState(false);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -84,6 +85,10 @@ export default function NotifikasiPage() {
 
     const failedJobsCount = useMemo(() => {
         return jobs.filter(job => job.status === 'failed').length;
+    }, [jobs]);
+
+    const pendingJobsCount = useMemo(() => {
+        return jobs.filter(job => ['pending', 'processing'].includes(job.status)).length;
     }, [jobs]);
 
     const handleRetry = async (jobId: string) => {
@@ -136,6 +141,23 @@ export default function NotifikasiPage() {
         }
     }
 
+    const handleCancelAll = async () => {
+        setIsCancellingAll(true);
+        try {
+            const result = await deleteAllPendingAndProcessingJobs();
+            if (result.success) {
+                toast({ title: "Sukses", description: `${result.count} tugas yang tertunda/diproses telah dibatalkan.` });
+            } else {
+                throw new Error(result.error || "Operasi gagal.");
+            }
+        } catch (e: any) {
+            console.error(`Failed to cancel all jobs`, e);
+            toast({ variant: "destructive", title: "Gagal", description: "Tidak dapat membatalkan semua tugas." });
+        } finally {
+            setIsCancellingAll(false);
+        }
+    }
+
     const getStatusVariant = (status: NotificationJob['status']) => {
         switch (status) {
             case 'sent': return 'default';
@@ -153,26 +175,49 @@ export default function NotifikasiPage() {
             <h1 className="font-headline text-3xl font-bold tracking-tight">Antrean Notifikasi</h1>
             <p className="text-muted-foreground">Pantau status pengiriman notifikasi WhatsApp ke grup kelas.</p>
           </div>
-           <AlertDialog>
-              <AlertDialogTrigger asChild>
-                  <Button disabled={failedJobsCount === 0 || isLoading || isRetryingAll}>
-                      {isRetryingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-                      Kirim Ulang Semua Gagal ({failedJobsCount})
-                  </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                  <AlertDialogHeader>
-                      <AlertDialogTitle>Anda Yakin?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                          Tindakan ini akan mencoba mengirim ulang semua {failedJobsCount} notifikasi yang gagal. Lanjutkan?
-                      </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                      <AlertDialogCancel>Batal</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleRetryAll}>Ya, Kirim Ulang Semua</AlertDialogAction>
-                  </AlertDialogFooter>
-              </AlertDialogContent>
-          </AlertDialog>
+           <div className="flex flex-col sm:flex-row gap-2">
+                <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="destructive" disabled={pendingJobsCount === 0 || isLoading || isCancellingAll}>
+                            {isCancellingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                            Batalkan Semua Tertunda ({pendingJobsCount})
+                        </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Anda Yakin?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Tindakan ini akan menghapus semua {pendingJobsCount} notifikasi yang berstatus 'pending' atau 'processing'. Lanjutkan?
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleCancelAll}>Ya, Batalkan Semua</AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+
+               <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                      <Button disabled={failedJobsCount === 0 || isLoading || isRetryingAll}>
+                          {isRetryingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                          Kirim Ulang Semua Gagal ({failedJobsCount})
+                      </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                      <AlertDialogHeader>
+                          <AlertDialogTitle>Anda Yakin?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                              Tindakan ini akan mencoba mengirim ulang semua {failedJobsCount} notifikasi yang gagal. Lanjutkan?
+                          </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                          <AlertDialogCancel>Batal</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleRetryAll}>Ya, Kirim Ulang Semua</AlertDialogAction>
+                      </AlertDialogFooter>
+                  </AlertDialogContent>
+              </AlertDialog>
+           </div>
         </div>
       <Card>
         <CardHeader>
