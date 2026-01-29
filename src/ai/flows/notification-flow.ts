@@ -119,14 +119,14 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID, timeZone });
 
     const messageLines = [
-        "🏫 *SMAS PGRI Naringgul*",
+        "🏫 *E-Absensi SMAS PGRI Naringgul*",
         `*${title}: ${formattedDate}*`,
-        "",
-        `👤 *Nama*      : ${record.studentName}`,
-        `🆔 *NISN*      : ${record.nisn}`,
-        `📚 *Kelas*     : ${classInfo.name}`,
-        `⏰ *Jam*       : ${formattedTime} WIB`,
-        `👋 *Status*    : *${finalStatus}*`,
+        "====================",
+        `👤 *Nama*: ${record.studentName}`,
+        `🆔 *NISN*: ${record.nisn}`,
+        `📚 *Kelas*: ${classInfo.name}`,
+        `⏰ *Jam*: ${formattedTime}`,
+        `✨ *Status*: *${finalStatus}*`,
     ];
     
     const message = messageLines.join("\n");
