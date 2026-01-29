@@ -129,7 +129,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         }
     }, [isProcessing]);
     
-    const playSound = useCallback(async (type: 'success' | 'error') => {
+    const playSound = useCallback(async (type: 'checkin' | 'late' | 'checkout' | 'error') => {
         try {
             if (!audioContextRef.current) {
                 // @ts-ignore
@@ -148,24 +148,43 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
-
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
 
-            if (type === 'success') {
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
-                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.5);
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + 0.5);
-            } else {
-                oscillator.type = 'square';
-                oscillator.frequency.setValueAtTime(220, audioContext.currentTime);
-                gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.3);
-                oscillator.start(audioContext.currentTime);
-                oscillator.stop(audioContext.currentTime + 0.3);
+            gainNode.gain.setValueAtTime(0.4, audioContext.currentTime); // Set a professional, audible volume
+
+            switch(type) {
+                case 'checkin': // A clear, rising two-tone chime for success
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(622.25, audioContext.currentTime); // D#5
+                    oscillator.frequency.linearRampToValueAtTime(830.61, audioContext.currentTime + 0.1); // G#5
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.4);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.4);
+                    break;
+                case 'late': // A more neutral, slightly urgent two-tone sound for late
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(415.30, audioContext.currentTime); // G#4
+                    oscillator.frequency.linearRampToValueAtTime(311.13, audioContext.currentTime + 0.15); // D#4
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.4);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.4);
+                    break;
+                case 'checkout': // A descending two-tone chime for checkout
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(830.61, audioContext.currentTime); // G#5
+                    oscillator.frequency.linearRampToValueAtTime(622.25, audioContext.currentTime + 0.15); // D#5
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.5);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.5);
+                    break;
+                case 'error': // A low, short buzz for error
+                    oscillator.type = 'square';
+                    oscillator.frequency.setValueAtTime(164.81, audioContext.currentTime); // E3
+                    gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.3);
+                    oscillator.start(audioContext.currentTime);
+                    oscillator.stop(audioContext.currentTime + 0.3);
+                    break;
             }
         } catch (e) {
             console.error("Could not play sound due to an error:", e);
@@ -320,7 +339,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setAttendanceData(prev => ({ ...prev, [student!.id]: finalRecord }));
                 addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                await playSound('success');
+                await playSound('checkout');
                 cleanup('success', student, 'Absen Pulang');
                 
                 // Send notification
@@ -354,7 +373,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 setAttendanceData(prev => ({ ...prev, [student!.id]: finalRecord }));
                 addLog(`Absen Masuk: ${student.nama} berhasil (${status}).`, 'success');
                 setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-                await playSound('success');
+                await playSound(status === 'Hadir' ? 'checkin' : 'late');
                 cleanup('success', student, `Absen Masuk: ${status}`);
 
                 // Send notification
