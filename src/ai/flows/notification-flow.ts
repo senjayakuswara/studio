@@ -119,9 +119,14 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID, timeZone });
 
     const messageLines = [
-        `*${title} (${finalStatus})*`,
-        `*Nama*: ${record.studentName}`,
-        `*Jam*: ${formattedTime} WIB`,
+        "🏫 *SMAS PGRI Naringgul*",
+        `*${title}: ${formattedDate}*`,
+        "",
+        `👤 *Nama*      : ${record.studentName}`,
+        `🆔 *NISN*      : ${record.nisn}`,
+        `📚 *Kelas*     : ${classInfo.name}`,
+        `⏰ *Jam*       : ${formattedTime} WIB`,
+        `👋 *Status*    : *${finalStatus}*`,
     ];
     
     const message = messageLines.join("\n");
@@ -133,5 +138,3 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         className: classInfo.name,
     });
 }
-
-    
