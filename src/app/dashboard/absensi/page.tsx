@@ -315,8 +315,12 @@ export default function AbsensiPage() {
         await batch.commit();
         toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen masuk. Notifikasi sedang dikirim...` });
 
-        // Send notifications after successful DB commit
-        await Promise.all(notificationPayloads.map(payload => notifyOnAttendance(payload)));
+        // Fire and forget notifications. Don't block the UI.
+        notificationPayloads.forEach(payload => {
+            notifyOnAttendance(payload).catch(err => {
+                console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+            });
+        });
 
         await fetchData(date);
 
@@ -366,8 +370,12 @@ export default function AbsensiPage() {
         await batch.commit();
         toast({ title: "Sukses", description: `${studentsToCheckOut.length} siswa berhasil diabsen pulang. Notifikasi sedang dikirim...` });
         
-        // Send notifications after successful DB commit
-        await Promise.all(notificationPayloads.map(payload => notifyOnAttendance(payload)));
+        // Fire and forget notifications. Don't block the UI.
+        notificationPayloads.forEach(payload => {
+            notifyOnAttendance(payload).catch(err => {
+                console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+            });
+        });
 
         await fetchData(date);
 
@@ -853,5 +861,3 @@ export default function AbsensiPage() {
     </>
   )
 }
-
-    

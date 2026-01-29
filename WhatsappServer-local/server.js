@@ -7,7 +7,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
@@ -40,18 +40,14 @@ async function connectToWhatsApp() {
     sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' })
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: true,
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-
-        if (qr) {
-            logger.warn('Pindai QR Code di bawah ini untuk terhubung:');
-            qrcode.generate(qr, { small: true });
-        }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
@@ -68,7 +64,6 @@ async function connectToWhatsApp() {
         } else if (connection === 'open') {
             logger.info('WhatsApp Terhubung! Siap memproses notifikasi.');
             
-            // Muat daftar grup saat pertama kali terhubung
             try {
                 logger.info('Memuat daftar grup...');
                 const groups = await sock.groupFetchAllParticipating();
@@ -106,15 +101,25 @@ async function findGroupJidByName(name) {
 function listenForNotificationJobs() {
     const q = query(collection(db, "notification_queue"), where("status", "==", "pending"));
 
-    onSnapshot(q, (snapshot) => {
+    onSnapshot(q, async (snapshot) => {
         if (snapshot.empty) {
             return;
         }
 
-        snapshot.docs.forEach(async (jobDoc) => {
+        logger.info(`[QUEUE] Ditemukan ${snapshot.size} tugas baru. Memulai pemrosesan serial...`);
+
+        // Use a for...of loop to process jobs one by one to prevent rate limits
+        for (const jobDoc of snapshot.docs) {
             const jobData = jobDoc.data();
             const jobId = jobDoc.id;
             const jobRef = doc(db, "notification_queue", jobId);
+
+            // Double-check the status in case it was processed by another call
+            const freshDoc = await getDoc(jobRef);
+            if (freshDoc.data()?.status !== 'pending') {
+                logger.info(`[JOB] Melewati tugas ${jobId} karena status bukan 'pending'.`);
+                continue;
+            }
 
             logger.info(`[JOB] Mengambil tugas baru: ${jobId}`);
 
@@ -127,8 +132,7 @@ function listenForNotificationJobs() {
                 }
                 
                 let jid;
-                // Cek apakah recipient adalah nama grup atau nomor telepon
-                if (recipient.match(/^\d+$/)) { // Jika hanya angka, anggap nomor telepon
+                if (recipient.match(/^\d+$/)) {
                      let phoneJid = recipient.replace(/\D/g, ''); 
                     if (phoneJid.startsWith('0')) {
                         phoneJid = '62' + phoneJid.substring(1);
@@ -139,10 +143,10 @@ function listenForNotificationJobs() {
                          throw new Error(`Nomor ${recipient} tidak ditemukan di WhatsApp.`);
                     }
                     jid = result.jid;
-                } else { // Anggap sebagai nama grup
+                } else {
                     jid = await findGroupJidByName(recipient);
                     if (!jid) {
-                         throw new Error(`Nomor atau Grup ${recipient} tidak ditemukan di WhatsApp.`);
+                         throw new Error(`Grup "${recipient}" tidak ditemukan. Pastikan nama grup sama persis.`);
                     }
                 }
                 
@@ -154,13 +158,29 @@ function listenForNotificationJobs() {
 
             } catch (error) {
                 logger.error(`[JOB] Gagal memproses tugas ${jobId}: ${error.message}`);
-                await updateDoc(jobRef, {
-                    status: "failed",
-                    errorMessage: error.message,
-                    updatedAt: Timestamp.now()
-                });
+                // If it's a rate limit error, reset to pending so the fail-safe or next run can pick it up.
+                if (error.message && (error.message.includes('rate-overlimit') || error.message.includes('too-many-messages'))) {
+                    logger.warn(`[RATE-LIMIT] Terkena rate-limit. Mereset tugas ${jobId} ke 'pending' untuk dicoba lagi nanti.`);
+                    await updateDoc(jobRef, {
+                        status: "pending",
+                        errorMessage: `Rate limit hit. Will be retried automatically.`,
+                        updatedAt: Timestamp.now()
+                    });
+                } else {
+                    await updateDoc(jobRef, {
+                        status: "failed",
+                        errorMessage: error.message,
+                        updatedAt: Timestamp.now()
+                    });
+                }
             }
-        });
+            
+            // CRUCIAL: Wait for a short, random interval before processing the next job.
+            const delay = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+            logger.info(`[QUEUE] Menjeda ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        logger.info(`[QUEUE] Selesai memproses batch saat ini.`);
     });
 }
 
