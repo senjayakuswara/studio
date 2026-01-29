@@ -4,37 +4,53 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // --- ATURAN PENGECUALIAN (AKSES TANPA LOGIN) ---
-    // Aturan di bawah ini adalah pengecualian yang sangat spesifik
-    // untuk proses yang berjalan tanpa konteks login admin.
+    // --- ATURAN AKSES SERVER / PUBLIK (TANPA LOGIN) ---
+    // Aturan ini hanya berlaku untuk proses yang berjalan tanpa otentikasi.
 
-    // 1. Izinkan Server Action untuk MEMBACA nama kelas untuk pesan notifikasi.
-    //    'get' lebih aman daripada 'read' karena tidak mengizinkan 'list' (query semua).
-    match /classes/{classId} {
-      allow get: if true;
-      allow list, write: if request.auth != null;
-    }
-
-    // 2. Izinkan siapa saja MEMBACA (get) konfigurasi aplikasi.
-    //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi
-    //    sebelum admin berhasil masuk.
-    match /settings/appConfig {
-      allow get: if true;
-    }
-    
-    // 3. Izinkan PROSES APAPUN (termasuk server notifikasi) untuk membaca, menulis,
-    //    dan mengubah antrean notifikasi. Ini WAJIB agar server bisa mengambil
-    //    tugas dan mengubah statusnya (pending -> processing -> sent/failed).
+    // 1. Izinkan server notifikasi untuk membaca dan menulis ke antrean notifikasi.
+    //    Ini WAJIB agar server bisa mengambil dan memperbarui status pekerjaan.
     match /notification_queue/{jobId} {
       allow read, write: if true;
     }
 
-    // --- ATURAN UTAMA (MENANGKAP SEMUA) ---
-    // Aturan ini harus menjadi yang PALING AKHIR.
-    // Ia secara otomatis memberikan akses penuh (baca & tulis) ke SEMUA koleksi
-    // (students, attendance, settings, dll.) HANYA JIKA pengguna sudah login.
-    // Inilah yang memberikan admin akses penuh ke semua fitur aplikasi.
-    match /{document=**} {
+    // 2. Izinkan siapa saja untuk MEMBACA (get) konfigurasi aplikasi.
+    //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi.
+    match /settings/appConfig {
+      allow get: if true;
+    }
+    
+    // 3. Izinkan Server Action atau proses lain untuk MEMBACA (get) nama kelas.
+    //    Contoh: untuk menampilkan nama kelas dalam pesan notifikasi.
+    match /classes/{classId} {
+        allow get: if true;
+    }
+    
+    // --- ATURAN AKSES ADMIN (MEMBUTUHKAN LOGIN) ---
+    // Aturan di bawah ini memberikan akses penuh ke koleksi yang relevan HANYA
+    // jika pengguna (admin) sudah login (request.auth != null).
+
+    match /students/{studentId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // Untuk koleksi 'classes', 'get' sudah diizinkan di atas.
+    // Aturan ini menambahkan izin 'list' dan 'write' untuk admin.
+    match /classes/{classId} {
+      allow list, write: if request.auth != null;
+    }
+    
+    match /attendance/{recordId} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /holidays/{holidayId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Untuk koleksi 'settings', 'get' untuk 'appConfig' sudah diizinkan di atas.
+    // Aturan ini memberikan akses penuh ke semua dokumen lain di 'settings'
+    // dan izin 'write' ke 'appConfig' untuk admin.
+    match /settings/{settingId} {
       allow read, write: if request.auth != null;
     }
   }
