@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { MoreHorizontal, Info, ScanLine, Loader2, User, XCircle, CheckCircle2 } from "lucide-react"
-import { format, startOfDay, endOfDay } from "date-fns"
+import { format, startOfDay, endOfDay, setHours, setMinutes, setSeconds } from "date-fns"
 import { cn } from "@/lib/utils"
 import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
@@ -255,12 +255,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
         if (!trimmedNisn || processingLock.current || recentlyScanned.current.has(trimmedNisn)) return;
-        
+
         processingLock.current = true;
         setIsProcessing(true);
         setFeedbackOverlay({ show: true, type: 'loading' });
         if (scannerInputRef.current) scannerInputRef.current.value = "";
-    
+
         const cleanup = (type: FeedbackOverlayState['type'], student?: Student, message?: string) => {
             setFeedbackOverlay({ show: true, type, student, message });
             setTimeout(() => {
@@ -276,94 +276,96 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             if (!schoolHours) {
                 throw new Error("Pengaturan jam sekolah belum dimuat.");
             }
-    
+
             student = allStudents.find(s => s.nisn === trimmedNisn);
-    
             if (!student) {
                 throw new Error(`Siswa dengan NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`);
-            }
-    
-            const existingRecord = attendanceData[student.id];
-            const now = new Date();
-            const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
-            const jamPulangTime = new Date();
-            jamPulangTime.setHours(pulangHours, pulangMinutes, 0, 0);
-    
-            if (existingRecord && existingRecord.timestampMasuk && !existingRecord.timestampPulang && now < jamPulangTime) {
-                throw new Error("Siswa sudah tercatat absen masuk hari ini.");
-            }
-            if (existingRecord && existingRecord.timestampPulang) {
-                throw new Error("Siswa sudah tercatat absen masuk dan pulang hari ini.");
             }
             if (student.grade !== grade) {
                 throw new Error(`Siswa salah ruang absen. Seharusnya di Kelas ${student.grade}.`);
             }
+
+            const existingRecord = attendanceData[student.id];
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
                 throw new Error(`Siswa berstatus ${existingRecord.status}. Tidak bisa melakukan absensi.`);
             }
-    
+
             recentlyScanned.current.add(student.nisn);
             setTimeout(() => { recentlyScanned.current.delete(student.nisn); }, 3000); 
-    
-            let tempRecordForDb: Omit<AttendanceRecord, 'id'> & { id?: string };
-            let isAbsenMasuk = false;
 
-            if (!existingRecord || !existingRecord.timestampMasuk) {
-                isAbsenMasuk = true;
+            const now = new Date();
+            const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+            const [pulangHours, pulangMinutes] = schoolHours.jamPulang.split(':').map(Number);
+            const deadlineTime = setSeconds(setMinutes(setHours(now, masukHours), masukMinutes + parseInt(schoolHours.toleransi, 10)), 0);
+            const jamPulangTime = setSeconds(setMinutes(setHours(now, pulangHours), pulangMinutes), 0);
+
+            let isCheckInAttempt = !existingRecord || !existingRecord.timestampMasuk;
+
+            // --- CHECK-OUT LOGIC ---
+            if (!isCheckInAttempt) {
+                if (existingRecord.timestampPulang) {
+                    throw new Error("Siswa sudah tercatat absen masuk dan pulang hari ini.");
+                }
+                if (now < jamPulangTime) {
+                    throw new Error(`Belum waktunya absen pulang. Absen pulang dimulai pukul ${schoolHours.jamPulang}.`);
+                }
+                
+                const docId = existingRecord.id;
+                if (!docId) throw new Error("ID catatan absensi tidak ditemukan untuk update.");
+
+                const updatePayload = { timestampPulang: Timestamp.fromDate(now) };
+                await updateDoc(doc(db, "attendance", docId), updatePayload);
+
+                const finalRecord: AttendanceRecord = { ...existingRecord, ...updatePayload };
+                setAttendanceData(prev => ({ ...prev, [student!.id]: finalRecord }));
+                addLog(`Absen Pulang: ${student.nama} berhasil.`, 'success');
+                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
+                await playSound('success');
+                cleanup('success', student, 'Absen Pulang');
+                
+                // Send notification
+                const serializableRecord: SerializableAttendanceRecord = {
+                    ...finalRecord, studentName: student.nama, parentWaNumber: student.parentWaNumber,
+                    timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
+                    recordDate: finalRecord.recordDate.toDate().toISOString(),
+                };
+                await notifyOnAttendance(serializableRecord);
+
+            // --- CHECK-IN LOGIC ---
+            } else {
                 if (now > jamPulangTime) {
                     throw new Error("Waktu absen masuk sudah berakhir.");
                 }
-    
-                const [masukHours, masukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
-                const deadline = new Date();
-                deadline.setHours(masukHours, masukMinutes + parseInt(schoolHours.toleransi, 10), 0, 0);
-                const status: AttendanceStatus = now > deadline ? "Terlambat" : "Hadir";
+
+                const status: AttendanceStatus = now > deadlineTime ? "Terlambat" : "Hadir";
                 
-                tempRecordForDb = {
+                const newRecordPayload: Omit<AttendanceRecord, 'id'> = {
                     studentId: student.id, nisn: student.nisn, studentName: student.nama, classId: student.classId,
                     status,
-                    timestampMasuk: Timestamp.fromDate(now), timestampPulang: null,
+                    timestampMasuk: Timestamp.fromDate(now),
+                    timestampPulang: null,
                     recordDate: Timestamp.fromDate(startOfDay(now)),
                 };
-            } else if (!existingRecord.timestampPulang) {
-                tempRecordForDb = { ...existingRecord, timestampPulang: Timestamp.fromDate(now) };
-            } else {
-                throw new Error("Siswa sudah tercatat absen penuh.");
-            }
-    
-            let docId = existingRecord?.id;
-            if (isAbsenMasuk) {
-                if(docId) {
-                    await updateDoc(doc(db, "attendance", docId), tempRecordForDb as any);
-                } else {
-                    const docRef = await addDoc(collection(db, "attendance"), tempRecordForDb);
-                    docId = docRef.id;
-                }
-            } else if (docId) {
-                 await updateDoc(doc(db, "attendance", docId), { timestampPulang: tempRecordForDb.timestampPulang });
-            }
 
-            const finalRecord = { ...tempRecordForDb, id: docId } as AttendanceRecord;
-            setAttendanceData(prev => ({...prev, [student.id]: finalRecord }));
-            
-            const logMessage = `Absen ${isAbsenMasuk ? 'Masuk' : 'Pulang'}: ${student.nama} berhasil.`;
-            addLog(logMessage, 'success');
-            setHighlightedNisn({ nisn: student.nisn, type: 'success' });
-            
-            await playSound('success');
-            
-            cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
-            
-            // Send notification after successful scan
-            const serializableRecord: SerializableAttendanceRecord = {
-                ...finalRecord,
-                studentName: student.nama,
-                timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
-                recordDate: finalRecord.recordDate.toDate().toISOString(),
-            };
-            await notifyOnAttendance(serializableRecord);
+                const docRef = await addDoc(collection(db, "attendance"), newRecordPayload);
+                const finalRecord: AttendanceRecord = { ...newRecordPayload, id: docRef.id };
 
+                setAttendanceData(prev => ({ ...prev, [student!.id]: finalRecord }));
+                addLog(`Absen Masuk: ${student.nama} berhasil (${status}).`, 'success');
+                setHighlightedNisn({ nisn: student.nisn, type: 'success' });
+                await playSound('success');
+                cleanup('success', student, `Absen Masuk: ${status}`);
+
+                // Send notification
+                const serializableRecord: SerializableAttendanceRecord = {
+                    ...finalRecord, studentName: student.nama, parentWaNumber: student.parentWaNumber,
+                    timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
+                    recordDate: finalRecord.recordDate.toDate().toISOString(),
+                };
+                await notifyOnAttendance(serializableRecord);
+            }
         } catch (error: any) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
             addLog(`${student ? student.nama + ': ' : ''}${errorMessage}`, 'error');
@@ -411,6 +413,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             const serializableRecord: SerializableAttendanceRecord = {
                 ...newRecord,
                 studentName: student.nama,
+                parentWaNumber: student.parentWaNumber,
                 timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
                 timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
                 recordDate: newRecord.recordDate.toDate().toISOString(),
@@ -598,5 +601,3 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
-
-    

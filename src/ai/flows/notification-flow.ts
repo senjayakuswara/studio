@@ -117,9 +117,9 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         return;
     }
 
-    // IMPORTANT: Convert ISO string to Date and format in the correct timezone.
-    const wibDate = new Date(timestampStr); 
     const timeZone = "Asia/Jakarta";
+    const wibDate = new Date(timestampStr);
+    
     const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID, timeZone });
     const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID, timeZone });
 
