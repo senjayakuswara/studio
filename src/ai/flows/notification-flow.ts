@@ -8,7 +8,7 @@
 
 import { doc, getDoc, addDoc, collection, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { format } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
 
 // Types
@@ -35,7 +35,6 @@ export type SerializableAttendanceRecord = {
 const footerVariations = [
     "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas._",
     "_Ini adalah pesan otomatis, mohon tidak membalas pesan ini._",
-    "_Notifikasi otomatis dari sistem E-Absensi._",
     "_Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
 ];
 
@@ -118,10 +117,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     }
 
     const timeZone = "Asia/Jakarta";
-    const wibDate = new Date(timestampStr);
+    // The timestampStr is an ISO string (UTC) from the client
+    const date = new Date(timestampStr);
     
-    const formattedDate = format(wibDate, "eeee, dd MMMM yyyy", { locale: localeID, timeZone });
-    const formattedTime = format(wibDate, "HH:mm:ss", { locale: localeID, timeZone });
+    // Use formatInTimeZone to guarantee the conversion to WIB
+    const formattedDate = formatInTimeZone(date, timeZone, "eeee, dd MMMM yyyy", { locale: localeID });
+    const formattedTime = formatInTimeZone(date, timeZone, "HH:mm:ss");
 
     const messageLines = [
         "🏫 *E-Absensi SMAS PGRI Naringgul*",
