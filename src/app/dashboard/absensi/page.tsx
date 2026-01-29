@@ -277,6 +277,7 @@ export default function AbsensiPage() {
         const studentsToAttend = studentsBelumAbsen;
         if (studentsToAttend.length === 0) {
             toast({ title: "Informasi", description: "Semua siswa sudah memiliki catatan absensi hari ini." });
+            setIsMassCheckinProcessing(false);
             return;
         }
 
@@ -313,15 +314,18 @@ export default function AbsensiPage() {
         });
 
         await batch.commit();
-        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen masuk. Notifikasi sedang dikirim...` });
-
-        // Fire and forget notifications. Don't block the UI.
-        notificationPayloads.forEach(payload => {
-            notifyOnAttendance(payload).catch(err => {
+        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen. Memulai pengiriman notifikasi...` });
+        
+        // Serially queue notifications to avoid hitting Firestore write limits
+        for (const payload of notificationPayloads) {
+            try {
+                await notifyOnAttendance(payload);
+            } catch (err) {
                 console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-            });
-        });
-
+            }
+        }
+        
+        toast({ title: "Antrean Selesai", description: "Semua notifikasi telah berhasil dimasukkan ke dalam antrean." });
         await fetchData(date);
 
     } catch (error) {
@@ -342,6 +346,7 @@ export default function AbsensiPage() {
         const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
         if (studentsToCheckOut.length === 0) {
             toast({ title: "Informasi", description: "Tidak ada siswa yang bisa diabsen pulang." });
+            setIsMassCheckoutProcessing(false);
             return;
         }
 
@@ -368,15 +373,18 @@ export default function AbsensiPage() {
         });
 
         await batch.commit();
-        toast({ title: "Sukses", description: `${studentsToCheckOut.length} siswa berhasil diabsen pulang. Notifikasi sedang dikirim...` });
+        toast({ title: "Sukses", description: `${studentsToCheckOut.length} siswa berhasil diabsen pulang. Memulai pengiriman notifikasi...` });
         
-        // Fire and forget notifications. Don't block the UI.
-        notificationPayloads.forEach(payload => {
-            notifyOnAttendance(payload).catch(err => {
+        // Serially queue notifications to avoid hitting Firestore write limits
+        for (const payload of notificationPayloads) {
+            try {
+                await notifyOnAttendance(payload);
+            } catch (err) {
                 console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-            });
-        });
+            }
+        }
 
+        toast({ title: "Antrean Selesai", description: "Semua notifikasi pulang telah berhasil dimasukkan ke dalam antrean." });
         await fetchData(date);
 
     } catch (error) {
@@ -861,3 +869,5 @@ export default function AbsensiPage() {
     </>
   )
 }
+
+    
