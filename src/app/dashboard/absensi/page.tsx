@@ -328,7 +328,7 @@ export default function AbsensiPage() {
                   failCount++;
               }
               // Artificial delay to prevent hitting Firestore rate limits.
-              await new Promise(resolve => setTimeout(resolve, 50));
+              await new Promise(resolve => setTimeout(resolve, 100));
           }
           
           let description = `${successCount} notifikasi berhasil dimasukkan ke antrean.`;
@@ -341,7 +341,7 @@ export default function AbsensiPage() {
 
       } catch (error) {
           console.error("Error during mass check-in:", error);
-          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi masuk massal." });
+          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi masuk massal. Kemungkinan kuota Firestore terlampaui." });
       } finally {
           setIsMassCheckinProcessing(false);
       }
@@ -399,7 +399,7 @@ export default function AbsensiPage() {
                   failCount++;
               }
               // Artificial delay
-              await new Promise(resolve => setTimeout(resolve, 50));
+              await new Promise(resolve => setTimeout(resolve, 100));
           }
 
           let description = `${successCount} notifikasi pulang berhasil dimasukkan ke antrean.`;
@@ -411,7 +411,7 @@ export default function AbsensiPage() {
 
       } catch (error) {
           console.error("Error during mass checkout:", error);
-          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi pulang massal." });
+          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi pulang massal. Kemungkinan kuota Firestore terlampaui." });
       } finally {
           setIsMassCheckoutProcessing(false);
       }
@@ -891,5 +891,3 @@ export default function AbsensiPage() {
     </>
   )
 }
-
-    
