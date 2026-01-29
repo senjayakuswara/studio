@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore"
+import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, query, where, limit } from "firebase/firestore"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
@@ -141,8 +141,22 @@ export default function KelasPage() {
 
   async function handleDeleteClass() {
     if (!deletingClassId) return
+
     try {
-      // TODO: Check if any student is still in this class before deleting
+      // Security Check: Ensure class is empty before deleting
+      const studentQuery = query(collection(db, "students"), where("classId", "==", deletingClassId), limit(1));
+      const studentSnapshot = await getDocs(studentQuery);
+
+      if (!studentSnapshot.empty) {
+          toast({
+              variant: "destructive",
+              title: "Gagal Menghapus Kelas",
+              description: `Masih ada siswa terdaftar di kelas ini. Pindahkan siswa terlebih dahulu sebelum menghapus kelas.`,
+          });
+          setIsAlertOpen(false);
+          return;
+      }
+      
       await deleteDoc(doc(db, "classes", deletingClassId))
       toast({ title: "Sukses", description: "Data kelas berhasil dihapus." })
       await fetchClasses()
@@ -166,7 +180,10 @@ export default function KelasPage() {
 
   const openEditDialog = (cls: Class) => {
     setEditingClass(cls)
-    form.reset(cls)
+    form.reset({
+      ...cls,
+      whatsappGroupName: cls.whatsappGroupName || "",
+    })
     setIsFormDialogOpen(true)
   }
 

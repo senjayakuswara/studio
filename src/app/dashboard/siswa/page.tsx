@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import * as xlsx from "xlsx"
-import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award } from "lucide-react"
+import { MoreHorizontal, PlusCircle, FileUp, Download, Loader2, Trash2, ChevronsRight, Award, GraduationCap } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -44,6 +44,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import {
   DropdownMenu,
@@ -68,6 +69,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Separator } from "@/components/ui/separator"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 const studentSchema = z.object({
   nisn: z.string().min(1, "NISN tidak boleh kosong."),
@@ -91,6 +94,7 @@ export default function SiswaPage() {
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false)
+  const [isPromotionDialogOpen, setIsPromotionDialogOpen] = useState(false);
   const [isAlertOpen, setIsAlertOpen] = useState(false)
   const [isGraduateAlertOpen, setIsGraduateAlertOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
@@ -99,6 +103,8 @@ export default function SiswaPage() {
   const [isImporting, setIsImporting] = useState(false);
   const [isMoving, setIsMoving] = useState(false);
   const [isGraduating, setIsGraduating] = useState(false);
+  const [moveFromClassId, setMoveFromClassId] = useState("");
+  const [moveToClassId, setMoveToClassId] = useState("");
   const [targetClassId, setTargetClassId] = useState<string>("");
   const [filterName, setFilterName] = useState("")
   const [filterClass, setFilterClass] = useState("all")
@@ -304,6 +310,43 @@ export default function SiswaPage() {
     } finally {
       setIsGraduating(false);
       setIsGraduateAlertOpen(false);
+    }
+  };
+
+  const handleBulkMove = async () => {
+    if (!moveFromClassId || !moveToClassId) {
+        toast({ variant: "destructive", title: "Gagal", description: "Pilih kelas asal dan kelas tujuan." });
+        return;
+    }
+    if (moveFromClassId === moveToClassId) {
+        toast({ variant: "destructive", title: "Gagal", description: "Kelas asal dan tujuan tidak boleh sama." });
+        return;
+    }
+    setIsMoving(true);
+    try {
+        const q = query(collection(db, "students"), where("classId", "==", moveFromClassId), where("status", "==", "Aktif"));
+        const studentsToMoveSnapshot = await getDocs(q);
+
+        if (studentsToMoveSnapshot.empty) {
+            toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa aktif di kelas asal untuk dipindahkan." });
+            return;
+        }
+
+        const batch = writeBatch(db);
+        studentsToMoveSnapshot.forEach(doc => {
+            batch.update(doc.ref, { classId: moveToClassId });
+        });
+        await batch.commit();
+
+        toast({ title: "Sukses", description: `${studentsToMoveSnapshot.size} siswa berhasil dipindahkan.` });
+        await fetchData();
+        setMoveFromClassId("");
+        setMoveToClassId("");
+    } catch (error) {
+        console.error("Error on bulk move:", error);
+        toast({ variant: "destructive", title: "Gagal Pindah Kelas", description: "Terjadi kesalahan saat memproses." });
+    } finally {
+        setIsMoving(false);
     }
   };
 
@@ -534,9 +577,9 @@ export default function SiswaPage() {
                 <FileUp className="mr-2 h-4 w-4" />
                 Impor Siswa
             </Button>
-            <Button onClick={() => setIsGraduateAlertOpen(true)} variant="secondary">
-                <Award className="mr-2 h-4 w-4" />
-                Luluskan Siswa XII
+            <Button onClick={() => setIsPromotionDialogOpen(true)} variant="secondary">
+                <GraduationCap className="mr-2 h-4 w-4" />
+                Proses Akhir Tahun
             </Button>
             <Button onClick={openAddDialog}>
                 <PlusCircle className="mr-2 h-4 w-4" />
@@ -772,6 +815,77 @@ export default function SiswaPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
+      <Dialog open={isPromotionDialogOpen} onOpenChange={setIsPromotionDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+                <DialogTitle>Alat Bantu Proses Akhir Tahun</DialogTitle>
+                <DialogDescription>
+                    Gunakan alat ini untuk meluluskan dan menaikkan kelas siswa secara massal. Lakukan proses secara berurutan dari Langkah 1.
+                </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 space-y-6">
+                <div className="p-4 border rounded-lg">
+                    <h3 className="font-semibold mb-2">Langkah 1: Luluskan Siswa Kelas XII</h3>
+                    <p className="text-sm text-muted-foreground mb-4">Tindakan ini akan mengubah status semua siswa aktif di tingkat XII menjadi 'Lulus'.</p>
+                    <AlertDialogTrigger asChild>
+                         <Button variant="secondary" onClick={() => setIsGraduateAlertOpen(true)}>
+                            <Award className="mr-2 h-4 w-4" />
+                            Luluskan Siswa Kelas XII
+                        </Button>
+                    </AlertDialogTrigger>
+                </div>
+
+                <Separator />
+
+                <div className="p-4 border rounded-lg space-y-4">
+                    <h3 className="font-semibold">Langkah 2: Naikkan Kelas Siswa (Massal)</h3>
+                     <Alert>
+                        <ChevronsRight className="h-4 w-4" />
+                        <AlertTitle>Penting</AlertTitle>
+                        <AlertDescription>
+                          Pindahkan siswa dari tingkat yang lebih tinggi terlebih dahulu (misal: XI ke XII) sebelum memindahkan tingkat yang lebih rendah (X ke XI) untuk menghindari kelas yang penuh.
+                        </AlertDescription>
+                    </Alert>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div className="space-y-2">
+                            <Label>Dari Kelas</Label>
+                            <Select onValueChange={setMoveFromClassId} value={moveFromClassId}>
+                                <SelectTrigger><SelectValue placeholder="Pilih kelas asal..." /></SelectTrigger>
+                                <SelectContent>
+                                    {["X", "XI"].map(grade => (
+                                        <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
+                                            {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                                        </SelectGroup>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Ke Kelas</Label>
+                             <Select onValueChange={setMoveToClassId} value={moveToClassId}>
+                                <SelectTrigger><SelectValue placeholder="Pilih kelas tujuan..." /></SelectTrigger>
+                                <SelectContent>
+                                     {["XI", "XII"].map(grade => (
+                                        <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
+                                            {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                                        </SelectGroup>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <Button onClick={handleBulkMove} disabled={isMoving || !moveFromClassId || !moveToClassId} className="w-full">
+                        {isMoving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ChevronsRight className="mr-2 h-4 w-4" />}
+                        Pindahkan Semua Siswa Aktif
+                    </Button>
+                </div>
+            </div>
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsPromotionDialogOpen(false)}>Tutup</Button>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
        <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
             <DialogContent className="sm:max-w-md">

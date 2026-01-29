@@ -117,6 +117,16 @@ type SchoolHoursSettings = {
 
 const attendanceEditSchema = z.object({
   status: z.enum(["Hadir", "Terlambat", "Sakit", "Izin", "Alfa", "Dispen"]),
+  jamMasuk: z.string().optional(),
+  jamPulang: z.string().optional(),
+}).refine(data => {
+    if ((data.status === "Hadir" || data.status === "Terlambat") && !data.jamMasuk) {
+        return false;
+    }
+    return true;
+}, {
+    message: "Jam masuk harus diisi jika status Hadir atau Terlambat.",
+    path: ["jamMasuk"],
 })
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
@@ -303,33 +313,65 @@ export default function AbsensiPage() {
       });
       return;
     }
-    setEditingRecord(record)
+    setEditingRecord(record);
+    const formatTimestampToTime = (ts: Timestamp | null | undefined) => {
+        if (!ts) return "";
+        return format(ts.toDate(), "HH:mm");
+    }
     form.reset({
       status: record.status as any,
+      jamMasuk: formatTimestampToTime(record.timestampMasuk),
+      jamPulang: formatTimestampToTime(record.timestampPulang),
     })
     setIsFormDialogOpen(true)
   }
 
   const handleSaveAttendance = async (values: z.infer<typeof attendanceEditSchema>) => {
     if (!editingRecord || !editingRecord.id) return
-
+    setIsLoading(true);
     try {
-      const docRef = doc(db, "attendance", editingRecord.id)
-      await updateDoc(docRef, {
-        status: values.status,
-      })
+        const { status, jamMasuk, jamPulang } = values;
+        const docRef = doc(db, "attendance", editingRecord.id);
 
-      setAttendanceRecords(prev =>
-        prev.map(rec =>
-          rec.id === editingRecord.id ? { ...rec, status: values.status as AttendanceStatus } : rec
-        )
-      )
+        const updatePayload: { [key: string]: any } = {};
+        const recordDate = startOfDay(date);
 
-      toast({ title: "Sukses", description: "Data absensi berhasil diperbarui." })
-      setIsFormDialogOpen(false)
+        if (["Sakit", "Izin", "Alfa", "Dispen"].includes(status)) {
+            updatePayload.timestampMasuk = null;
+            updatePayload.timestampPulang = null;
+            updatePayload.status = status;
+        } else {
+            const [hMasuk, mMasuk] = jamMasuk!.split(':').map(Number);
+            const newTimestampMasuk = Timestamp.fromDate(setMinutes(setHours(recordDate, hMasuk), mMasuk));
+            updatePayload.timestampMasuk = newTimestampMasuk;
+
+            if (schoolHours) {
+                const [shHours, shMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+                const deadlineTime = setMinutes(setHours(recordDate, shHours), shMinutes + parseInt(schoolHours.toleransi));
+                updatePayload.status = newTimestampMasuk.toDate() > deadlineTime ? "Terlambat" : "Hadir";
+            } else {
+                updatePayload.status = status; // Fallback
+            }
+
+            if (jamPulang) {
+                const [hPulang, mPulang] = jamPulang.split(':').map(Number);
+                updatePayload.timestampPulang = Timestamp.fromDate(setMinutes(setHours(recordDate, hPulang), mPulang));
+            } else {
+                updatePayload.timestampPulang = null;
+            }
+        }
+        
+        await updateDoc(docRef, updatePayload);
+        
+        toast({ title: "Sukses", description: "Data absensi berhasil diperbarui." });
+        await fetchData(date);
+        setIsFormDialogOpen(false)
+
     } catch (error) {
       console.error("Error updating attendance:", error)
       toast({ variant: "destructive", title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan data." })
+    } finally {
+        setIsLoading(false);
     }
   }
 
@@ -455,15 +497,17 @@ export default function AbsensiPage() {
       setIsPrinting(false);
     }
   };
+  
+  const statusValue = form.watch("status");
 
   return (
     <>
       <Dialog open={isFormDialogOpen} onOpenChange={setIsFormDialogOpen}>
-        <DialogContent className="sm:max-w-[425px]">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Absensi</DialogTitle>
             <DialogDescription>
-              Ubah status absensi untuk siswa <span className="font-semibold">{editingRecord?.studentName}</span>.
+              Ubah status dan waktu absensi untuk siswa <span className="font-semibold">{editingRecord?.studentName}</span>.
             </DialogDescription>
           </DialogHeader>
           <Form {...form}>
@@ -493,6 +537,38 @@ export default function AbsensiPage() {
                   </FormItem>
                 )}
               />
+
+              {(statusValue === "Hadir" || statusValue === "Terlambat") && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="jamMasuk"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Jam Masuk</FormLabel>
+                        <FormControl>
+                          <Input type="time" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="jamPulang"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Jam Pulang (Opsional)</FormLabel>
+                        <FormControl>
+                          <Input type="time" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
               <DialogFooter>
                 <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -657,7 +733,7 @@ export default function AbsensiPage() {
                               <DropdownMenuContent align="end">
                                   <DropdownMenuLabel>Aksi</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => openEditDialog(record)} disabled={record.status === 'Belum Absen'}>
-                                      Edit Status
+                                      Edit
                                   </DropdownMenuItem>
                               </DropdownMenuContent>
                           </DropdownMenu>
