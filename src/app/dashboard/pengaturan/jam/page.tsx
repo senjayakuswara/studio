@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -60,6 +61,18 @@ export default function JamPage() {
   const handleSave = async () => {
     setIsSaving(true)
     try {
+      // Simple validation for 24h format
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      if (!timeRegex.test(settings.jamMasuk) || !timeRegex.test(settings.jamPulang)) {
+        toast({
+          variant: "destructive",
+          title: "Format Waktu Salah",
+          description: "Harap masukkan waktu dalam format 24 jam (HH:mm), contoh: 07:00 atau 15:30.",
+        });
+        setIsSaving(false);
+        return;
+      }
+
       const docRef = doc(db, "settings", "schoolHours")
       await setDoc(docRef, settings, { merge: true })
       toast({
@@ -99,7 +112,7 @@ export default function JamPage() {
         <CardHeader>
           <CardTitle>Jadwal Umum</CardTitle>
           <CardDescription>
-            Pengaturan ini akan berlaku untuk semua siswa.
+            Pengaturan ini akan berlaku untuk semua siswa. Gunakan format 24 jam (HH:mm).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -113,31 +126,33 @@ export default function JamPage() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <Label htmlFor="jamMasuk">Jam Masuk</Label>
+                  <Label htmlFor="jamMasuk">Jam Masuk (Format 24 Jam)</Label>
                   <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <Input
                       id="jamMasuk"
-                      type="time"
-                      className="pr-10"
+                      type="text"
+                      className="pl-10"
                       value={settings.jamMasuk}
                       onChange={handleChange}
+                      placeholder="HH:mm (contoh: 07:00)"
                     />
-                     <Clock className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="jamPulang">Jam Pulang</Label>
+                  <Label htmlFor="jamPulang">Jam Pulang (Format 24 Jam)</Label>
                    <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                     <Input
                       id="jamPulang"
-                      type="time"
-                      className="pr-10"
+                      type="text"
+                      className="pl-10"
                       value={settings.jamPulang}
                       onChange={handleChange}
+                      placeholder="HH:mm (contoh: 15:30)"
                     />
-                    <Clock className="absolute right-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   </div>
                 </div>
               </div>
@@ -150,6 +165,7 @@ export default function JamPage() {
                   type="number"
                   value={settings.toleransi}
                   onChange={handleChange}
+                  placeholder="Contoh: 15"
                 />
               </div>
             </>
