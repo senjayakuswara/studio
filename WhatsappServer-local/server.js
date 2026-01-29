@@ -114,8 +114,9 @@ function initializeWhatsApp() {
 
         // Start a watchdog timer in case 'ready' event never fires
         clearTimeout(readyTimeout);
+        log('[WATCHDOG] Memulai timer 90 detik untuk memantau status "ready"...');
         readyTimeout = setTimeout(() => {
-            log('Client gagal siap dalam 90 detik. Mencoba restart paksa...', 'error');
+            log('[WATCHDOG] Waktu habis! Client gagal siap dalam 90 detik. Mencoba restart paksa...', 'error');
             io.emit('status', 'Koneksi macet, mencoba restart...');
             if (client) {
                 // Destroy the client and re-initialize
@@ -131,6 +132,7 @@ function initializeWhatsApp() {
 
     client.on('ready', () => {
         clearTimeout(readyTimeout); // Success! Cancel the watchdog timer.
+        log('[WATCHDOG] Timer dibatalkan, client sudah siap.', 'info');
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
         io.emit('status', 'WhatsApp Terhubung!');
