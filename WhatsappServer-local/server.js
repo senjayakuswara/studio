@@ -104,6 +104,9 @@ function initializeWhatsApp() {
                 '--single-process',
             ],
         },
+        webVersionCache: {
+          type: 'remote',
+        }
     });
 
     client.on('qr', qr => {
