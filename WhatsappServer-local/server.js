@@ -1,3 +1,4 @@
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
@@ -29,6 +30,7 @@ logger.info('Berhasil terhubung ke project Firestore: ' + firebaseConfig.project
 
 const SESSION_DIR = './.baileys_auth_info';
 let sock;
+let groupCache = {}; // Cache untuk menyimpan daftar grup
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -44,7 +46,7 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
@@ -66,10 +68,41 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') {
             logger.info('WhatsApp Terhubung! Siap memproses notifikasi.');
+            
+            // Muat daftar grup saat pertama kali terhubung
+            try {
+                logger.info('Memuat daftar grup...');
+                const groups = await sock.groupFetchAllParticipating();
+                groupCache = groups;
+                logger.info(`Berhasil memuat ${Object.keys(groups).length} grup.`);
+            } catch(e) {
+                logger.error('Gagal memuat daftar grup saat startup.', e);
+            }
+
             listenForNotificationJobs();
         }
     });
 }
+
+async function findGroupJidByName(name) {
+    if (Object.keys(groupCache).length === 0) {
+        try {
+            logger.info('Cache grup kosong, mencoba memuat ulang...');
+            const groups = await sock.groupFetchAllParticipating();
+            groupCache = groups;
+            logger.info(`Berhasil memuat ulang ${Object.keys(groups).length} grup.`);
+        } catch(e) {
+            logger.error('Gagal memuat ulang daftar grup.', e);
+            return null;
+        }
+    }
+    
+    const groups = Object.values(groupCache);
+    const foundGroup = groups.find(group => group.subject.trim().toLowerCase() === name.trim().toLowerCase());
+    
+    return foundGroup ? foundGroup.id : null;
+}
+
 
 function listenForNotificationJobs() {
     const q = query(collection(db, "notification_queue"), where("status", "==", "pending"));
@@ -94,25 +127,24 @@ function listenForNotificationJobs() {
                     throw new Error('Payload tidak valid: recipient atau message kosong.');
                 }
                 
-                let jid = recipient;
-                if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us')) {
-                    jid = jid.replace(/\D/g, ''); // Hapus non-digit
-                    if (jid.startsWith('0')) {
-                        jid = '62' + jid.substring(1);
+                let jid;
+                // Cek apakah recipient adalah nama grup atau nomor telepon
+                if (recipient.match(/^\d+$/)) { // Jika hanya angka, anggap nomor telepon
+                     let phoneJid = recipient.replace(/\D/g, ''); 
+                    if (phoneJid.startsWith('0')) {
+                        phoneJid = '62' + phoneJid.substring(1);
                     }
-                    jid = jid + '@s.whatsapp.net';
-                }
-                
-                const [result] = await sock.onWhatsApp(jid);
-                if (!result?.exists) {
-                     // Check if it's a group
-                    const groupMeta = await sock.groupMetadata(recipient).catch(() => null);
-                    if (!groupMeta) {
-                        throw new Error(`Nomor atau Grup ${recipient} tidak ditemukan di WhatsApp.`);
+                    jid = phoneJid + '@s.whatsapp.net';
+                    const [result] = await sock.onWhatsApp(jid);
+                    if (!result?.exists) {
+                         throw new Error(`Nomor ${recipient} tidak ditemukan di WhatsApp.`);
                     }
-                    jid = groupMeta.id; // Use the correct group JID
-                } else {
                     jid = result.jid;
+                } else { // Anggap sebagai nama grup
+                    jid = await findGroupJidByName(recipient);
+                    if (!jid) {
+                         throw new Error(`Nomor atau Grup ${recipient} tidak ditemukan di WhatsApp.`);
+                    }
                 }
                 
                 logger.info(`[JOB] Mengirim pesan ke ${jid}`);
