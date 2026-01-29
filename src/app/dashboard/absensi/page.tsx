@@ -273,6 +273,8 @@ export default function AbsensiPage() {
         return;
     }
     setIsMassCheckinProcessing(true);
+    toast({ title: "Memulai Absensi Massal", description: "Mencatat kehadiran siswa..." });
+
     try {
         const studentsToAttend = studentsBelumAbsen;
         if (studentsToAttend.length === 0) {
@@ -314,18 +316,26 @@ export default function AbsensiPage() {
         });
 
         await batch.commit();
-        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen. Memulai pengiriman notifikasi...` });
+        toast({ title: "Absensi Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen. Memulai pengiriman notifikasi...` });
         
-        // Serially queue notifications to avoid hitting Firestore write limits
+        let successCount = 0;
+        let failCount = 0;
         for (const payload of notificationPayloads) {
             try {
                 await notifyOnAttendance(payload);
+                successCount++;
             } catch (err) {
                 console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+                failCount++;
             }
         }
         
-        toast({ title: "Antrean Selesai", description: "Semua notifikasi telah berhasil dimasukkan ke dalam antrean." });
+        let description = `${successCount} notifikasi berhasil dimasukkan ke antrean.`;
+        if (failCount > 0) {
+            description += ` ${failCount} gagal karena masalah koneksi/database.`;
+        }
+        toast({ title: "Proses Notifikasi Selesai", description });
+
         await fetchData(date);
 
     } catch (error) {
@@ -342,6 +352,7 @@ export default function AbsensiPage() {
         return;
     }
     setIsMassCheckoutProcessing(true);
+    toast({ title: "Memulai Absensi Pulang Massal", description: "Mencatat jam pulang siswa..." });
     try {
         const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
         if (studentsToCheckOut.length === 0) {
@@ -375,16 +386,23 @@ export default function AbsensiPage() {
         await batch.commit();
         toast({ title: "Sukses", description: `${studentsToCheckOut.length} siswa berhasil diabsen pulang. Memulai pengiriman notifikasi...` });
         
-        // Serially queue notifications to avoid hitting Firestore write limits
+        let successCount = 0;
+        let failCount = 0;
         for (const payload of notificationPayloads) {
             try {
                 await notifyOnAttendance(payload);
+                successCount++;
             } catch (err) {
                 console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+                failCount++;
             }
         }
 
-        toast({ title: "Antrean Selesai", description: "Semua notifikasi pulang telah berhasil dimasukkan ke dalam antrean." });
+        let description = `${successCount} notifikasi pulang berhasil dimasukkan ke antrean.`;
+        if (failCount > 0) {
+            description += ` ${failCount} gagal karena masalah koneksi/database.`;
+        }
+        toast({ title: "Proses Notifikasi Selesai", description });
         await fetchData(date);
 
     } catch (error) {

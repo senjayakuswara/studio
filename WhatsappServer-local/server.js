@@ -7,7 +7,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
@@ -214,6 +214,148 @@ setInterval(async () => {
         logger.error(`[FAIL-SAFE] Error saat membersihkan tugas macet: ${error.message}`);
     }
 }, 5 * 60 * 1000);
+
+
+// --- SCHEDULED TASKS ---
+let lastCheckDate = null;
+let sentMasukReport = false;
+let sentPulangReport = false;
+
+async function generateUnattendedReport(adminGroup, type) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const studentsByClass = {};
+    let message = '';
+    let unattendedStudents = [];
+
+    try {
+        const studentsSnapshot = await getDocs(query(collection(db, "students"), where("status", "==", "Aktif")));
+        const allStudents = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        const attendanceSnapshot = await getDocs(query(collection(db, "attendance"), where("recordDate", ">=", todayStart), where("recordDate", "<=", todayEnd)));
+        const attendanceRecords = attendanceSnapshot.docs.map(d => d.data());
+
+        const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const todayString = new Date().toLocaleDateString('id-ID', dateOptions);
+
+        if (type === 'masuk') {
+            message = `*Laporan Siswa Belum Absen Masuk*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi masuk hingga saat ini:\n`;
+            const attendedStudentIds = new Set(attendanceRecords.map(r => r.studentId));
+            unattendedStudents = allStudents.filter(s => !attendedStudentIds.has(s.id));
+        } else { // type === 'pulang'
+            message = `*Laporan Siswa Belum Absen Pulang*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi pulang hingga saat ini:\n`;
+            const pulangStudentIds = new Set(attendanceRecords.filter(r => r.timestampPulang).map(r => r.studentId));
+            const masukStudentIds = new Set(attendanceRecords.map(r => r.studentId));
+            unattendedStudents = allStudents.filter(s => masukStudentIds.has(s.id) && !pulangStudentIds.has(s.id));
+        }
+        
+        if (unattendedStudents.length === 0) {
+            logger.info(`[SCHEDULER] Tidak ada siswa yang belum absen ${type}. Laporan tidak dikirim.`);
+            return;
+        }
+
+        const classesSnapshot = await getDocs(collection(db, "classes"));
+        const classMap = new Map(classesSnapshot.docs.map(d => [d.id, d.data()]));
+
+        unattendedStudents.forEach(student => {
+            const classInfo = classMap.get(student.classId);
+            const className = classInfo ? `${classInfo.grade} ${classInfo.name}` : 'Kelas Tidak Dikenal';
+            if (!studentsByClass[className]) {
+                studentsByClass[className] = [];
+            }
+            studentsByClass[className].push(student.nama);
+        });
+
+        const sortedClasses = Object.keys(studentsByClass).sort();
+        
+        let reportBody = '';
+        sortedClasses.forEach(className => {
+            reportBody += `\n*${className}*:\n`;
+            studentsByClass[className].sort().forEach(studentName => {
+                reportBody += `- ${studentName}\n`;
+            });
+        });
+        
+        message += reportBody;
+
+        const jobPayload = {
+            payload: { recipient: adminGroup, message },
+            type: 'recap',
+            metadata: { reportType: `unattended_${type}` },
+            status: 'pending',
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            errorMessage: '',
+        };
+
+        await addDoc(collection(db, "notification_queue"), jobPayload);
+        logger.info(`[SCHEDULER] Laporan siswa belum absen ${type} berhasil dimasukkan ke antrean untuk grup ${adminGroup}.`);
+
+    } catch (e) {
+        logger.error(`[SCHEDULER] Gagal membuat laporan siswa belum absen ${type}: ${e.message}`);
+    }
+}
+
+
+async function runScheduledTasks() {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+
+    if (lastCheckDate !== today) {
+        logger.info('[SCHEDULER] Hari baru, mereset flag laporan harian.');
+        sentMasukReport = false;
+        sentPulangReport = false;
+        lastCheckDate = today;
+    }
+
+    try {
+        const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
+        const appConfigSnap = await getDoc(doc(db, "settings", "appConfig"));
+
+        if (!schoolHoursSnap.exists() || !appConfigSnap.exists()) {
+            return;
+        }
+
+        const schoolHours = schoolHoursSnap.data();
+        const appConfig = appConfigSnap.data();
+        const adminGroup = appConfig.adminNotificationGroupName;
+
+        if (!adminGroup || !schoolHours.jamMasuk || !schoolHours.jamPulang) {
+            return;
+        }
+
+        const [hMasuk, mMasuk] = schoolHours.jamMasuk.split(':').map(Number);
+        const reportTimeMasuk = new Date();
+        reportTimeMasuk.setHours(hMasuk + 1, mMasuk, 0, 0);
+
+        const [hPulang, mPulang] = schoolHours.jamPulang.split(':').map(Number);
+        const reportTimePulang = new Date();
+        reportTimePulang.setHours(hPulang + 1, mPulang, 0, 0);
+        
+        if (!sentMasukReport && now >= reportTimeMasuk && now < reportTimePulang) {
+            logger.info('[SCHEDULER] Waktunya laporan siswa belum absen masuk. Memulai proses...');
+            await generateUnattendedReport(adminGroup, 'masuk');
+            sentMasukReport = true;
+        }
+
+        if (!sentPulangReport && now >= reportTimePulang) {
+            logger.info('[SCHEDULER] Waktunya laporan siswa belum absen pulang. Memulai proses...');
+            await generateUnattendedReport(adminGroup, 'pulang');
+            sentPulangReport = true;
+        }
+
+    } catch (error) {
+        logger.error(`[SCHEDULER] Error: ${error.message}`);
+    }
+}
+
+// Check every 5 minutes
+setInterval(runScheduledTasks, 5 * 60 * 1000);
+// --- END SCHEDULED TASKS ---
+
 
 const expressApp = express();
 const PORT = 8000;
