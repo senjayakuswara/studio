@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { collection, query, where, getDocs, addDoc, doc, getDoc, Timestamp, updateDoc } from "firebase/firestore"
-import { Html5Qrcode, type CameraDevice } from "html5-qrcode"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -31,8 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MoreHorizontal, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode, CheckCircle2 } from "lucide-react"
+import { MoreHorizontal, Info, ScanLine, Loader2, User, XCircle, CheckCircle2 } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
 import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
@@ -96,17 +94,12 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const [logMessages, setLogMessages] = useState<LogMessage[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isScannerOn, setIsScannerOn] = useState(false);
-    const [cameraError, setCameraError] = useState<string | null>(null);
     const [highlightedNisn, setHighlightedNisn] = useState<{ nisn: string; type: "success" | "error" } | null>(null);
     const [feedbackOverlay, setFeedbackOverlay] = useState<FeedbackOverlayState>({ show: false, type: 'loading' });
-    const [availableCameras, setAvailableCameras] = useState<CameraDevice[]>([]);
-    const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(undefined);
     
     const recentlyScanned = useRef(new Set<string>());
     const processingLock = useRef(false);
     const scannerInputRef = useRef<HTMLInputElement>(null);
-    const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const { toast } = useToast()
 
@@ -124,40 +117,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         };
         setLogMessages(prev => [newLog, ...prev].slice(0, 50));
     }, [])
-
-    useEffect(() => {
-        if (window.location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-            const message = "Kamera mungkin tidak berfungsi karena halaman ini tidak aman (bukan HTTPS).";
-            addLog(message, "warning");
-            setCameraError(message);
-            return;
-        }
-
-        Html5Qrcode.getCameras()
-            .then(devices => {
-                if (devices && devices.length) {
-                    setAvailableCameras(devices);
-                    if (!selectedCameraId) {
-                        setSelectedCameraId(devices[0].id); 
-                    }
-                } else {
-                    const message = "Tidak ada perangkat kamera yang ditemukan.";
-                    setCameraError(message);
-                    addLog(message, "error");
-                }
-            })
-            .catch(err => {
-                let message = "Gagal mengakses perangkat kamera.";
-                if (err.name === "NotAllowedError") {
-                    message = "Izin kamera ditolak. Harap aktifkan izin kamera untuk situs ini di pengaturan browser Anda.";
-                } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-                    message = "Tidak ada perangkat kamera yang ditemukan di perangkat ini.";
-                }
-                console.error("Gagal mendapatkan perangkat kamera.", err);
-                setCameraError(message);
-                addLog(message, "error");
-            });
-    }, [selectedCameraId, addLog]);
 
     const getAttendanceRecord = useCallback((studentId: string): Partial<AttendanceRecord> => {
         return attendanceData[studentId] || {};
@@ -417,56 +376,6 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             cleanup('error', student, errorMessage);
         }
     }, [schoolHours, allStudents, grade, attendanceData, addLog, playSound, toast]);
-    
-    const stopScanner = useCallback(async () => {
-        if (html5QrCodeRef.current?.isScanning) {
-            try {
-                await html5QrCodeRef.current.stop();
-            } catch (err) {
-                 console.log("Gagal menghentikan scanner QR, mungkin sudah berhenti.");
-            }
-        }
-        html5QrCodeRef.current = null;
-        setIsScannerOn(false);
-    }, []);
-
-    const startScanner = useCallback(async () => {
-        if (!selectedCameraId) {
-            toast({ variant: "destructive", title: "Kamera Belum Siap", description: "Pilih perangkat kamera terlebih dahulu." });
-            return;
-        }
-    
-        const qrCode = new Html5Qrcode("qr-reader");
-        html5QrCodeRef.current = qrCode;
-        setCameraError(null);
-        setIsScannerOn(true);
-        
-        try {
-            await qrCode.start(
-                selectedCameraId,
-                { fps: 10, qrbox: (w, h) => ({ width: w * 0.8, height: h * 0.8 }) },
-                (decodedText) => { if (qrCode.isScanning) handleScan(decodedText); },
-                (errorMessage) => { /* ignore */ }
-            );
-            addLog(`Scanner QR diaktifkan.`, "success");
-        } catch (err: any) {
-            let errorMessage = err?.message || 'Gagal memulai kamera.';
-            if (err.name === 'NotAllowedError') {
-                errorMessage = "Izin kamera ditolak. Harap izinkan akses di browser Anda.";
-            } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-                 errorMessage = "Kamera yang dipilih tidak ditemukan.";
-            }
-            setCameraError(errorMessage);
-            addLog(`Error kamera: ${errorMessage}`, "error");
-            await stopScanner();
-        }
-    }, [selectedCameraId, handleScan, addLog, stopScanner, toast]);
-    
-    useEffect(() => {
-        return () => {
-            stopScanner();
-        };
-    }, [stopScanner]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -547,96 +456,56 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Pindai barcode untuk absen masuk &amp; pulang.</p>
+            <p className="text-muted-foreground">Gunakan pemindai barcode atau ketik manual untuk absen.</p>
             </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="lg:col-span-1">
+            <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2"><QrCode /> Pindai QR Code</CardTitle>
+                    <CardTitle className="flex items-center gap-2"><ScanLine />Input Pindai / Manual</CardTitle>
                 </CardHeader>
-                <CardContent className="flex flex-col items-center gap-4">
-                     <div className="w-full aspect-video rounded-md bg-muted border overflow-hidden flex items-center justify-center relative">
-                        <div id="qr-reader" className="w-full h-full" />
-                         {!isScannerOn && !cameraError && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
-                                <QrCode className="h-10 w-10 text-muted-foreground" />
-                                <p className="mt-2 text-sm text-muted-foreground">Scanner QR tidak aktif.</p>
+                <CardContent>
+                    <Input
+                        ref={scannerInputRef}
+                        id={`nisn-input-${grade}`}
+                        placeholder={isLoading ? "Memuat data..." : "Pindai NISN atau ketik lalu tekan Enter..."}
+                        disabled={isLoading || isProcessing}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                handleScan(e.currentTarget.value);
+                            }
+                        }}
+                        autoFocus
+                    />
+                    <p className="text-xs text-muted-foreground mt-2">Fokuskan kursor di sini untuk menggunakan pemindai barcode USB.</p>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Log Aktivitas</CardTitle>
+                    <CardDescription>Catatan pemindaian hari ini.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="h-[205px] overflow-y-auto rounded-md border p-2 space-y-2">
+                        {logMessages.length > 0 ? (
+                            logMessages.map((log, i) => (
+                                <div key={i} className="flex items-start gap-2 text-sm">
+                                    <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
+                                    {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
+                                    {log.type === 'error' && <XCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
+                                    {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
+                                    <span className="flex-1">{log.message}</span>
+                                </div>
+                            ))
+                        ) : (
+                             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                                Belum ada aktivitas.
                             </div>
                         )}
-                        {cameraError && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center bg-background/80 backdrop-blur-sm">
-                                <VideoOff className="h-10 w-10 text-destructive" />
-                                <p className="mt-2 text-sm text-destructive">{cameraError}</p>
-                            </div>
-                        )}
-                    </div>
-                     <div className="w-full flex gap-2">
-                        <Select onValueChange={setSelectedCameraId} value={selectedCameraId} disabled={isScannerOn || !!cameraError || availableCameras.length === 0}>
-                            <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Pilih Perangkat Kamera..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {availableCameras.map(device => (
-                                    <SelectItem key={device.id} value={device.id}>{device.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button className="w-full" onClick={() => isScannerOn ? stopScanner() : startScanner()} disabled={!selectedCameraId || !!cameraError} variant={isScannerOn ? 'destructive' : 'default'}>
-                            {isScannerOn ? <VideoOff className="mr-2"/> : <Camera className="mr-2"/>}
-                            {isScannerOn ? 'Matikan Scanner' : 'Nyalakan Scanner'}
-                        </Button>
                     </div>
                 </CardContent>
             </Card>
-
-            <div className="flex flex-col gap-6 lg:col-span-1">
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><ScanLine /> Input Manual</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <Input
-                            ref={scannerInputRef}
-                            id={`nisn-input-${grade}`}
-                            placeholder={isLoading ? "Memuat data..." : "Ketik NISN lalu tekan Enter..."}
-                            disabled={isLoading || isProcessing}
-                            onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                    handleScan(e.currentTarget.value);
-                                }
-                            }}
-                            autoFocus
-                        />
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Log Aktivitas</CardTitle>
-                        <CardDescription>Catatan pemindaian hari ini.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="h-[250px] overflow-y-auto rounded-md border p-2 space-y-2">
-                            {logMessages.length > 0 ? (
-                                logMessages.map((log, i) => (
-                                    <div key={i} className="flex items-start gap-2 text-sm">
-                                        <span className="font-mono text-xs text-muted-foreground pt-0.5">{log.timestamp}</span>
-                                        {log.type === 'success' && <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500 mt-0.5" />}
-                                        {log.type === 'error' && <XCircle className="h-4 w-4 shrink-0 text-red-500 mt-0.5" />}
-                                        {log.type === 'info' && <Info className="h-4 w-4 shrink-0 text-blue-500 mt-0.5" />}
-                                        <span className="flex-1">{log.message}</span>
-                                    </div>
-                                ))
-                            ) : (
-                                 <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                                    Belum ada aktivitas.
-                                </div>
-                            )}
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
         </div>
 
         <Card>
