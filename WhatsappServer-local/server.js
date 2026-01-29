@@ -7,7 +7,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
@@ -200,11 +200,11 @@ setInterval(async () => {
         }
         
         logger.warn(`[FAIL-SAFE] Ditemukan ${stuckJobs.size} tugas macet. Mereset ke 'pending'...`);
-        const batch = [];
-        stuckJobs.forEach(doc => {
-            batch.push(updateDoc(doc.ref, { status: 'pending', errorMessage: 'Direset oleh fail-safe' }));
+        const batch = writeBatch(db);
+        stuckJobs.forEach(jobDoc => {
+            batch.update(jobDoc.ref, { status: 'pending', errorMessage: 'Direset oleh fail-safe' });
         });
-        await Promise.all(batch);
+        await batch.commit();
 
     } catch (error) {
         logger.error(`[FAIL-SAFE] Error saat membersihkan tugas macet: ${error.message}`);
