@@ -3,6 +3,7 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLat
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
 const express = require('express');
+const cors = require('cors');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
@@ -359,22 +360,15 @@ const isWeekend = (date) => {
     return day === 0 || day === 6; // Sunday or Saturday
 }
 
-async function generateAndQueueAllMonthlyRecaps() {
-    logger.info('[MONTHLY-RECAP] Memulai proses rekap bulanan untuk grup kelas...');
-    
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth(); // It will recap the current month
+async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth) {
+    logger.info(`[MONTHLY-RECAP] Memulai proses rekap bulanan untuk ${recapMonth + 1}-${recapYear}...`);
+
+    const year = recapYear;
+    const month = recapMonth;
     const monthIdentifier = `${year}-${month}`;
+    const dateForMonthName = new Date(year, month);
 
     try {
-        const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
-        const statusDocSnap = await getDoc(statusDocRef);
-        if (statusDocSnap.exists() && statusDocSnap.data().lastRun === monthIdentifier) {
-            logger.info(`[MONTHLY-RECAP] Rekap bulanan untuk ${monthIdentifier} sudah pernah dijalankan. Melewati.`);
-            return;
-        }
-
         const [studentsSnapshot, classesSnapshot, holidaysSnapshot] = await Promise.all([
             getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
             getDocs(collection(db, "classes")),
@@ -430,7 +424,7 @@ async function generateAndQueueAllMonthlyRecaps() {
                 continue;
             }
 
-            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(now);
+            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(dateForMonthName);
             let classMessage = `🏫 *SMAS PGRI Naringgul*\n*Rekap Absensi Bulanan: ${monthName}*\n*Kelas: ${classInfo.grade} ${classInfo.name}*\n--------------------------------\n\n`;
             
             const studentsInClass = studentsByClass[classId].sort((a,b) => a.nama.localeCompare(b.nama));
@@ -481,22 +475,39 @@ async function generateAndQueueAllMonthlyRecaps() {
             logger.info(`[MONTHLY-RECAP] Rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`);
         }
 
+        const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
         await setDoc(statusDocRef, { lastRun: monthIdentifier }, { merge: true });
         logger.info(`[MONTHLY-RECAP] Selesai: Semua rekap bulanan per kelas berhasil dimasukkan ke antrean.`);
 
     } catch (e) {
         logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan: ${e.message}`);
+        throw e;
     }
 }
 
 
-function runMonthlyRecapScheduler() {
+async function runMonthlyRecapScheduler() {
     const now = new Date();
     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     // Run on the last day of the month at 8 PM (20:00)
     if (now.getDate() === lastDayOfMonth && now.getHours() === 20) {
-        logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan!');
-        generateAndQueueAllMonthlyRecaps();
+        logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan. Memeriksa status...');
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const monthIdentifier = `${year}-${month}`;
+
+        try {
+            const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
+            const statusDocSnap = await getDoc(statusDocRef);
+            if (statusDocSnap.exists() && statusDocSnap.data().lastRun === monthIdentifier) {
+                logger.info(`[MONTHLY-RECAP-SCHEDULER] Rekap bulanan untuk ${monthIdentifier} sudah pernah dijalankan. Melewati.`);
+                return;
+            }
+            logger.info('[MONTHLY-RECAP-SCHEDULER] Memulai pembuatan rekap otomatis...');
+            await generateAndQueueAllMonthlyRecaps(year, month);
+        } catch(e) {
+            logger.error(`[MONTHLY-RECAP-SCHEDULER] Gagal menjalankan rekap otomatis: ${e.message}`);
+        }
     }
 }
 
@@ -509,6 +520,29 @@ setInterval(runMonthlyRecapScheduler, 60 * 60 * 1000);
 
 
 const expressApp = express();
+expressApp.use(cors());
+expressApp.use(express.json());
+
+expressApp.post('/trigger-monthly-recap', async (req, res) => {
+    try {
+        const { year, month } = req.body;
+        // Basic validation
+        if (typeof year !== 'number' || typeof month !== 'number' || month < 0 || month > 11) {
+            return res.status(400).json({ message: 'Payload tidak valid: `year` dan `month` (0-11) diperlukan.' });
+        }
+
+        logger.info(`[MANUAL-RECAP] Memicu rekap manual untuk bulan ${month + 1}, tahun ${year}`);
+        
+        await generateAndQueueAllMonthlyRecaps(year, month);
+        
+        res.status(200).json({ message: 'Proses rekap bulanan berhasil dipicu. Notifikasi akan dimasukkan ke dalam antrean.' });
+    } catch (error) {
+        logger.error(`[MANUAL-RECAP] Gagal memicu rekap manual: ${error.message}`);
+        res.status(500).json({ message: 'Terjadi kesalahan internal saat memicu rekap.' });
+    }
+});
+
+
 const PORT = 8000;
 expressApp.get('/', (req, res) => {
     res.send('WhatsApp Server (Baileys) is running.');

@@ -8,7 +8,7 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Download, Loader2, Printer, Search } from "lucide-react"
+import { Download, Loader2, Printer, Search, Send } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 
@@ -109,6 +109,7 @@ export default function RekapitulasiPage() {
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
+    const [isTriggeringRecap, setIsTriggeringRecap] = useState(false);
     const { toast } = useToast()
     
     const individualStudentOptions = useMemo(() => {
@@ -676,6 +677,43 @@ export default function RekapitulasiPage() {
         doc.save(`SP_${studentData.studentInfo.nama.replace(/ /g, '_')}_${warningMonth+1}_${warningYear}.pdf`);
     }
 
+    const handleTriggerManualRecap = async () => {
+        setIsTriggeringRecap(true);
+        toast({
+            title: "Memicu Rekap Manual",
+            description: `Memulai proses rekap untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
+        });
+
+        try {
+            const response = await fetch('http://localhost:8000/trigger-monthly-recap', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ year: selectedYear, month: selectedMonth }),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                throw new Error(result.message || 'Gagal terhubung ke server notifikasi.');
+            }
+
+            toast({
+                title: "Sukses",
+                description: result.message,
+            });
+
+        } catch (error: any) {
+            console.error("Error triggering manual recap:", error);
+            toast({
+                variant: "destructive",
+                title: "Gagal Memicu Rekap",
+                description: error.message || 'Pastikan server notifikasi sedang berjalan dan dapat diakses.',
+            });
+        } finally {
+            setIsTriggeringRecap(false);
+        }
+    }
+
     return (
         <div className="flex flex-col gap-6">
             <div>
@@ -733,6 +771,10 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
+                                <Button onClick={handleTriggerManualRecap} disabled={isTriggeringRecap || isGenerating || isLoading}>
+                                    {isTriggeringRecap ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    Kirim Rekap ke Grup
+                                </Button>
                                 <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
