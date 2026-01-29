@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -167,7 +168,7 @@ export default function NotifikasiPage() {
                             {job.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-medium">{job.payload.recipient}</TableCell>
+                      <TableCell className="font-medium">{job.payload?.recipient || 'N/A'}</TableCell>
                       <TableCell>
                         <div className="flex flex-col">
                             <span>{format(job.createdAt.toDate(), "d MMM yyyy, HH:mm", { locale: localeID })}</span>
@@ -175,7 +176,7 @@ export default function NotifikasiPage() {
                         </div>
                       </TableCell>
                       <TableCell className="max-w-xs">
-                        <p className="truncate text-sm text-foreground">{job.status === 'failed' ? job.errorMessage : job.payload.message}</p>
+                        <p className="truncate text-sm text-foreground">{job.status === 'failed' ? job.errorMessage : job.payload?.message || ""}</p>
                       </TableCell>
                       <TableCell className="text-right">
                          <div className="flex gap-2 justify-end">
