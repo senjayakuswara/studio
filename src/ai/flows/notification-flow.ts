@@ -99,7 +99,12 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     } else if (record.timestampMasuk) {
         timestampStr = record.timestampMasuk;
         title = `Absensi Masuk`;
-        finalStatus = record.status;
+        // Make status more descriptive
+        if (record.status === 'Hadir') {
+            finalStatus = 'Masuk Tepat Waktu';
+        } else {
+            finalStatus = record.status; // e.g., "Terlambat"
+        }
     } else {
         // This case is for manual entries like Sakit/Izin/Alfa
         timestampStr = record.recordDate; 
@@ -125,7 +130,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         `👤 *Nama*: ${record.studentName}`,
         `🆔 *NISN*: ${record.nisn}`,
         `📚 *Kelas*: ${classInfo.name}`,
-        `⏰ *Jam*: ${formattedTime}`,
+        `⏰ *Jam*: ${formattedTime} WIB`,
         `✨ *Status*: *${finalStatus}*`,
     ];
     
