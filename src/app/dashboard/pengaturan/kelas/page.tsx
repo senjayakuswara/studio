@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -68,7 +69,7 @@ const classSchema = z.object({
   whatsappGroupName: z.string().optional(),
 })
 
-type Class = z.infer<typeof classSchema> & { id: string; whatsappGroupName?: string; }
+type Class = z.infer<typeof classSchema> & { id: string }
 type NewClass = z.infer<typeof classSchema>
 
 export default function KelasPage() {
@@ -239,7 +240,7 @@ export default function KelasPage() {
                   <FormItem>
                     <FormLabel>Nama Grup WhatsApp (Opsional)</FormLabel>
                     <FormControl>
-                      <Input placeholder="Contoh: Info Kelas X MIPA 1" {...field} />
+                      <Input placeholder="Contoh: Info Kelas X MIPA 1" {...field} value={field.value || ''} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
