@@ -7,7 +7,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
@@ -360,11 +360,11 @@ const isWeekend = (date) => {
 }
 
 async function generateAndQueueAllMonthlyRecaps() {
-    logger.info('[MONTHLY-RECAP] Memulai proses rekap bulanan...');
+    logger.info('[MONTHLY-RECAP] Memulai proses rekap bulanan untuk grup kelas...');
     
     const now = new Date();
     const year = now.getFullYear();
-    const month = now.getMonth();
+    const month = now.getMonth(); // It will recap the current month
     const monthIdentifier = `${year}-${month}`;
 
     try {
@@ -375,21 +375,26 @@ async function generateAndQueueAllMonthlyRecaps() {
             return;
         }
 
-        const studentsQuery = query(collection(db, "students"), where("parentWaNumber", "!=", ""));
-        const [studentsSnapshot, holidaysSnapshot] = await Promise.all([
-            getDocs(studentsQuery),
+        const [studentsSnapshot, classesSnapshot, holidaysSnapshot] = await Promise.all([
+            getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
+            getDocs(collection(db, "classes")),
             getDocs(collection(db, "holidays"))
         ]);
-
-        if (studentsSnapshot.empty) {
-            logger.info("[MONTHLY-RECAP] Tidak ada siswa dengan nomor WA orang tua. Proses dihentikan.");
-            await updateDoc(statusDocRef, { lastRun: monthIdentifier });
-            return;
-        }
-
-        const students = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const holidays = holidaysSnapshot.docs.map(d => d.data());
         
+        const classes = classesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const classMap = new Map(classes.map(c => [c.id, c]));
+        const students = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // Group students by classId
+        const studentsByClass = {};
+        students.forEach(student => {
+            if (!studentsByClass[student.classId]) {
+                studentsByClass[student.classId] = [];
+            }
+            studentsByClass[student.classId].push(student);
+        });
+        
+        const holidays = holidaysSnapshot.docs.map(d => d.data());
         const holidayDateStrings = new Set();
         holidays.forEach(holiday => {
             const start = holiday.startDate.toDate();
@@ -404,89 +409,91 @@ async function generateAndQueueAllMonthlyRecaps() {
         const monthStart = new Date(year, month, 1);
         const monthEnd = new Date(year, month + 1, 0);
 
-        const studentIds = students.map(s => s.id);
+        // Fetch all attendance for all students in one go (or chunked)
+        const allStudentIds = students.map(s => s.id);
         const allAttendance = [];
-        for (let i = 0; i < studentIds.length; i += 30) {
-            const chunk = studentIds.slice(i, i + 30);
+        for (let i = 0; i < allStudentIds.length; i += 30) {
+            const chunk = allStudentIds.slice(i, i + 30);
             if(chunk.length === 0) continue;
             const attendanceQuery = query(collection(db, "attendance"), where("studentId", "in", chunk), where("recordDate", ">=", monthStart), where("recordDate", "<=", monthEnd));
             const attendanceSnapshot = await getDocs(attendanceQuery);
             attendanceSnapshot.forEach(doc => allAttendance.push(doc.data()));
         }
         
-        logger.info(`[MONTHLY-RECAP] Memproses rekap untuk ${students.length} siswa...`);
+        logger.info(`[MONTHLY-RECAP] Memproses rekap untuk ${Object.keys(studentsByClass).length} kelas...`);
 
-        for (const student of students) {
-            const summary = { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 };
-            const studentRecords = allAttendance.filter(r => r.studentId === student.id);
-            const studentRecordsByDate = new Map(studentRecords.map(r => [r.recordDate.toDate().toISOString().split('T')[0], r]));
+        // Now, iterate over classes
+        for (const classId in studentsByClass) {
+            const classInfo = classMap.get(classId);
+            if (!classInfo || !classInfo.whatsappGroupName) {
+                logger.warn(`[MONTHLY-RECAP] Melewati kelas ${classInfo?.name || classId} karena tidak ada nama grup WhatsApp.`);
+                continue;
+            }
 
-            const daysInMonth = monthEnd.getDate();
-            for (let day = 1; day <= daysInMonth; day++) {
-                const currentDate = new Date(year, month, day);
-                const dateString = currentDate.toISOString().split('T')[0];
+            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(now);
+            let classMessage = `🏫 *SMAS PGRI Naringgul*\n*Rekap Absensi Bulanan: ${monthName}*\n*Kelas: ${classInfo.grade} ${classInfo.name}*\n--------------------------------\n\n`;
+            
+            const studentsInClass = studentsByClass[classId].sort((a,b) => a.nama.localeCompare(b.nama));
 
-                if (holidayDateStrings.has(dateString) || isWeekend(currentDate)) {
-                    summary.L++;
-                    continue;
-                }
+            for (const student of studentsInClass) {
+                const summary = { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 };
+                const studentRecords = allAttendance.filter(r => r.studentId === student.id);
+                const studentRecordsByDate = new Map(studentRecords.map(r => [r.recordDate.toDate().toISOString().split('T')[0], r]));
 
-                const record = studentRecordsByDate.get(dateString);
-                if (record) {
-                    switch (record.status) {
-                        case "Hadir": summary.H++; break;
-                        case "Terlambat": summary.T++; break;
-                        case "Sakit": summary.S++; break;
-                        case "Izin": summary.I++; break;
-                        case "Alfa": summary.A++; break;
-                        case "Dispen": summary.D++; break;
+                const daysInMonth = monthEnd.getDate();
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const currentDate = new Date(year, month, day);
+                    const dateString = currentDate.toISOString().split('T')[0];
+
+                    if (holidayDateStrings.has(dateString) || isWeekend(currentDate)) {
+                        summary.L++; continue;
                     }
-                } else {
-                    summary.A++;
+
+                    const record = studentRecordsByDate.get(dateString);
+                    if (record) {
+                        switch (record.status) {
+                            case "Hadir": summary.H++; break;
+                            case "Terlambat": summary.T++; break;
+                            case "Sakit": summary.S++; break;
+                            case "Izin": summary.I++; break;
+                            case "Alfa": summary.A++; break;
+                            case "Dispen": summary.D++; break;
+                        }
+                    } else {
+                        summary.A++;
+                    }
                 }
+                
+                const totalHadir = summary.H + summary.T;
+                classMessage += `*${student.nama}*\n H:${totalHadir}, T:${summary.T}, S:${summary.S}, I:${summary.I}, A:${summary.A}, D:${summary.D}\n\n`;
             }
             
-            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(now);
-            const messageLines = [
-                "🏫 *SMAS PGRI Naringgul*",
-                `*Rekap Absensi Bulanan: ${monthName}*`,
-                "--------------------------------",
-                `*Nama Siswa*: ${student.nama}`,
-                `*NISN*: ${student.nisn}`,
-                "",
-                "*Rincian Kehadiran:*",
-                `  - Hadir       : ${summary.H + summary.T} hari`,
-                `  - Terlambat   : ${summary.T} hari`,
-                `  - Sakit       : ${summary.S} hari`,
-                `  - Izin        : ${summary.I} hari`,
-                `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
-                `  - Dispensasi  : ${summary.D} hari`,
-            ];
-
-            const message = messageLines.join('\n');
             const jobPayload = {
-                payload: { recipient: student.parentWaNumber, message },
+                payload: { recipient: classInfo.whatsappGroupName, message: classMessage },
                 type: 'recap',
-                metadata: { reportType: 'monthly_parent_recap', studentId: student.id },
+                metadata: { reportType: 'monthly_class_recap', classId: classId },
                 status: 'pending',
                 createdAt: Timestamp.now(),
                 updatedAt: Timestamp.now(),
                 errorMessage: '',
             };
             await addDoc(collection(db, "notification_queue"), jobPayload);
+            logger.info(`[MONTHLY-RECAP] Rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`);
         }
 
-        await setDoc(statusDocRef, { lastRun: monthIdentifier });
-        logger.info(`[MONTHLY-RECAP] Selesai: ${students.length} rekap bulanan berhasil dimasukkan ke antrean.`);
+        await setDoc(statusDocRef, { lastRun: monthIdentifier }, { merge: true });
+        logger.info(`[MONTHLY-RECAP] Selesai: Semua rekap bulanan per kelas berhasil dimasukkan ke antrean.`);
 
     } catch (e) {
         logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan: ${e.message}`);
     }
 }
 
+
 function runMonthlyRecapScheduler() {
     const now = new Date();
     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    // Run on the last day of the month at 8 PM (20:00)
     if (now.getDate() === lastDayOfMonth && now.getHours() === 20) {
         logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan!');
         generateAndQueueAllMonthlyRecaps();
