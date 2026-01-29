@@ -65,9 +65,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 const classSchema = z.object({
   name: z.string().min(1, "Nama kelas tidak boleh kosong."),
   grade: z.enum(["X", "XI", "XII"], { required_error: "Tingkat kelas harus dipilih."}),
+  whatsappGroupName: z.string().optional(),
 })
 
-type Class = z.infer<typeof classSchema> & { id: string }
+type Class = z.infer<typeof classSchema> & { id: string; whatsappGroupName?: string; }
 type NewClass = z.infer<typeof classSchema>
 
 export default function KelasPage() {
@@ -84,6 +85,7 @@ export default function KelasPage() {
     defaultValues: {
       name: "",
       grade: undefined,
+      whatsappGroupName: "",
     },
   })
 
@@ -157,7 +159,7 @@ export default function KelasPage() {
 
   const openAddDialog = () => {
     setEditingClass(null)
-    form.reset({ name: "", grade: undefined })
+    form.reset({ name: "", grade: undefined, whatsappGroupName: "" })
     setIsFormDialogOpen(true)
   }
 
@@ -177,7 +179,7 @@ export default function KelasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Kelas</h1>
-          <p className="text-muted-foreground">Kelola daftar kelas dan tingkatannya.</p>
+          <p className="text-muted-foreground">Kelola daftar kelas, tingkatan, dan grup WhatsApp notifikasi.</p>
         </div>
         <Button onClick={openAddDialog}>
           <PlusCircle className="mr-2 h-4 w-4" />
@@ -230,6 +232,19 @@ export default function KelasPage() {
                   </FormItem>
                 )}
               />
+               <FormField
+                control={form.control}
+                name="whatsappGroupName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nama Grup WhatsApp (Opsional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Contoh: Info Kelas X MIPA 1" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <DialogFooter>
                 <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -277,6 +292,7 @@ export default function KelasPage() {
                     <TableRow>
                     <TableHead>Tingkat</TableHead>
                     <TableHead>Nama Kelas</TableHead>
+                    <TableHead>Grup WhatsApp</TableHead>
                     <TableHead>
                         <span className="sr-only">Aksi</span>
                     </TableHead>
@@ -288,6 +304,7 @@ export default function KelasPage() {
                         <TableRow key={cls.id}>
                         <TableCell className="font-medium">{cls.grade}</TableCell>
                         <TableCell>{cls.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{cls.whatsappGroupName || "-"}</TableCell>
                         <TableCell>
                             <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -311,7 +328,7 @@ export default function KelasPage() {
                     ))
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={3} className="h-24 text-center">
+                        <TableCell colSpan={4} className="h-24 text-center">
                         Belum ada data kelas. Silakan tambahkan kelas baru.
                         </TableCell>
                     </TableRow>

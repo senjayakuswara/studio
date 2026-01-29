@@ -35,6 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MoreHorizontal, Info, Camera, ScanLine, Loader2, VideoOff, User, XCircle, QrCode, CheckCircle2 } from "lucide-react"
 import { format, startOfDay, endOfDay } from "date-fns"
 import { cn } from "@/lib/utils"
+import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string }
@@ -392,6 +393,16 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             await playSound('success');
             
             cleanup('success', student, isAbsenMasuk ? `Absen Masuk: ${finalRecord.status}` : 'Absen Pulang');
+            
+            // Send notification after successful scan
+            const serializableRecord: SerializableAttendanceRecord = {
+                ...finalRecord,
+                studentName: student.nama,
+                timestampMasuk: finalRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
+                recordDate: finalRecord.recordDate.toDate().toISOString(),
+            };
+            await notifyOnAttendance(serializableRecord);
 
         } catch (error: any) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
@@ -486,6 +497,15 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             setAttendanceData(prev => ({ ...prev, [student.id]: newRecord }));
             addLog(`Manual: ${student.nama} ditandai ${status}.`, 'info');
             
+            // Send notification for manual status change
+            const serializableRecord: SerializableAttendanceRecord = {
+                ...newRecord,
+                studentName: student.nama,
+                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
+                recordDate: newRecord.recordDate.toDate().toISOString(),
+            };
+            await notifyOnAttendance(serializableRecord);
 
         } catch (error: any) {
             console.error("Error updating manual attendance: ", error);

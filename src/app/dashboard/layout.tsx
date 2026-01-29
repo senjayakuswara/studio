@@ -20,6 +20,7 @@ import {
   School,
   Settings,
   Users,
+  MessageCircle,
 } from "lucide-react"
 
 import { db } from "@/lib/firebase"
@@ -259,6 +260,17 @@ export default function DashboardLayout({
                   >
                     <BookCopy />
                     <span>Kelas</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+               <SidebarMenuItem>
+                <Link href="/dashboard/pengaturan/notifikasi">
+                  <SidebarMenuButton
+                    tooltip="Antrean Notifikasi"
+                    isActive={isActive("/dashboard/pengaturan/notifikasi")}
+                  >
+                    <MessageCircle />
+                    <span>Notifikasi</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

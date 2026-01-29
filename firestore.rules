@@ -21,6 +21,11 @@ service cloud.firestore {
     match /settings/appConfig {
       allow get: if true;
     }
+    
+    // 3. Izinkan admin yang sudah login untuk mengelola antrean notifikasi
+    match /notification_queue/{jobId} {
+      allow read, write: if request.auth != null;
+    }
 
     // --- ATURAN UTAMA (MENANGKAP SEMUA) ---
     // Aturan ini harus menjadi yang PALING AKHIR.

@@ -148,13 +148,17 @@ async function appendToSheet(data) {
     }
 }
 
-async function sendWhatsAppMessage(recipientNumber, message) {
-    const sanitizedNumber = recipientNumber.replace(/\D/g, '');
-    const finalNumber = sanitizedNumber.startsWith('0') ? '62' + sanitizedNumber.substring(1) : sanitizedNumber;
-    const recipientId = `${finalNumber}@c.us`;
-    
-    log(`Mengirim pesan ke ${recipientId}...`);
-    const sendMessagePromise = client.sendMessage(recipientId, message);
+async function sendWhatsAppMessageToGroup(groupName, message) {
+    log(`Mencari grup: "${groupName}"...`);
+    const chats = await client.getChats();
+    const groupChat = chats.find(chat => chat.isGroup && chat.name === groupName);
+
+    if (!groupChat) {
+        throw new Error(`Grup "${groupName}" tidak ditemukan. Pastikan nama grup di pengaturan kelas sudah benar.`);
+    }
+
+    log(`Mengirim pesan ke grup ${groupName} (ID: ${groupChat.id._serialized})...`);
+    const sendMessagePromise = groupChat.sendMessage(message);
     
     const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error(`Waktu pengiriman habis (${SEND_MESSAGE_TIMEOUT_MS / 1000} detik).`)), SEND_MESSAGE_TIMEOUT_MS)
@@ -163,15 +167,16 @@ async function sendWhatsAppMessage(recipientNumber, message) {
     await Promise.race([sendMessagePromise, timeoutPromise]);
 }
 
+
 async function processJob(job) {
     if (!job || !job.id) return;
     const jobRef = db.collection('notification_queue').doc(job.id);
     
-    const phoneNumber = job.phone || (job.payload ? job.payload.recipient : undefined);
-    const messageContent = job.message || (job.payload ? job.payload.message : undefined);
+    const groupName = job.payload?.recipient;
+    const messageContent = job.payload?.message;
 
-    if (!phoneNumber || !messageContent) {
-        const errorMsg = "Tugas notifikasi tidak memiliki format yang benar (tidak ada nomor telepon atau pesan).";
+    if (!groupName || !messageContent) {
+        const errorMsg = "Tugas notifikasi tidak memiliki format yang benar (tidak ada nama grup atau pesan).";
         log(`Gagal memproses tugas ${job.id}: ${errorMsg}`, 'error');
         await jobRef.update({ status: 'failed', error: errorMsg, processedAt: Timestamp.now(), lockedAt: null });
         return;
@@ -181,19 +186,16 @@ async function processJob(job) {
         log(`Mengunci tugas ${job.id} sebagai 'processing'.`);
         await jobRef.update({ status: 'processing', lockedAt: Timestamp.now() });
         
-        await sendWhatsAppMessage(phoneNumber, messageContent);
+        await sendWhatsAppMessageToGroup(groupName, messageContent);
         
-        log(`Pesan ke ${phoneNumber} berhasil dikirim.`, 'success');
+        log(`Pesan ke grup ${groupName} berhasil dikirim.`, 'success');
         await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null, lockedAt: null });
 
-        if (job.metadata?.studentId) {
-            await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'valid' });
-        }
-        await appendToSheet([new Date().toISOString(), phoneNumber, job.metadata?.studentName || '', 'sent', messageContent]);
+        await appendToSheet([new Date().toISOString(), groupName, job.metadata?.studentName || '', 'sent', messageContent]);
 
     } catch (error) {
         const errorMessage = error.message || 'Terjadi error tidak diketahui.';
-        log(`Gagal memproses tugas ${job.id} untuk ${phoneNumber}: ${errorMessage}`, 'error');
+        log(`Gagal memproses tugas ${job.id} untuk grup ${groupName}: ${errorMessage}`, 'error');
 
         const newRetryCount = (job.retryCount || 0) + 1;
         if (newRetryCount <= MAX_RETRIES) {
@@ -202,51 +204,40 @@ async function processJob(job) {
         } else {
             log(`Tugas ${job.id} ditandai gagal permanen.`);
             await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}`, lockedAt: null });
-            
-            if (job.metadata?.studentId && (errorMessage.includes("is not a user") || errorMessage.includes("not a valid WhatsApp user") || errorMessage.includes("Evaluation failed"))) {
-                 await db.collection('students').doc(job.metadata.studentId).update({ parentWaStatus: 'invalid' });
-            }
         }
-        await appendToSheet([new Date().toISOString(), phoneNumber, job.metadata?.studentName || '', 'failed', errorMessage]);
+        await appendToSheet([new Date().toISOString(), groupName, job.metadata?.studentName || '', 'failed', errorMessage]);
     }
 }
 
-// [REWORK] Logika antrean rekursif yang baru dan lebih tangguh
 async function processQueue() {
-    // 1. Berhenti memproses jika WhatsApp tidak siap
     if (!isWhatsAppReady) {
         log("Koneksi WhatsApp terputus, pemrosesan antrean dihentikan sementara.", "warn");
-        setTimeout(processQueue, 15000); // Cek kembali status koneksi dalam 15 detik
+        setTimeout(processQueue, 15000); 
         return;
     }
 
-    // 2. Ambil SATU tugas paling lama yang masih pending
     const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(1);
     
     try {
         const snapshot = await q.get();
 
-        // 3. Jika tidak ada tugas, tunggu dan cek lagi nanti
         if (snapshot.empty) {
-            setTimeout(processQueue, 5000); // Tidak ada tugas, cek lagi dalam 5 detik
+            setTimeout(processQueue, 5000); 
             return;
         }
 
-        // 4. Jika ada tugas, proses
         const jobDoc = snapshot.docs[0];
         const jobData = { id: jobDoc.id, ...jobDoc.data() };
         
         log(`Memproses tugas: ${jobData.id}`);
         await processJob(jobData);
 
-        // 5. Setelah selesai, tunggu jeda acak sebelum memanggil diri sendiri lagi
         const delay = getRandomDelay();
         log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
         setTimeout(processQueue, delay);
 
     } catch (error) {
         log(`Terjadi error pada loop pemrosesan antrean: ${error.message}`, 'error');
-        // Jika terjadi error pada loop utama, tunggu lebih lama sebelum mencoba lagi
         setTimeout(processQueue, 30000);
     }
 }
