@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay, setHours, setMinutes, setSeconds } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Calendar as CalendarIcon, Download, Loader2, MoreHorizontal, Users } from "lucide-react"
+import { Calendar as CalendarIcon, Download, Loader2, MoreHorizontal, Users, LogOut } from "lucide-react"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
 import { useForm } from "react-hook-form"
@@ -76,10 +76,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
+import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string; }
+type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
   id: string
@@ -98,6 +99,7 @@ type CombinedAttendanceRecord = Partial<AttendanceRecord> & {
   nisn: string;
   classId: string;
   classInfo?: Class,
+  parentWaNumber?: string;
 }
 
 type ReportConfig = {
@@ -112,6 +114,7 @@ type ReportConfig = {
 
 type SchoolHoursSettings = {
   jamMasuk: string
+  jamPulang: string
   toleransi: string
 }
 
@@ -150,7 +153,8 @@ export default function AbsensiPage() {
   const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
-  const [isMassAttending, setIsMassAttending] = useState(false);
+  const [isMassCheckinProcessing, setIsMassCheckinProcessing] = useState(false);
+  const [isMassCheckoutProcessing, setIsMassCheckoutProcessing] = useState(false);
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
   const [filterStatus, setFilterStatus] = useState<AttendanceStatus | "all">("all")
@@ -199,9 +203,11 @@ export default function AbsensiPage() {
       const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
       
       const combinedRecords = records.map(record => {
+        const studentInfo = studentList.find(s => s.id === record.studentId);
         return {
           ...record,
           classInfo: classMap.get(record.classId),
+          parentWaNumber: studentInfo?.parentWaNumber,
         }
       }).sort((a,b) => {
           const classA = a.classInfo ? `${a.classInfo.grade}-${a.classInfo.name}` : ''
@@ -233,6 +239,10 @@ export default function AbsensiPage() {
     return allStudents.filter(student => !studentsWithAttendance.has(student.id))
   }, [allStudents, attendanceRecords]);
 
+  const studentsSudahMasukTapiBelumPulang = useMemo(() => {
+    return attendanceRecords.filter(rec => rec.timestampMasuk && !rec.timestampPulang);
+  }, [attendanceRecords]);
+
   const filteredRecords = useMemo(() => {
     const classMap = new Map(classes.map(c => [c.id, c]));
 
@@ -247,6 +257,7 @@ export default function AbsensiPage() {
           timestampMasuk: null,
           timestampPulang: null,
           classInfo: classMap.get(student.classId),
+          parentWaNumber: student.parentWaNumber,
         }))
       : attendanceRecords;
 
@@ -256,12 +267,12 @@ export default function AbsensiPage() {
       .filter(record => filterStatus === "all" || record.status === filterStatus)
   }, [allStudents, attendanceRecords, studentsBelumAbsen, filterClass, filterName, filterStatus, classes])
   
-  const handleMassAttendance = async () => {
+  const handleMassCheckIn = async () => {
     if (!schoolHours) {
         toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
         return;
     }
-    setIsMassAttending(true);
+    setIsMassCheckinProcessing(true);
     try {
         const studentsToAttend = studentsBelumAbsen;
         if (studentsToAttend.length === 0) {
@@ -270,37 +281,101 @@ export default function AbsensiPage() {
         }
 
         const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-        const deadlineTime = setSeconds(setMinutes(setHours(date, hours), minutes + (parseInt(schoolHours.toleransi) || 0)), 0);
+        const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
         
         const batch = writeBatch(db);
-        
+        const notificationPayloads: SerializableAttendanceRecord[] = [];
+
         studentsToAttend.forEach(student => {
-            const newRecord: Omit<AttendanceRecord, 'id'> & {recordDate: Timestamp} = {
+            const newRecordDocRef = doc(collection(db, "attendance"));
+            const newRecord: Omit<AttendanceRecord, 'id'> & {recordDate: Date} = {
                 studentId: student.id,
                 nisn: student.nisn,
                 studentName: student.nama,
                 classId: student.classId,
                 status: "Hadir",
-                timestampMasuk: Timestamp.fromDate(deadlineTime),
+                timestampMasuk: Timestamp.fromDate(entryTime),
                 timestampPulang: null,
                 notes: "Absensi massal oleh admin",
-                recordDate: Timestamp.fromDate(startOfDay(date)),
+                recordDate: startOfDay(date),
             };
-            const docRef = doc(collection(db, "attendance"));
-            batch.set(docRef, newRecord);
+            batch.set(newRecordDocRef, newRecord);
+
+            const serializableRecord: SerializableAttendanceRecord = {
+                id: newRecordDocRef.id,
+                ...newRecord,
+                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: null,
+                recordDate: newRecord.recordDate.toISOString(),
+                parentWaNumber: student.parentWaNumber
+            };
+            notificationPayloads.push(serializableRecord);
         });
 
         await batch.commit();
+        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen masuk. Notifikasi sedang dikirim...` });
 
-        toast({ title: "Sukses", description: `${studentsToAttend.length} siswa berhasil diabsen.` });
-        
+        // Send notifications after successful DB commit
+        await Promise.all(notificationPayloads.map(payload => notifyOnAttendance(payload)));
+
         await fetchData(date);
 
     } catch (error) {
-        console.error("Error during mass attendance:", error);
-        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi massal." });
+        console.error("Error during mass check-in:", error);
+        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi masuk massal." });
     } finally {
-        setIsMassAttending(false);
+        setIsMassCheckinProcessing(false);
+    }
+  };
+
+  const handleMassCheckOut = async () => {
+    if (!schoolHours) {
+        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
+        return;
+    }
+    setIsMassCheckoutProcessing(true);
+    try {
+        const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
+        if (studentsToCheckOut.length === 0) {
+            toast({ title: "Informasi", description: "Tidak ada siswa yang bisa diabsen pulang." });
+            return;
+        }
+
+        const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
+        const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+        
+        const batch = writeBatch(db);
+        const notificationPayloads: SerializableAttendanceRecord[] = [];
+        
+        studentsToCheckOut.forEach(record => {
+            if (!record.id) return;
+            const docRef = doc(db, "attendance", record.id);
+            batch.update(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
+
+            const serializableRecord: SerializableAttendanceRecord = {
+                ...record,
+                id: record.id,
+                studentName: record.studentName!,
+                timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: exitTime.toISOString(),
+                recordDate: (record.recordDate as any as Timestamp).toDate().toISOString(),
+            };
+            notificationPayloads.push(serializableRecord);
+        });
+
+        await batch.commit();
+        toast({ title: "Sukses", description: `${studentsToCheckOut.length} siswa berhasil diabsen pulang. Notifikasi sedang dikirim...` });
+        
+        // Send notifications after successful DB commit
+        await Promise.all(notificationPayloads.map(payload => notifyOnAttendance(payload)));
+
+        await fetchData(date);
+
+    } catch (error) {
+        console.error("Error during mass checkout:", error);
+        toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi pulang massal." });
+    } finally {
+        setIsMassCheckoutProcessing(false);
     }
   };
 
@@ -591,24 +666,46 @@ export default function AbsensiPage() {
                     <div className="flex flex-col md:flex-row gap-2">
                         <AlertDialog>
                             <AlertDialogTrigger asChild>
-                                <Button variant="secondary" className="w-full md:w-auto" disabled={isMassAttending || isLoading}>
-                                    {isMassAttending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
-                                    {isMassAttending ? 'Memproses...' : 'Absen Massal Manual'}
+                                <Button variant="secondary" className="w-full md:w-auto" disabled={isMassCheckinProcessing || isMassCheckoutProcessing || isLoading || studentsBelumAbsen.length === 0}>
+                                    {isMassCheckinProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
+                                    {isMassCheckinProcessing ? 'Memproses...' : 'Absen Masuk Massal'}
                                 </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                                 <AlertDialogHeader>
-                                    <AlertDialogTitle>Konfirmasi Absensi Massal</AlertDialogTitle>
+                                    <AlertDialogTitle>Konfirmasi Absen Masuk Massal</AlertDialogTitle>
                                     <AlertDialogDescription>
-                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir'. Anda yakin?
+                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir' dan mengirim notifikasi. Anda yakin?
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>
                                     <AlertDialogCancel>Batal</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleMassAttendance}>Ya, Lanjutkan</AlertDialogAction>
+                                    <AlertDialogAction onClick={handleMassCheckIn}>Ya, Lanjutkan</AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
+
+                         <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <Button variant="secondary" className="w-full md:w-auto" disabled={isMassCheckinProcessing || isMassCheckoutProcessing || isLoading || studentsSudahMasukTapiBelumPulang.length === 0}>
+                                    {isMassCheckoutProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                                    {isMassCheckoutProcessing ? 'Memproses...' : 'Absen Pulang Massal'}
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Konfirmasi Absen Pulang Massal</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        Tindakan ini akan mencatat jam pulang untuk {studentsSudahMasukTapiBelumPulang.length} siswa dan mengirim notifikasi. Anda yakin?
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Batal</AlertDialogCancel>
+                                    <AlertDialogAction onClick={handleMassCheckOut}>Ya, Lanjutkan</AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
+
                         <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
                             {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                             {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
@@ -756,3 +853,5 @@ export default function AbsensiPage() {
     </>
   )
 }
+
+    
