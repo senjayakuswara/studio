@@ -221,14 +221,12 @@ let lastCheckDate = null;
 let sentMasukReport = false;
 let sentPulangReport = false;
 
-async function generateUnattendedReport(adminGroup, type) {
+async function generateUnattendedReport(type) {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    const studentsByClass = {};
-    let message = '';
     let unattendedStudents = [];
 
     try {
@@ -241,12 +239,13 @@ async function generateUnattendedReport(adminGroup, type) {
         const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
         const todayString = new Date().toLocaleDateString('id-ID', dateOptions);
 
+        let messageHeader = '';
         if (type === 'masuk') {
-            message = `*Laporan Siswa Belum Absen Masuk*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi masuk hingga saat ini:\n`;
+            messageHeader = `*Laporan Siswa Belum Absen Masuk*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi masuk hingga saat ini:\n`;
             const attendedStudentIds = new Set(attendanceRecords.map(r => r.studentId));
             unattendedStudents = allStudents.filter(s => !attendedStudentIds.has(s.id));
         } else { // type === 'pulang'
-            message = `*Laporan Siswa Belum Absen Pulang*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi pulang hingga saat ini:\n`;
+            messageHeader = `*Laporan Siswa Belum Absen Pulang*\nTanggal: ${todayString}\n\nBerikut adalah daftar siswa yang belum melakukan absensi pulang hingga saat ini:\n`;
             const pulangStudentIds = new Set(attendanceRecords.filter(r => r.timestampPulang).map(r => r.studentId));
             const masukStudentIds = new Set(attendanceRecords.map(r => r.studentId));
             unattendedStudents = allStudents.filter(s => masukStudentIds.has(s.id) && !pulangStudentIds.has(s.id));
@@ -260,45 +259,49 @@ async function generateUnattendedReport(adminGroup, type) {
         const classesSnapshot = await getDocs(collection(db, "classes"));
         const classMap = new Map(classesSnapshot.docs.map(d => [d.id, d.data()]));
 
+        // Group students by classId
+        const unattendedByClassId = {};
         unattendedStudents.forEach(student => {
-            const classInfo = classMap.get(student.classId);
-            const className = classInfo ? `${classInfo.grade} ${classInfo.name}` : 'Kelas Tidak Dikenal';
-            if (!studentsByClass[className]) {
-                studentsByClass[className] = [];
+            if (!unattendedByClassId[student.classId]) {
+                unattendedByClassId[student.classId] = [];
             }
-            studentsByClass[className].push(student.nama);
+            unattendedByClassId[student.classId].push(student.nama);
         });
 
-        const sortedClasses = Object.keys(studentsByClass).sort();
-        
-        let reportBody = '';
-        sortedClasses.forEach(className => {
-            reportBody += `\n*${className}*:\n`;
-            studentsByClass[className].sort().forEach(studentName => {
-                reportBody += `- ${studentName}\n`;
-            });
-        });
-        
-        message += reportBody;
+        // For each class with unattended students, queue a notification
+        for (const classId in unattendedByClassId) {
+            const classInfo = classMap.get(classId);
+            const studentNames = unattendedByClassId[classId];
 
-        const jobPayload = {
-            payload: { recipient: adminGroup, message },
-            type: 'recap',
-            metadata: { reportType: `unattended_${type}` },
-            status: 'pending',
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-            errorMessage: '',
-        };
+            if (classInfo && classInfo.whatsappGroupName && studentNames.length > 0) {
+                const groupName = classInfo.whatsappGroupName;
+                
+                let reportBody = `\n*Kelas ${classInfo.grade} ${classInfo.name}*:\n`;
+                studentNames.sort().forEach(studentName => {
+                    reportBody += `- ${studentName}\n`;
+                });
+                
+                const message = messageHeader + reportBody;
 
-        await addDoc(collection(db, "notification_queue"), jobPayload);
-        logger.info(`[SCHEDULER] Laporan siswa belum absen ${type} berhasil dimasukkan ke antrean untuk grup ${adminGroup}.`);
+                const jobPayload = {
+                    payload: { recipient: groupName, message },
+                    type: 'recap',
+                    metadata: { reportType: `unattended_${type}`, classId: classId },
+                    status: 'pending',
+                    createdAt: Timestamp.now(),
+                    updatedAt: Timestamp.now(),
+                    errorMessage: '',
+                };
 
+                await addDoc(collection(db, "notification_queue"), jobPayload);
+                logger.info(`[SCHEDULER] Laporan siswa belum absen ${type} untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean untuk grup ${groupName}.`);
+                 await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
     } catch (e) {
         logger.error(`[SCHEDULER] Gagal membuat laporan siswa belum absen ${type}: ${e.message}`);
     }
 }
-
 
 async function runScheduledTasks() {
     const now = new Date();
@@ -313,17 +316,14 @@ async function runScheduledTasks() {
 
     try {
         const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
-        const appConfigSnap = await getDoc(doc(db, "settings", "appConfig"));
 
-        if (!schoolHoursSnap.exists() || !appConfigSnap.exists()) {
+        if (!schoolHoursSnap.exists()) {
             return;
         }
 
         const schoolHours = schoolHoursSnap.data();
-        const appConfig = appConfigSnap.data();
-        const adminGroup = appConfig.adminNotificationGroupName;
 
-        if (!adminGroup || !schoolHours.jamMasuk || !schoolHours.jamPulang) {
+        if (!schoolHours.jamMasuk || !schoolHours.jamPulang) {
             return;
         }
 
@@ -337,13 +337,13 @@ async function runScheduledTasks() {
         
         if (!sentMasukReport && now >= reportTimeMasuk && now < reportTimePulang) {
             logger.info('[SCHEDULER] Waktunya laporan siswa belum absen masuk. Memulai proses...');
-            await generateUnattendedReport(adminGroup, 'masuk');
+            await generateUnattendedReport('masuk');
             sentMasukReport = true;
         }
 
         if (!sentPulangReport && now >= reportTimePulang) {
             logger.info('[SCHEDULER] Waktunya laporan siswa belum absen pulang. Memulai proses...');
-            await generateUnattendedReport(adminGroup, 'pulang');
+            await generateUnattendedReport('pulang');
             sentPulangReport = true;
         }
 
@@ -351,10 +351,154 @@ async function runScheduledTasks() {
         logger.error(`[SCHEDULER] Error: ${error.message}`);
     }
 }
+// --- END DAILY SCHEDULED TASKS ---
 
-// Check every 5 minutes
+// --- NEW MONTHLY RECAP TASKS ---
+const isWeekend = (date) => {
+    const day = date.getDay();
+    return day === 0 || day === 6; // Sunday or Saturday
+}
+
+async function generateAndQueueAllMonthlyRecaps() {
+    logger.info('[MONTHLY-RECAP] Memulai proses rekap bulanan...');
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const monthIdentifier = `${year}-${month}`;
+
+    try {
+        const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
+        const statusDocSnap = await getDoc(statusDocRef);
+        if (statusDocSnap.exists() && statusDocSnap.data().lastRun === monthIdentifier) {
+            logger.info(`[MONTHLY-RECAP] Rekap bulanan untuk ${monthIdentifier} sudah pernah dijalankan. Melewati.`);
+            return;
+        }
+
+        const studentsQuery = query(collection(db, "students"), where("parentWaNumber", "!=", ""));
+        const [studentsSnapshot, holidaysSnapshot] = await Promise.all([
+            getDocs(studentsQuery),
+            getDocs(collection(db, "holidays"))
+        ]);
+
+        if (studentsSnapshot.empty) {
+            logger.info("[MONTHLY-RECAP] Tidak ada siswa dengan nomor WA orang tua. Proses dihentikan.");
+            await updateDoc(statusDocRef, { lastRun: monthIdentifier });
+            return;
+        }
+
+        const students = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const holidays = holidaysSnapshot.docs.map(d => d.data());
+        
+        const holidayDateStrings = new Set();
+        holidays.forEach(holiday => {
+            const start = holiday.startDate.toDate();
+            const end = holiday.endDate.toDate();
+            for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                 if (d.getMonth() === month && d.getFullYear() === year) {
+                     holidayDateStrings.add(d.toISOString().split('T')[0]);
+                 }
+            }
+        });
+
+        const monthStart = new Date(year, month, 1);
+        const monthEnd = new Date(year, month + 1, 0);
+
+        const studentIds = students.map(s => s.id);
+        const allAttendance = [];
+        for (let i = 0; i < studentIds.length; i += 30) {
+            const chunk = studentIds.slice(i, i + 30);
+            if(chunk.length === 0) continue;
+            const attendanceQuery = query(collection(db, "attendance"), where("studentId", "in", chunk), where("recordDate", ">=", monthStart), where("recordDate", "<=", monthEnd));
+            const attendanceSnapshot = await getDocs(attendanceQuery);
+            attendanceSnapshot.forEach(doc => allAttendance.push(doc.data()));
+        }
+        
+        logger.info(`[MONTHLY-RECAP] Memproses rekap untuk ${students.length} siswa...`);
+
+        for (const student of students) {
+            const summary = { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 };
+            const studentRecords = allAttendance.filter(r => r.studentId === student.id);
+            const studentRecordsByDate = new Map(studentRecords.map(r => [r.recordDate.toDate().toISOString().split('T')[0], r]));
+
+            const daysInMonth = monthEnd.getDate();
+            for (let day = 1; day <= daysInMonth; day++) {
+                const currentDate = new Date(year, month, day);
+                const dateString = currentDate.toISOString().split('T')[0];
+
+                if (holidayDateStrings.has(dateString) || isWeekend(currentDate)) {
+                    summary.L++;
+                    continue;
+                }
+
+                const record = studentRecordsByDate.get(dateString);
+                if (record) {
+                    switch (record.status) {
+                        case "Hadir": summary.H++; break;
+                        case "Terlambat": summary.T++; break;
+                        case "Sakit": summary.S++; break;
+                        case "Izin": summary.I++; break;
+                        case "Alfa": summary.A++; break;
+                        case "Dispen": summary.D++; break;
+                    }
+                } else {
+                    summary.A++;
+                }
+            }
+            
+            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(now);
+            const messageLines = [
+                "🏫 *SMAS PGRI Naringgul*",
+                `*Rekap Absensi Bulanan: ${monthName}*`,
+                "--------------------------------",
+                `*Nama Siswa*: ${student.nama}`,
+                `*NISN*: ${student.nisn}`,
+                "",
+                "*Rincian Kehadiran:*",
+                `  - Hadir       : ${summary.H + summary.T} hari`,
+                `  - Terlambat   : ${summary.T} hari`,
+                `  - Sakit       : ${summary.S} hari`,
+                `  - Izin        : ${summary.I} hari`,
+                `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
+                `  - Dispensasi  : ${summary.D} hari`,
+            ];
+
+            const message = messageLines.join('\n');
+            const jobPayload = {
+                payload: { recipient: student.parentWaNumber, message },
+                type: 'recap',
+                metadata: { reportType: 'monthly_parent_recap', studentId: student.id },
+                status: 'pending',
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                errorMessage: '',
+            };
+            await addDoc(collection(db, "notification_queue"), jobPayload);
+        }
+
+        await setDoc(statusDocRef, { lastRun: monthIdentifier });
+        logger.info(`[MONTHLY-RECAP] Selesai: ${students.length} rekap bulanan berhasil dimasukkan ke antrean.`);
+
+    } catch (e) {
+        logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan: ${e.message}`);
+    }
+}
+
+function runMonthlyRecapScheduler() {
+    const now = new Date();
+    const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    if (now.getDate() === lastDayOfMonth && now.getHours() === 20) {
+        logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan!');
+        generateAndQueueAllMonthlyRecaps();
+    }
+}
+
+// Check every 5 minutes for daily reports
 setInterval(runScheduledTasks, 5 * 60 * 1000);
-// --- END SCHEDULED TASKS ---
+// Check every hour for monthly recap
+setInterval(runMonthlyRecapScheduler, 60 * 60 * 1000);
+
+// --- END MONTHLY RECAP TASKS ---
 
 
 const expressApp = express();

@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect, type ChangeEvent } from "react"
@@ -24,7 +25,6 @@ type AppSettings = {
     appName: string
     logoUrl: string | null
     theme: ThemeSettings
-    adminNotificationGroupName?: string;
 }
 
 type ThemeSettings = {
@@ -97,7 +97,6 @@ export default function AppSettingsPage() {
     const [settings, setSettings] = useState<Omit<AppSettings, 'theme'>>({
         appName: "AbTrack",
         logoUrl: null,
-        adminNotificationGroupName: "",
     });
     const [theme, setTheme] = useState<ThemeSettings>({
         primary: "#0f172a",
@@ -119,7 +118,6 @@ export default function AppSettingsPage() {
                     setSettings({
                         appName: data.appName || "AbTrack",
                         logoUrl: data.logoUrl || null,
-                        adminNotificationGroupName: data.adminNotificationGroupName || "",
                     });
                     if (data.theme) {
                          setTheme({
@@ -174,7 +172,6 @@ export default function AppSettingsPage() {
 
             const dataToSave: AppSettings = {
                 ...settings,
-                adminNotificationGroupName: settings.adminNotificationGroupName || "",
                 theme: themeToSave,
             };
 
@@ -232,18 +229,6 @@ export default function AppSettingsPage() {
                     <div className="space-y-2">
                         <Label htmlFor="appName">Nama Aplikasi</Label>
                         <Input id="appName" value={settings.appName} onChange={handleSettingsChange} />
-                    </div>
-                    <div className="space-y-2">
-                        <Label htmlFor="adminNotificationGroupName">Nama Grup WA Admin</Label>
-                        <Input 
-                        id="adminNotificationGroupName" 
-                        value={settings.adminNotificationGroupName} 
-                        onChange={handleSettingsChange} 
-                        placeholder="Contoh: Admin Notifikasi Sekolah"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                            Grup untuk menerima laporan siswa yang belum absen. Pastikan server WA sudah join grup ini.
-                        </p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="app-logo">Logo Aplikasi</Label>
