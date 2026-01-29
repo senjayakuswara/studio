@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -28,6 +29,7 @@ export type SerializableAttendanceRecord = {
   timestampMasuk: string | null
   timestampPulang: string | null
   recordDate: string
+  parentWaNumber?: string;
 };
 
 const footerVariations = [
@@ -131,3 +133,5 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         className: classInfo.name,
     });
 }
+
+    

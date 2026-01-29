@@ -80,6 +80,7 @@ const studentSchema = z.object({
     required_error: "Jenis kelamin harus dipilih.",
   }),
   status: z.enum(["Aktif", "Lulus", "Pindah"]).optional().default("Aktif"),
+  parentWaNumber: z.string().optional(),
 })
 
 type Student = z.infer<typeof studentSchema> & { id: string }
@@ -138,6 +139,7 @@ export default function SiswaPage() {
       classId: undefined,
       jenisKelamin: undefined,
       status: "Aktif",
+      parentWaNumber: "",
     },
   })
 
@@ -356,8 +358,8 @@ export default function SiswaPage() {
   }
 
   const handleDownloadTemplate = () => {
-    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Status"];
-    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "Aktif"];
+    const header = ["NISN", "Nama", "Tingkat", "Nama Kelas", "Jenis Kelamin", "Status", "Nomor WA Orang Tua"];
+    const example = ["1234567890", "Budi Santoso", "X", "MIPA 1", "Laki-laki", "Aktif", "6281234567890"];
     const data = [header, example];
     const worksheet = xlsx.utils.aoa_to_sheet(data);
     const workbook = xlsx.utils.book_new();
@@ -384,6 +386,7 @@ export default function SiswaPage() {
             "Nama Kelas": classInfo?.name || "Kelas Dihapus",
             "Jenis Kelamin": student.jenisKelamin,
             "Status": student.status || "Aktif",
+            "Nomor WA Orang Tua": student.parentWaNumber || "",
         }
     });
     
@@ -398,6 +401,7 @@ export default function SiswaPage() {
         { wch: 20 }, // Nama Kelas
         { wch: 15 }, // Jenis Kelamin
         { wch: 10 }, // Status
+        { wch: 20 }, // Nomor WA Orang Tua
     ];
     worksheet['!cols'] = columnWidths;
 
@@ -442,6 +446,7 @@ export default function SiswaPage() {
                     classId: classId,
                     jenisKelamin: jenisKelamin,
                     status: String(row[5] || "Aktif").trim(),
+                    parentWaNumber: String(row[6] || "").trim(),
                 };
 
                 const validation = studentSchema.safeParse(studentData);
@@ -453,7 +458,8 @@ export default function SiswaPage() {
                         const isIdentical = existingStudent.nama === validStudent.nama &&
                                             existingStudent.classId === validStudent.classId &&
                                             existingStudent.jenisKelamin === validStudent.jenisKelamin &&
-                                            (existingStudent.status || "Aktif") === (validStudent.status || "Aktif");
+                                            (existingStudent.status || "Aktif") === (validStudent.status || "Aktif") &&
+                                            (existingStudent.parentWaNumber || '') === (validStudent.parentWaNumber || '');
 
                         processedStudents.push({ 
                             ...validStudent, 
@@ -551,13 +557,13 @@ export default function SiswaPage() {
 
   const openAddDialog = () => {
     setEditingStudent(null)
-    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, status: "Aktif" })
+    form.reset({ nisn: "", nama: "", classId: undefined, jenisKelamin: undefined, status: "Aktif", parentWaNumber: "" })
     setIsFormDialogOpen(true)
   }
 
   const openEditDialog = (student: Student) => {
     setEditingStudent(student)
-    form.reset(student)
+    form.reset({ ...student, parentWaNumber: student.parentWaNumber || '' })
     setIsFormDialogOpen(true)
   }
 
@@ -619,6 +625,19 @@ export default function SiswaPage() {
                     <FormLabel>Nama Lengkap</FormLabel>
                     <FormControl>
                       <Input placeholder="Nama Siswa" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="parentWaNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nomor WA Orang Tua (Opsional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Contoh: 6281234567890" {...field} value={field.value || ''} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -1002,8 +1021,8 @@ export default function SiswaPage() {
                     </TableHead>
                     <TableHead>NISN</TableHead>
                     <TableHead>Nama</TableHead>
-                    <TableHead>Nama Kelas</TableHead>
-                    <TableHead>Tingkat</TableHead>
+                    <TableHead>Kelas</TableHead>
+                    <TableHead>No. WA Ortu</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Aksi</TableHead>
                     </TableRow>
@@ -1033,7 +1052,7 @@ export default function SiswaPage() {
                             <TableCell>{student.nisn}</TableCell>
                             <TableCell className="font-medium">{student.nama}</TableCell>
                             <TableCell>{classInfo ? classInfo.name : 'Kelas Dihapus'}</TableCell>
-                            <TableCell>{classInfo ? classInfo.grade : 'N/A'}</TableCell>
+                            <TableCell>{student.parentWaNumber || '-'}</TableCell>
                             <TableCell>
                                 <Badge variant={status === 'Lulus' ? 'secondary' : status === 'Pindah' ? 'outline' : 'default'}>{status}</Badge>
                             </TableCell>
@@ -1075,3 +1094,5 @@ export default function SiswaPage() {
     </div>
   )
 }
+
+    

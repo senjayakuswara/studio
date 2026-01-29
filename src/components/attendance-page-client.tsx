@@ -44,7 +44,8 @@ type Student = {
     classId: string, 
     grade: string, 
     jenisKelamin: "Laki-laki" | "Perempuan", 
-    status?: "Aktif" | "Lulus" | "Pindah"
+    status?: "Aktif" | "Lulus" | "Pindah",
+    parentWaNumber?: string,
 }
 type SchoolHoursSettings = { jamMasuk: string; toleransi: string; jamPulang: string }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
@@ -456,7 +457,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         <div className="flex items-center justify-between">
             <div>
             <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
-            <p className="text-muted-foreground">Gunakan pemindai barcode atau ketik manual untuk absen.</p>
+            <p className="text-muted-foreground">Fokuskan kursor pada kolom input untuk menggunakan pemindai barcode USB.</p>
             </div>
         </div>
 
@@ -478,7 +479,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         }}
                         autoFocus
                     />
-                    <p className="text-xs text-muted-foreground mt-2">Fokuskan kursor di sini untuk menggunakan pemindai barcode USB.</p>
+                     <p className="text-xs text-muted-foreground mt-2">Sistem siap untuk pemindaian. Tidak perlu klik apapun.</p>
                 </CardContent>
             </Card>
             <Card>
@@ -487,7 +488,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                     <CardDescription>Catatan pemindaian hari ini.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="h-[205px] overflow-y-auto rounded-md border p-2 space-y-2">
+                    <div className="h-[125px] overflow-y-auto rounded-md border p-2 space-y-2">
                         {logMessages.length > 0 ? (
                             logMessages.map((log, i) => (
                                 <div key={i} className="flex items-start gap-2 text-sm">
@@ -597,3 +598,5 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     </>
   )
 }
+
+    
