@@ -4,9 +4,10 @@
 /**
  * @fileOverview Handles queuing notifications to Firestore for WhatsApp group delivery.
  * - notifyOnAttendance: Queues a real-time attendance notification to a class group.
+ * - retryAllFailedJobs: Retries all failed notification jobs at once.
  */
 
-import { doc, getDoc, addDoc, collection, Timestamp } from "firebase/firestore";
+import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
@@ -143,4 +144,35 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         studentId: record.studentId,
         className: classInfo.name,
     });
+}
+
+
+/**
+ * Retries all failed notification jobs by resetting their status to 'pending'.
+ */
+export async function retryAllFailedJobs(): Promise<{ success: boolean, count: number, error?: string }> {
+    try {
+        const q = query(collection(db, "notification_queue"), where("status", "==", "failed"));
+        const snapshot = await getDocs(q);
+
+        if (snapshot.empty) {
+            return { success: true, count: 0 };
+        }
+
+        const batch = writeBatch(db);
+        snapshot.forEach(doc => {
+            batch.update(doc.ref, {
+                status: 'pending',
+                updatedAt: Timestamp.now(),
+                errorMessage: 'Retrying all failed jobs...',
+            });
+        });
+
+        await batch.commit();
+        return { success: true, count: snapshot.size };
+
+    } catch (e: any) {
+        console.error(`Failed to retry all failed jobs`, e);
+        return { success: false, count: 0, error: e.message };
+    }
 }

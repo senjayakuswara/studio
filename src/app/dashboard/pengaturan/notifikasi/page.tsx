@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react"
 import { collection, query, onSnapshot, orderBy, doc, updateDoc, deleteDoc, Timestamp } from "firebase/firestore"
 import { format, formatDistanceToNow } from "date-fns"
 import { id as localeID } from "date-fns/locale"
-import { Trash2, Send, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { Trash2, Send, Loader2, AlertCircle, CheckCircle2, RefreshCw } from "lucide-react"
 
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
+import { retryAllFailedJobs } from "@/ai/flows/notification-flow"
 
 type NotificationJob = {
     id: string;
@@ -52,6 +53,7 @@ export default function NotifikasiPage() {
     const [jobs, setJobs] = useState<NotificationJob[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null);
+    const [isRetryingAll, setIsRetryingAll] = useState(false);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -78,6 +80,10 @@ export default function NotifikasiPage() {
     
     const sortedJobs = useMemo(() => {
         return jobs.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+    }, [jobs]);
+
+    const failedJobsCount = useMemo(() => {
+        return jobs.filter(job => job.status === 'failed').length;
     }, [jobs]);
 
     const handleRetry = async (jobId: string) => {
@@ -113,6 +119,23 @@ export default function NotifikasiPage() {
         }
     };
 
+    const handleRetryAll = async () => {
+        setIsRetryingAll(true);
+        try {
+            const result = await retryAllFailedJobs();
+            if (result.success) {
+                toast({ title: "Sukses", description: `${result.count} tugas yang gagal telah dijadwalkan untuk dikirim ulang.` });
+            } else {
+                throw new Error(result.error || "Operasi gagal.");
+            }
+        } catch (e: any) {
+            console.error(`Failed to retry all jobs`, e);
+            toast({ variant: "destructive", title: "Gagal", description: "Tidak dapat mengirim ulang semua tugas yang gagal." });
+        } finally {
+            setIsRetryingAll(false);
+        }
+    }
+
     const getStatusVariant = (status: NotificationJob['status']) => {
         switch (status) {
             case 'sent': return 'default';
@@ -125,9 +148,31 @@ export default function NotifikasiPage() {
 
   return (
     <div className="flex flex-col gap-6">
-       <div>
-          <h1 className="font-headline text-3xl font-bold tracking-tight">Antrean Notifikasi</h1>
-          <p className="text-muted-foreground">Pantau status pengiriman notifikasi WhatsApp ke grup kelas.</p>
+       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="font-headline text-3xl font-bold tracking-tight">Antrean Notifikasi</h1>
+            <p className="text-muted-foreground">Pantau status pengiriman notifikasi WhatsApp ke grup kelas.</p>
+          </div>
+           <AlertDialog>
+              <AlertDialogTrigger asChild>
+                  <Button disabled={failedJobsCount === 0 || isLoading || isRetryingAll}>
+                      {isRetryingAll ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                      Kirim Ulang Semua Gagal ({failedJobsCount})
+                  </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                  <AlertDialogHeader>
+                      <AlertDialogTitle>Anda Yakin?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                          Tindakan ini akan mencoba mengirim ulang semua {failedJobsCount} notifikasi yang gagal. Lanjutkan?
+                      </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                      <AlertDialogCancel>Batal</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleRetryAll}>Ya, Kirim Ulang Semua</AlertDialogAction>
+                  </AlertDialogFooter>
+              </AlertDialogContent>
+          </AlertDialog>
         </div>
       <Card>
         <CardHeader>
