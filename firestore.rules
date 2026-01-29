@@ -22,9 +22,11 @@ service cloud.firestore {
       allow get: if true;
     }
     
-    // 3. Izinkan admin yang sudah login untuk mengelola antrean notifikasi
+    // 3. Izinkan PROSES APAPUN (termasuk server notifikasi) untuk membaca, menulis,
+    //    dan mengubah antrean notifikasi. Ini WAJIB agar server bisa mengambil
+    //    tugas dan mengubah statusnya (pending -> processing -> sent/failed).
     match /notification_queue/{jobId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if true;
     }
 
     // --- ATURAN UTAMA (MENANGKAP SEMUA) ---
