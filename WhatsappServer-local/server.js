@@ -1,357 +1,180 @@
-
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const { initializeApp, cert } = require('firebase-admin/app');
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
-const fs = require('fs');
-const path = require('path');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const { Boom } = require('@hapi/boom');
 const express = require('express');
-const http = require('http');
-const { Server } = require("socket.io");
-const cors = require('cors');
-const { google } = require('googleapis');
-const config = require('./config.json');
+const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 
-// =================================================================================
-// --- KONFIGURASI & STATE GLOBAL ---
-// =================================================================================
+const { initializeApp } = require('firebase/app');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp } = require('firebase/firestore');
 
-const PORT = process.env.PORT || 8000;
-const MAX_RETRIES = 1;
-const STALE_JOB_TIMEOUT_MINUTES = 2; 
-const SEND_MESSAGE_TIMEOUT_MS = 45000; // Timeout pengiriman pesan dinaikkan menjadi 45 detik
-const GLOBAL_READY_TIMEOUT_MS = 120000; // 2 menit
-
-let db;
-let client;
-let googleSheetsClient;
-let isWhatsAppReady = false;
-let readyTimeout = null; // Watchdog timer GLOBAL
-
-const app = express();
-app.use(cors());
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
-
-// =================================================================================
-// --- UTILITIES ---
-// =================================================================================
-
-const log = (message, type = 'info') => {
-    const timestamp = new Date().toLocaleTimeString('id-ID');
-    const typeMap = { info: 'INFO', success: 'SUCCESS', error: 'ERROR', warn: 'WARN' };
-    const logMessage = `[${timestamp}][${typeMap[type] || 'INFO'}] ${message}`;
-    console.log(logMessage);
-    io.emit('log', { timestamp, message, type });
+const firebaseConfig = {
+  apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
+  authDomain: "sekolah-ccec3.firebaseapp.com",
+  projectId: "sekolah-ccec3",
+  storageBucket: "sekolah-ccec3.appspot.com",
+  messagingSenderId: "430648491716",
+  appId: "1:430648491716:web:1c3d389337adfd80d49391"
 };
 
-function getRandomDelay() {
-    // Jeda antara 5 hingga 15 detik
-    return Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
-}
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-// =================================================================================
-// --- INISIALISASI MODUL ---
-// =================================================================================
+const logger = pino({ level: 'info' });
 
-function initializeFirebase() {
-    try {
-        const serviceAccountPath = path.join(__dirname, 'credentials.json');
-        if (!fs.existsSync(serviceAccountPath)) throw new Error("File credentials.json tidak ditemukan.");
-        const serviceAccount = require(serviceAccountPath);
-        if (!serviceAccount.project_id) throw new Error("File credentials.json tidak valid.");
-        
-        initializeApp({ credential: cert(serviceAccount) });
-        db = getFirestore();
-        log(`Berhasil terhubung ke project Firestore: ${serviceAccount.project_id}`, 'success');
-    } catch (error) {
-        log(`Gagal inisialisasi Firebase: ${error.message}`, 'error');
-        process.exit(1);
-    }
-}
+console.log('====================================================');
+console.log('  AbTrack WhatsApp Server (v6.0 - Arsitektur Baileys)');
+console.log('====================================================');
+logger.info('Berhasil terhubung ke project Firestore: ' + firebaseConfig.projectId);
 
-async function initializeGoogleSheets() {
-    try {
-        const credentialsPath = path.join(__dirname, 'sheets-credentials.json');
-        if (!fs.existsSync(credentialsPath)) {
-            log("File sheets-credentials.json tidak ditemukan. Fitur logging ke Google Sheets dinonaktifkan.", "warn");
-            return;
-        }
-        const auth = new google.auth.GoogleAuth({
-            keyFile: credentialsPath,
-            scopes: 'https://www.googleapis.com/auth/spreadsheets',
-        });
-        googleSheetsClient = await auth.getClient();
-        log("Berhasil terhubung ke Google Sheets API.", "success");
-    } catch (error) {
-        log(`Gagal inisialisasi Google Sheets: ${error.message}`, 'error');
-    }
-}
+const SESSION_DIR = './.baileys_auth_info';
+let sock;
 
-function initializeWhatsApp() {
-    log('Menginisialisasi WhatsApp Client...');
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    logger.info(`Menggunakan WA v${version.join('.')}, isLatest: ${isLatest}`);
 
-    // Watchdog GLOBAL: Memastikan client tidak macet selamanya saat inisialisasi.
-    clearTimeout(readyTimeout);
-    log(`[WATCHDOG] Memulai timer ${GLOBAL_READY_TIMEOUT_MS / 1000} detik untuk memantau status "ready"...`);
-    readyTimeout = setTimeout(() => {
-        log(`[WATCHDOG] Waktu habis! Client gagal siap dalam ${GLOBAL_READY_TIMEOUT_MS / 1000} detik. Mencoba restart paksa...`, 'error');
-        io.emit('status', 'Koneksi macet, mencoba restart...');
-        if (client) {
-            client.destroy().catch(e => log(`Gagal menghancurkan client: ${e.message}`, 'error'));
-        }
-        setTimeout(initializeWhatsApp, 5000);
-    }, GLOBAL_READY_TIMEOUT_MS);
-
-    client = new Client({
-        authStrategy: new LocalAuth({ clientId: "abtrack-server" }),
-        puppeteer: {
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--no-zygote',
-                '--no-first-run',
-                '--disable-accelerated-2d-canvas',
-                '--single-process',
-            ],
-        },
-        webVersionCache: {
-          type: 'remote',
-          remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
-        }
+    sock = makeWASocket({
+        version,
+        printQRInTerminal: true,
+        auth: state,
+        logger: pino({ level: 'silent' })
     });
 
-    client.on('qr', qr => {
-        log("Pindai QR Code di bawah ini:", 'warn');
-        qrcode.generate(qr, { small: true });
-        io.emit('status', 'Membutuhkan Scan QR');
-        io.emit('qr_code', qr);
-    });
+    sock.ev.on('creds.update', saveCreds);
 
-    client.on('loading_screen', (percent, message) => {
-        log(`Memuat Layar: ${percent}% "${message}"`, 'info');
-    });
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
 
-    client.on('authenticated', () => {
-        log('Autentikasi berhasil!', 'success');
-        io.emit('status', 'Autentikasi berhasil, memuat chat...');
-    });
-    
-    client.on('remote_session_saved', () => {
-        log('Sesi remote berhasil disimpan.', 'info');
-    });
-
-    client.on('ready', () => {
-        clearTimeout(readyTimeout); // Watchdog berhasil dibatalkan!
-        log('[WATCHDOG] Timer dibatalkan, client sudah siap.', 'info');
-        isWhatsAppReady = true;
-        log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
-        io.emit('status', 'WhatsApp Terhubung!');
-        processQueue();
-    });
-
-    client.on('auth_failure', msg => {
-        clearTimeout(readyTimeout); // Hentikan watchdog jika autentikasi gagal
-        log(`Autentikasi gagal: ${msg}. Hapus folder .wwebjs_auth dan mulai ulang.`, 'error');
-        io.emit('status', 'Autentikasi Gagal');
-        isWhatsAppReady = false;
-    });
-
-    client.on('disconnected', reason => {
-        clearTimeout(readyTimeout); // Hentikan watchdog jika koneksi terputus
-        log(`Koneksi WhatsApp terputus: ${reason}. Coba menghubungkan kembali...`, 'error');
-        io.emit('status', 'Koneksi Terputus');
-        isWhatsAppReady = false;
-        
-        if (client) {
-            client.destroy().catch(e => log(`Error saat destroy client: ${e.message}`, 'error'));
-        }
-        setTimeout(initializeWhatsApp, 15000);
-    });
-
-    log('Menjalankan client.initialize()...');
-    client.initialize().catch(err => {
-        clearTimeout(readyTimeout); // Hentikan watchdog jika inisialisasi awal gagal
-        log(`Gagal inisialisasi client awal: ${err.message}`, 'error');
-        setTimeout(initializeWhatsApp, 30000);
-    });
-}
-
-// =================================================================================
-// --- LOGIKA UTAMA (QUEUE, WHATSAPP & SHEETS) ---
-// =================================================================================
-
-async function appendToSheet(data) {
-    if (!googleSheetsClient || !config.spreadsheetId || config.spreadsheetId === "YOUR_SPREADSHEET_ID_HERE") return;
-    const sheets = google.sheets({ version: 'v4', auth: googleSheetsClient });
-    try {
-        await sheets.spreadsheets.values.append({
-            spreadsheetId: config.spreadsheetId,
-            range: `${config.sheetName}!A1`,
-            valueInputOption: 'USER_ENTERED',
-            resource: {
-                values: [data],
-            },
-        });
-    } catch (error) {
-        log(`Gagal menulis ke Google Sheet: ${error.message}`, 'error');
-    }
-}
-
-async function sendWhatsAppMessageToGroup(groupName, message) {
-    log(`Mencari grup: "${groupName}"...`);
-    const chats = await client.getChats();
-    const groupChat = chats.find(chat => chat.isGroup && chat.name === groupName);
-
-    if (!groupChat) {
-        throw new Error(`Grup "${groupName}" tidak ditemukan. Pastikan nama grup di pengaturan kelas sudah benar.`);
-    }
-
-    log(`Mengirim pesan ke grup ${groupName} (ID: ${groupChat.id._serialized})...`);
-    const sendMessagePromise = groupChat.sendMessage(message);
-    
-    const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error(`Waktu pengiriman habis (${SEND_MESSAGE_TIMEOUT_MS / 1000} detik).`)), SEND_MESSAGE_TIMEOUT_MS)
-    );
-
-    await Promise.race([sendMessagePromise, timeoutPromise]);
-}
-
-
-async function processJob(job) {
-    if (!job || !job.id) return;
-    const jobRef = db.collection('notification_queue').doc(job.id);
-    
-    const groupName = job.payload?.recipient;
-    const messageContent = job.payload?.message;
-
-    if (!groupName || !messageContent) {
-        const errorMsg = "Tugas notifikasi tidak memiliki format yang benar (tidak ada nama grup atau pesan).";
-        log(`Gagal memproses tugas ${job.id}: ${errorMsg}`, 'error');
-        await jobRef.update({ status: 'failed', error: errorMsg, processedAt: Timestamp.now(), lockedAt: null });
-        return;
-    }
-
-    try {
-        log(`Mengunci tugas ${job.id} sebagai 'processing'.`);
-        await jobRef.update({ status: 'processing', lockedAt: Timestamp.now() });
-        
-        await sendWhatsAppMessageToGroup(groupName, messageContent);
-        
-        log(`Pesan ke grup ${groupName} berhasil dikirim.`, 'success');
-        await jobRef.update({ status: 'sent', processedAt: Timestamp.now(), error: null, lockedAt: null });
-
-        await appendToSheet([new Date().toISOString(), groupName, job.metadata?.studentName || '', 'sent', messageContent]);
-
-    } catch (error) {
-        const errorMessage = error.message || 'Terjadi error tidak diketahui.';
-        log(`Gagal memproses tugas ${job.id} untuk grup ${groupName}: ${errorMessage}`, 'error');
-
-        const newRetryCount = (job.retryCount || 0) + 1;
-        if (newRetryCount <= MAX_RETRIES) {
-            log(`Tugas ${job.id} akan dicoba kembali (percobaan ke-${newRetryCount}).`);
-            await jobRef.update({ status: 'pending', retryCount: newRetryCount, error: `Percobaan gagal: ${errorMessage}`, lockedAt: null });
-        } else {
-            log(`Tugas ${job.id} ditandai gagal permanen.`);
-            await jobRef.update({ status: 'failed', error: `Gagal permanen: ${errorMessage}`, lockedAt: null });
-        }
-        await appendToSheet([new Date().toISOString(), groupName, job.metadata?.studentName || '', 'failed', errorMessage]);
-    }
-}
-
-async function processQueue() {
-    if (!isWhatsAppReady) {
-        log("Koneksi WhatsApp terputus, pemrosesan antrean dihentikan sementara.", "warn");
-        setTimeout(processQueue, 15000); 
-        return;
-    }
-
-    const q = db.collection('notification_queue').where('status', '==', 'pending').orderBy('createdAt', 'asc').limit(1);
-    
-    try {
-        const snapshot = await q.get();
-
-        if (snapshot.empty) {
-            setTimeout(processQueue, 5000); 
-            return;
+        if (qr) {
+            logger.warn('Pindai QR Code di bawah ini untuk terhubung:');
+            qrcode.generate(qr, { small: true });
         }
 
-        const jobDoc = snapshot.docs[0];
-        const jobData = { id: jobDoc.id, ...jobDoc.data() };
-        
-        log(`Memproses tugas: ${jobData.id}`);
-        await processJob(jobData);
-
-        const delay = getRandomDelay();
-        log(`Menunggu jeda ${delay / 1000} detik sebelum tugas berikutnya...`);
-        setTimeout(processQueue, delay);
-
-    } catch (error) {
-        log(`Terjadi error pada loop pemrosesan antrean: ${error.message}`, 'error');
-        setTimeout(processQueue, 30000);
-    }
-}
-
-
-async function cleanupStaleJobs() {
-    log('[FAIL-SAFE] Menjalankan pembersihan tugas macet...');
-    const staleTime = Timestamp.fromMillis(Date.now() - STALE_JOB_TIMEOUT_MINUTES * 60 * 1000);
-    const staleJobsQuery = db.collection('notification_queue').where('status', '==', 'processing').where('lockedAt', '<=', staleTime);
-
-    try {
-        const snapshot = await staleJobsQuery.get();
-        if (snapshot.empty) {
-            log('[FAIL-SAFE] Tidak ada tugas macet ditemukan.');
-            return;
-        }
-
-        log(`[FAIL-SAFE] Ditemukan ${snapshot.size} tugas macet. Mereset...`, 'warn');
-        const batch = db.batch();
-        snapshot.forEach(doc => {
-            const job = doc.data();
-            const newRetryCount = (job.retryCount || 0) + 1;
-            const errorMsg = '[FAIL-SAFE] Direset dari status macet (timeout).';
-            
-            if (newRetryCount <= MAX_RETRIES) {
-                batch.update(doc.ref, { status: 'pending', retryCount: newRetryCount, error: errorMsg, lockedAt: null });
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error instanceof Boom) && lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut;
+            logger.error(`Koneksi terputus: ${lastDisconnect.error}, mencoba menghubungkan kembali: ${shouldReconnect}`);
+            if (shouldReconnect) {
+                setTimeout(connectToWhatsApp, 5000);
             } else {
-                batch.update(doc.ref, { status: 'failed', error: `Gagal permanen: ${errorMsg}`, lockedAt: null });
+                logger.error('Tidak dapat terhubung, keluar. Hapus folder .baileys_auth_info dan coba lagi.');
+                if (fs.existsSync(SESSION_DIR)) {
+                    fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+                }
+                process.exit(1);
+            }
+        } else if (connection === 'open') {
+            logger.info('WhatsApp Terhubung! Siap memproses notifikasi.');
+            listenForNotificationJobs();
+        }
+    });
+}
+
+function listenForNotificationJobs() {
+    const q = query(collection(db, "notification_queue"), where("status", "==", "pending"));
+
+    onSnapshot(q, (snapshot) => {
+        if (snapshot.empty) {
+            return;
+        }
+
+        snapshot.docs.forEach(async (jobDoc) => {
+            const jobData = jobDoc.data();
+            const jobId = jobDoc.id;
+            const jobRef = doc(db, "notification_queue", jobId);
+
+            logger.info(`[JOB] Mengambil tugas baru: ${jobId}`);
+
+            try {
+                await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now() });
+
+                const { recipient, message } = jobData.payload;
+                if (!recipient || !message) {
+                    throw new Error('Payload tidak valid: recipient atau message kosong.');
+                }
+                
+                let jid = recipient;
+                if (!jid.endsWith('@s.whatsapp.net') && !jid.endsWith('@g.us')) {
+                    jid = jid.replace(/\D/g, ''); // Hapus non-digit
+                    if (jid.startsWith('0')) {
+                        jid = '62' + jid.substring(1);
+                    }
+                    jid = jid + '@s.whatsapp.net';
+                }
+                
+                const [result] = await sock.onWhatsApp(jid);
+                if (!result?.exists) {
+                     // Check if it's a group
+                    const groupMeta = await sock.groupMetadata(recipient).catch(() => null);
+                    if (!groupMeta) {
+                        throw new Error(`Nomor atau Grup ${recipient} tidak ditemukan di WhatsApp.`);
+                    }
+                    jid = groupMeta.id; // Use the correct group JID
+                } else {
+                    jid = result.jid;
+                }
+                
+                logger.info(`[JOB] Mengirim pesan ke ${jid}`);
+                await sock.sendMessage(jid, { text: message });
+
+                await updateDoc(jobRef, { status: "sent", updatedAt: Timestamp.now() });
+                logger.info(`[JOB] Tugas ${jobId} berhasil dikirim.`);
+
+            } catch (error) {
+                logger.error(`[JOB] Gagal memproses tugas ${jobId}: ${error.message}`);
+                await updateDoc(jobRef, {
+                    status: "failed",
+                    errorMessage: error.message,
+                    updatedAt: Timestamp.now()
+                });
             }
         });
-        await batch.commit();
-        log(`[FAIL-SAFE] ${snapshot.size} tugas macet berhasil direset.`, 'success');
+    });
+}
+
+setInterval(async () => {
+    logger.info('[FAIL-SAFE] Menjalankan pembersihan tugas macet...');
+    try {
+        const fiveMinutesAgo = Timestamp.fromMillis(Date.now() - 5 * 60 * 1000);
+        const q = query(
+            collection(db, "notification_queue"),
+            where("status", "==", "processing"),
+            where("updatedAt", "<=", fiveMinutesAgo)
+        );
+        const stuckJobs = await getDocs(q);
+        if (stuckJobs.empty) {
+            logger.info('[FAIL-SAFE] Tidak ada tugas macet ditemukan.');
+            return;
+        }
+        
+        logger.warn(`[FAIL-SAFE] Ditemukan ${stuckJobs.size} tugas macet. Mereset ke 'pending'...`);
+        const batch = [];
+        stuckJobs.forEach(doc => {
+            batch.push(updateDoc(doc.ref, { status: 'pending', errorMessage: 'Direset oleh fail-safe' }));
+        });
+        await Promise.all(batch);
+
     } catch (error) {
-        log(`[FAIL-SAFE] Error saat membersihkan tugas macet: ${error.message}`, 'error');
+        logger.error(`[FAIL-SAFE] Error saat membersihkan tugas macet: ${error.message}`);
     }
-}
+}, 5 * 60 * 1000);
 
-// =================================================================================
-// --- TITIK MASUK APLIKASI ---
-// =================================================================================
+const expressApp = express();
+const PORT = 8000;
+expressApp.get('/', (req, res) => {
+    res.send('WhatsApp Server (Baileys) is running.');
+});
+expressApp.listen(PORT, () => {
+    logger.info(`Server Express berjalan di port ${PORT}`);
+});
 
-async function main() {
-    console.log(`\n====================================================`);
-    console.log(`  AbTrack WhatsApp Server (v5.0 - Arsitektur Express)`);
-    console.log(`====================================================\n`);
+connectToWhatsApp();
 
-    initializeFirebase();
-    await initializeGoogleSheets();
-    initializeWhatsApp();
-    
-    io.on('connection', (socket) => {
-        log('Client terhubung via Socket.IO');
-        socket.emit('status', isWhatsAppReady ? 'WhatsApp Terhubung!' : 'Menginisialisasi...');
-    });
-
-    server.listen(PORT, () => {
-        log(`Server Express berjalan di port ${PORT}`, 'success');
-    });
-
-    // Jalankan pembersihan tugas macet setiap 1 menit
-    setInterval(cleanupStaleJobs, 60 * 1000);
-}
-
-main();
+process.on('SIGINT', async () => {
+    logger.info("Menutup koneksi...");
+    if(sock) {
+        await sock.logout();
+    }
+    process.exit(0);
+});
