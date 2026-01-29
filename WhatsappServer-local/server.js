@@ -103,11 +103,23 @@ function initializeWhatsApp() {
         io.emit('qr_code', qr);
     });
 
+    client.on('loading_screen', (percent, message) => {
+        log(`Memuat Layar: ${percent}% "${message}"`, 'info');
+    });
+
+    client.on('authenticated', () => {
+        log('Autentikasi berhasil!', 'success');
+        io.emit('status', 'Autentikasi berhasil, memuat chat...');
+    });
+    
+    client.on('remote_session_saved', () => {
+        log('Sesi remote berhasil disimpan.', 'info');
+    });
+
     client.on('ready', () => {
         isWhatsAppReady = true;
         log('WhatsApp Terhubung! Siap memproses notifikasi.', 'success');
         io.emit('status', 'WhatsApp Terhubung!');
-        // Memulai pemroses antrean yang baru
         processQueue();
     });
 
@@ -121,10 +133,14 @@ function initializeWhatsApp() {
         log(`Koneksi WhatsApp terputus: ${reason}. Coba menghubungkan kembali...`, 'error');
         io.emit('status', 'Koneksi Terputus');
         isWhatsAppReady = false;
-        client.initialize().catch(err => log(`Gagal restart otomatis: ${err.message}`, 'error'));
+        setTimeout(() => {
+            log('Mencoba inisialisasi ulang client...');
+            client.initialize().catch(err => log(`Gagal restart otomatis: ${err.message}`, 'error'));
+        }, 15000); // Wait 15 seconds before retrying
     });
 
-    client.initialize().catch(err => log(`Gagal inisialisasi client: ${err.message}`, 'error'));
+    log('Menjalankan client.initialize()...');
+    client.initialize().catch(err => log(`Gagal inisialisasi client awal: ${err.message}`, 'error'));
 }
 
 // =================================================================================
