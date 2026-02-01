@@ -5,53 +5,46 @@ service cloud.firestore {
   match /databases/{database}/documents {
   
     // --- ATURAN AKSES SERVER / PUBLIK (TANPA LOGIN) ---
-    // Aturan ini hanya berlaku untuk proses yang berjalan tanpa otentikasi.
 
-    // 1. Izinkan server notifikasi untuk membaca dan menulis ke antrean notifikasi.
+    // Izinkan server notifikasi untuk membaca dan menulis ke antrean notifikasi.
     match /notification_queue/{jobId} {
       allow read, write: if true;
     }
 
-    // 2. Izinkan server notifikasi untuk mengelola pemicu manual.
+    // Izinkan server notifikasi untuk mengelola pemicu manual.
     match /manual_triggers/{triggerId} {
       allow create: if request.auth != null; // Admin creates trigger
       allow read, update, delete: if true;   // Server processes it
     }
-
-    // 3. Izinkan siapa saja untuk MEMBACA (get) konfigurasi aplikasi.
-    match /settings/appConfig {
-      allow get: if true;
-    }
     
-    // 4. Aturan untuk data utama aplikasi.
-    // Izinkan server (dan siapa saja) untuk MEMBACA data untuk membuat laporan,
-    // tetapi hanya admin yang bisa MENULIS (mengubah) data.
-    
+    // Izinkan server (dan siapa saja) untuk MEMBACA data untuk membuat laporan
     match /students/{studentId} {
       allow read: if true;
       allow write: if request.auth != null;
     }
-    
     match /classes/{classId} {
       allow read: if true;
       allow write: if request.auth != null;
     }
-    
     match /attendance/{recordId} {
       allow read: if true;
       allow write: if request.auth != null;
     }
-    
     match /holidays/{holidayId} {
       allow read: if true;
       allow write: if request.auth != null;
     }
 
-    // 5. Aturan untuk Pengaturan (Settings)
-    // Izinkan admin untuk membaca dan menulis semua pengaturan.
-    // Pengguna publik hanya bisa membaca 'appConfig' (diatur di aturan #3).
+    // --- Aturan untuk Pengaturan (Settings) ---
     match /settings/{settingId} {
-      allow read, write: if request.auth != null;
+      // Izinkan siapa saja membaca pengaturan (dibutuhkan oleh server dan klien)
+      allow read: if true;
+      
+      // Izinkan MENULIS hanya jika:
+      // 1. Pengguna adalah admin (request.auth != null)
+      // ATAU
+      // 2. Dokumen yang dituju adalah 'monthlyRecapStatus' (untuk server)
+      allow write: if request.auth != null || settingId == 'monthlyRecapStatus';
     }
   }
 }
