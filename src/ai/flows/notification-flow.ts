@@ -2,10 +2,11 @@
 'use server';
 
 /**
- * @fileOverview Handles queuing notifications to Firestore for WhatsApp group delivery.
- * - notifyOnAttendance: Queues a real-time attendance notification to a class group.
+ * @fileOverview Handles queuing notifications to Firestore for WhatsApp delivery.
+ * - notifyOnAttendance: Queues a real-time attendance notification to a parent.
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
  * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
+ * - queueMonthlyRecapToParent: Queues a monthly recap message to a parent.
  */
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
@@ -34,6 +35,12 @@ export type SerializableAttendanceRecord = {
   parentWaNumber?: string;
 };
 
+type MonthlySummaryData = {
+    studentInfo: { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; },
+    attendance: { [day: number]: string },
+    summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
+}
+
 const footerVariations = [
     "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas._",
     "_Ini adalah pesan otomatis, mohon tidak membalas pesan ini._",
@@ -41,19 +48,18 @@ const footerVariations = [
 ];
 
 // Internal helper to queue a notification
-async function queueNotification(groupName: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<void> {
-    if (!groupName) {
-        const errorMsg = "Nama grup WhatsApp tidak ditemukan untuk kelas ini. Notifikasi dilewati.";
+async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<void> {
+    if (!recipient) {
+        const errorMsg = "Nomor tujuan WhatsApp tidak ditemukan. Notifikasi dilewati.";
         console.warn(errorMsg, metadata);
-        return; // No group name, so no notification.
+        return; // No recipient, so no notification.
     }
     
     const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
     const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
 
     const jobPayload = {
-        // We reuse the 'recipient' field for the group name.
-        payload: { recipient: groupName, message: finalMessage },
+        payload: { recipient, message: finalMessage },
         type,
         metadata,
         status: 'pending' as const,
@@ -72,10 +78,16 @@ async function queueNotification(groupName: string, message: string, type: 'atte
 
 
 /**
- * Queues a real-time attendance notification to a class's WhatsApp group.
+ * Queues a real-time attendance notification to a parent's WhatsApp.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
+    const waNumber = record.parentWaNumber;
+    if (!waNumber) {
+        console.log(`No WhatsApp number for student ${record.studentName}, skipping parent notification.`);
+        return;
+    }
+    
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
         console.error(`Class with ID ${record.classId} not found for notification.`);
@@ -83,12 +95,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     }
     const classInfo = classSnap.data() as Class;
     
-    // If the class has no group name configured, skip notification.
-    if (!classInfo.whatsappGroupName) {
-        console.log(`No WhatsApp group name for class ${classInfo.name}, skipping notification.`);
-        return;
-    }
-
     let timestampStr: string | null = null;
     let title: string;
     let finalStatus: string;
@@ -100,12 +106,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     } else if (record.timestampMasuk) {
         timestampStr = record.timestampMasuk;
         title = `Absensi Masuk`;
-        // Make status more descriptive
-        if (record.status === 'Hadir') {
-            finalStatus = 'Masuk Tepat Waktu';
-        } else {
-            finalStatus = record.status; // e.g., "Terlambat"
-        }
+        finalStatus = record.status;
     } else {
         // This case is for manual entries like Sakit/Izin/Alfa
         timestampStr = record.recordDate; 
@@ -119,10 +120,8 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     }
 
     const timeZone = "Asia/Jakarta";
-    // The timestampStr is an ISO string (UTC) from the client
     const date = new Date(timestampStr);
     
-    // Use formatInTimeZone to guarantee the conversion to WIB
     const formattedDate = formatInTimeZone(date, timeZone, "eeee, dd MMMM yyyy", { locale: localeID });
     const formattedTime = formatInTimeZone(date, timeZone, "HH:mm:ss");
 
@@ -139,12 +138,53 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     
     const message = messageLines.join("\n");
     
-    await queueNotification(classInfo.whatsappGroupName, message, 'attendance', { 
+    await queueNotification(waNumber, message, 'attendance', { 
         studentName: record.studentName, 
         nisn: record.nisn, 
         studentId: record.studentId,
         className: classInfo.name,
     });
+}
+
+/**
+ * Queues a monthly attendance recap to a parent.
+ * @param studentData The student's monthly summary data.
+ * @param month The month of the recap (0-11).
+ * @param year The year of the recap.
+ * @param googleDriveLink The public link to the Google Drive folder.
+ */
+export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData, month: number, year: number, googleDriveLink: string): Promise<void> {
+    const waNumber = studentData.studentInfo.parentWaNumber;
+    if (!waNumber) {
+        // This is handled in the calling function, but as a safeguard.
+        return;
+    }
+
+    const { summary, studentInfo } = studentData;
+    const totalHadir = summary.H + summary.T;
+    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
+
+    const messageLines = [
+        "🏫 *SMAS PGRI Naringgul*",
+        `*Laporan Rekap Absensi: ${monthName}*`,
+        "--------------------------------",
+        `*Nama Siswa*: ${studentInfo.nama}`,
+        `*NISN*: ${studentInfo.nisn}`,
+        "",
+        "*Rincian Kehadiran:*",
+        `  - Hadir       : ${totalHadir} hari`,
+        `  - Terlambat   : ${summary.T} hari`,
+        `  - Sakit       : ${summary.S} hari`,
+        `  - Izin        : ${summary.I} hari`,
+        `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
+        `  - Dispensasi  : ${summary.D} hari`,
+        "",
+        "Untuk melihat atau mengunduh laporan PDF lengkap, silakan kunjungi tautan berikut:",
+        googleDriveLink,
+    ];
+
+    const message = messageLines.join('\n');
+    await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
 }
 
 

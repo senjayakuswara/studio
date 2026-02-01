@@ -3,9 +3,8 @@
 
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy, addDoc, serverTimestamp } from "firebase/firestore"
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, app } from "@/lib/firebase"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
+import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
@@ -36,10 +35,11 @@ import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { queueMonthlyRecapToParent } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
-type Student = { id: string; nisn: string; nama: string; classId: string; }
+type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
 type AttendanceRecord = {
@@ -82,7 +82,9 @@ const months = Array.from({ length: 12 }, (_, i) => ({
   value: i,
   label: format(new Date(0, i), "MMMM", { locale: localeID }),
 }));
-const storage = getStorage(app);
+
+const GOOGLE_DRIVE_LINK = "https://drive.google.com/drive/folders/1d3XcTvOT79KxlUQRO5sZVvEB-3-qBXwY?usp=sharing";
+
 
 export default function RekapitulasiPage() {
     // State for Monthly Report
@@ -113,7 +115,7 @@ export default function RekapitulasiPage() {
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
-    const [isSendingToGroup, setIsSendingToGroup] = useState(false);
+    const [isSendingToParents, setIsSendingToParents] = useState(false);
     const { toast } = useToast()
     
     const individualStudentOptions = useMemo(() => {
@@ -422,88 +424,52 @@ export default function RekapitulasiPage() {
         return doc;
     }
 
-    const handleSendRecapToGroup = async () => {
-        if (!reportConfig) {
-            toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
-            return;
-        }
-
-        setIsSendingToGroup(true);
+    const handleSendParentRecaps = async () => {
+        setIsSendingToParents(true);
         try {
             const data = await generateSummaryData();
-            
-            if (data) {
-                toast({ title: "Memproses Laporan...", description: "Membuat PDF untuk semua kelas target. Ini mungkin memakan waktu." });
-
-                const studentsByClass = data.students.reduce((acc, student) => {
-                    if (!acc[student.classId]) acc[student.classId] = [];
-                    acc[student.classId].push(student);
-                    return acc;
-                }, {} as Record<string, Student[]>);
-
-                let successCount = 0;
-                let failCount = 0;
-
-                for (const classId in studentsByClass) {
-                    const classInfo = classMap.get(classId);
-                    const studentsInClass = studentsByClass[classId];
-
-                    if (!classInfo || !classInfo.whatsappGroupName) {
-                        console.warn(`Melewati kelas ${classInfo?.name || classId} karena tidak ada nama grup WA.`);
-                        continue;
-                    }
-
-                    try {
-                        const singleClassSummary = Object.fromEntries(
-                            Object.entries(data.summary).filter(([studentId]) => studentsInClass.some(s => s.id === studentId))
-                        );
-
-                        const pdfDoc = generateMonthlyPdf(singleClassSummary, studentsInClass, classId, data.holidayDateStrings);
-                        const pdfBlob = pdfDoc.output('blob');
-                        const monthName = format(new Date(selectedYear, selectedMonth), "MMMM_yyyy", { locale: localeID });
-                        const fileName = `Rekap_${classInfo.name.replace(/ /g, '_')}_${monthName}.pdf`;
-                        const storagePath = `monthly-recaps/${selectedYear}-${selectedMonth + 1}/${fileName}`;
-                        const fileRef = ref(storage, storagePath);
-
-                        await uploadBytes(fileRef, pdfBlob, { contentType: 'application/pdf' });
-                        const pdfUrl = await getDownloadURL(fileRef);
-
-                        const caption = `Rekap Absensi Bulanan: ${format(new Date(selectedYear, selectedMonth), "MMMM yyyy", { locale: localeID })}\nKelas: ${classInfo.grade} ${classInfo.name}`;
-                        
-                        const jobPayload = {
-                            payload: {
-                                recipient: classInfo.whatsappGroupName,
-                                message: caption,
-                                fileUrl: pdfUrl,
-                                fileMimetype: 'application/pdf',
-                                fileName: fileName,
-                            },
-                            type: 'recap_pdf',
-                            status: 'pending',
-                            createdAt: Timestamp.now(),
-                            updatedAt: Timestamp.now(),
-                        };
-
-                        await addDoc(collection(db, "notification_queue"), jobPayload);
-                        successCount++;
-                    } catch (error) {
-                        console.error(`Gagal memproses PDF untuk kelas ${classInfo.name}:`, error);
-                        failCount++;
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-
-                if (successCount > 0) {
-                    toast({ title: "Proses Selesai", description: `${successCount} laporan kelas berhasil dimasukkan ke antrean kirim. ${failCount > 0 ? `${failCount} gagal.` : ''}` });
-                } else {
-                    toast({ variant: "destructive", title: "Proses Gagal", description: "Tidak ada laporan yang berhasil dibuat. Periksa log konsol untuk detail." });
-                }
+            if (!data || data.students.length === 0) {
+                toast({ title: "Tidak ada data untuk dikirim." });
+                return;
             }
+
+            toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan rekap untuk ${data.students.length} siswa. Ini mungkin memakan waktu.` });
+
+            let successCount = 0;
+            let noWaCount = 0;
+            let errorCount = 0;
+            
+            for (const student of data.students) {
+                const studentSummary = data.summary[student.id];
+                if (student.parentWaNumber) {
+                    try {
+                        await queueMonthlyRecapToParent(studentSummary, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK);
+                        successCount++;
+                    } catch (e) {
+                        console.error(`Gagal mengirim rekap untuk ${student.nama}`, e);
+                        errorCount++;
+                    }
+                } else {
+                    noWaCount++;
+                }
+                // Small delay to prevent overwhelming the backend function invocation
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            let finalDescription = `${successCount} notifikasi rekap berhasil dimasukkan ke antrean.`;
+            if (noWaCount > 0) finalDescription += ` ${noWaCount} siswa dilewati karena tidak ada nomor WA.`;
+            if (errorCount > 0) finalDescription += ` ${errorCount} gagal karena kesalahan sistem.`;
+
+            toast({
+                title: "Proses Selesai",
+                description: finalDescription,
+            });
+
         } catch (error) {
-            console.error("An unexpected error occurred in handleSendRecapToGroup:", error);
-            toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Proses pembuatan laporan gagal secara tak terduga." });
+            console.error("Error during handleSendParentRecaps:", error);
+            toast({ variant: "destructive", title: "Proses Gagal Total", description: "Terjadi kesalahan tak terduga saat memproses data." });
         } finally {
-            setIsSendingToGroup(false);
+            setIsSendingToParents(false);
         }
     }
 
@@ -854,11 +820,11 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleSendRecapToGroup} disabled={isSendingToGroup || isGenerating || isLoading || !selectedTarget}>
-                                    {isSendingToGroup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    Kirim Rekap ke Grup
+                                <Button onClick={handleSendParentRecaps} disabled={isSendingToParents || isGenerating || isLoading || !selectedTarget}>
+                                    {isSendingToParents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    Kirim Notifikasi ke Ortu
                                 </Button>
-                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingToGroup || isLoading || !selectedTarget}>
+                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingToParents || isLoading || !selectedTarget}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
                                 </Button>
