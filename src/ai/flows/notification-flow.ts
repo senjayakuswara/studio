@@ -191,12 +191,12 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         const s = summaryData[student.id]?.summary;
         if (!s) return "";
         const hadir = s.H + s.T;
-        return `${index + 1}. ${student.nama}\n   ✅ H: ${hadir} | ❌ A: ${s.A} | 🤒 S: ${s.S} | 📝 I: ${s.I}`;
+        return `${index + 1}. ${student.nama}\n   ✅ H: ${hadir} | ❌ A: ${s.A} | 🤒 S: ${s.S} | 📝 I: ${s.I} | 🏃 D: ${s.D}`;
     }).join('\n\n');
     
     const linkSection = classInfo.grade === 'Staf'
         ? `*Akses Laporan Guru:*\n${GOOGLE_DRIVE_LINK_GURU}`
-        : `*Akses Laporan Siswa:*\n${GOOGLE_DRIVE_LINK_SISWA}\n\n*Akses Laporan Guru:*\n${GOOGLE_DRIVE_LINK_GURU}`;
+        : `*Akses Laporan Siswa:*\n${GOOGLE_DRIVE_LINK_SISWA}`;
 
     // --- Assemble Final Message ---
     const messageLines = [
@@ -214,6 +214,7 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         `❌ Alpha: ${totalAlfa} hari`,
         `🤒 Sakit: ${totalSakit} hari`,
         `📝 Izin: ${totalIzin} hari`,
+        `🏃 Dispen: ${totalDispen} hari`,
         `📊 Rata-rata Kehadiran: ${averageKehadiran}%`,
         "━━━━━━━━━━━━━━━━━━",
         "📋 *Daftar Siswa (Ringkas)*",
