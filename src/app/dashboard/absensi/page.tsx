@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, updateDoc, writeBatch } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, updateDoc, writeBatch, setDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, startOfDay, endOfDay, setHours, setMinutes, setSeconds } from "date-fns"
@@ -80,7 +80,7 @@ import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flow
 
 // Types
 type Class = { id: string; name: string; grade: string }
-type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string }
+type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; status: "Aktif" | "Lulus" | "Pindah" }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
   id: string
@@ -154,8 +154,7 @@ export default function AbsensiPage() {
   const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true)
   const [isPrinting, setIsPrinting] = useState(false)
-  const [isMassCheckinProcessing, setIsMassCheckinProcessing] = useState(false);
-  const [isMassCheckoutProcessing, setIsMassCheckoutProcessing] = useState(false);
+  const [isMassProcessing, setIsMassProcessing] = useState(false);
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
   const [filterStatus, setFilterStatus] = useState<AttendanceStatus | "all">("all")
@@ -176,7 +175,7 @@ export default function AbsensiPage() {
       const [classesSnapshot, reportConfigSnap, studentsSnapshot, schoolHoursSnap] = await Promise.all([
           getDocs(collection(db, "classes")),
           getDoc(doc(db, "settings", "reportConfig")),
-          getDocs(collection(db, "students")),
+          getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
           getDoc(doc(db, "settings", "schoolHours")),
       ]);
 
@@ -237,12 +236,22 @@ export default function AbsensiPage() {
 
   const studentsBelumAbsen = useMemo(() => {
     const studentsWithAttendance = new Set(attendanceRecords.map(rec => rec.studentId));
-    return allStudents.filter(student => !studentsWithAttendance.has(student.id) && student.status === "Aktif")
+    return allStudents.filter(student => !studentsWithAttendance.has(student.id))
   }, [allStudents, attendanceRecords]);
-
+  
   const studentsSudahMasukTapiBelumPulang = useMemo(() => {
     return attendanceRecords.filter(rec => rec.timestampMasuk && !rec.timestampPulang);
   }, [attendanceRecords]);
+
+  const studentsInSelectedClassBelumAbsen = useMemo(() => {
+    if (filterClass === 'all') return [];
+    return studentsBelumAbsen.filter(s => s.classId === filterClass);
+  }, [studentsBelumAbsen, filterClass]);
+
+  const studentsInSelectedClassBelumPulang = useMemo(() => {
+    if (filterClass === 'all') return [];
+    return studentsSudahMasukTapiBelumPulang.filter(rec => rec.classId === filterClass);
+  }, [studentsSudahMasukTapiBelumPulang, filterClass]);
 
   const filteredRecords = useMemo(() => {
     const classMap = new Map(classes.map(c => [c.id, c]));
@@ -269,79 +278,59 @@ export default function AbsensiPage() {
   }, [allStudents, attendanceRecords, studentsBelumAbsen, filterClass, filterName, filterStatus, classes])
   
   const handleMassCheckIn = async () => {
-    if (!schoolHours) {
-        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
+    if (!schoolHours || filterClass === 'all') {
+        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur atau kelas belum dipilih." });
         return;
     }
-    setIsMassCheckinProcessing(true);
-    const studentsToAttend = studentsBelumAbsen;
+    setIsMassProcessing(true);
+    const studentsToAttend = studentsInSelectedClassBelumAbsen;
+    
     if (studentsToAttend.length === 0) {
-        toast({ title: "Informasi", description: "Semua siswa sudah memiliki catatan absensi hari ini." });
-        setIsMassCheckinProcessing(false);
+        toast({ title: "Informasi", description: "Semua siswa di kelas ini sudah memiliki catatan absensi hari ini." });
+        setIsMassProcessing(false);
         return;
     }
 
-    toast({ title: "Memulai Absensi Masuk Massal", description: `Memproses ${studentsToAttend.length} siswa dalam beberapa batch... Ini mungkin memakan waktu.` });
-
-    const CHUNK_SIZE = 25;
+    toast({ title: "Memulai Absen Masuk Massal", description: `Memproses ${studentsToAttend.length} siswa... Ini mungkin memakan waktu.` });
+    
     let totalSuccessCount = 0;
     let totalFailCount = 0;
 
-    for (let i = 0; i < studentsToAttend.length; i += CHUNK_SIZE) {
-        const chunk = studentsToAttend.slice(i, i + CHUNK_SIZE);
+    const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
+    const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+    
+    for (const student of studentsToAttend) {
         try {
-            const batch = writeBatch(db);
-            const notificationPayloads: SerializableAttendanceRecord[] = [];
+            const newRecordDocRef = doc(collection(db, "attendance"));
+            const newRecord: Omit<AttendanceRecord, 'id'> = {
+                studentId: student.id,
+                nisn: student.nisn,
+                studentName: student.nama,
+                classId: student.classId,
+                status: "Hadir",
+                timestampMasuk: Timestamp.fromDate(entryTime),
+                timestampPulang: null,
+                notes: "Absensi massal oleh admin",
+                recordDate: Timestamp.fromDate(startOfDay(date)),
+            };
+            await setDoc(newRecordDocRef, newRecord);
+
+            const serializableRecord: SerializableAttendanceRecord = {
+                id: newRecordDocRef.id,
+                ...newRecord,
+                timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: null,
+                recordDate: newRecord.recordDate.toDate().toISOString(),
+                parentWaNumber: student.parentWaNumber
+            };
             
-            const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-            const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
-
-            chunk.forEach(student => {
-                const newRecordDocRef = doc(collection(db, "attendance"));
-                const newRecord: Omit<AttendanceRecord, 'id'> = {
-                    studentId: student.id,
-                    nisn: student.nisn,
-                    studentName: student.nama,
-                    classId: student.classId,
-                    status: "Hadir",
-                    timestampMasuk: Timestamp.fromDate(entryTime),
-                    timestampPulang: null,
-                    notes: "Absensi massal oleh admin",
-                    recordDate: Timestamp.fromDate(startOfDay(date)),
-                };
-                batch.set(newRecordDocRef, newRecord);
-
-                const serializableRecord: SerializableAttendanceRecord = {
-                    id: newRecordDocRef.id,
-                    ...newRecord,
-                    timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                    timestampPulang: null,
-                    recordDate: newRecord.recordDate.toDate().toISOString(),
-                    parentWaNumber: student.parentWaNumber
-                };
-                notificationPayloads.push(serializableRecord);
-            });
-
-            await batch.commit();
-
-            for (const payload of notificationPayloads) {
-                try {
-                    await notifyOnAttendance(payload);
-                    totalSuccessCount++;
-                } catch (err) {
-                    console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-                    totalFailCount++;
-                }
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
+            await notifyOnAttendance(serializableRecord);
+            totalSuccessCount++;
         } catch (error) {
-            console.error("Error during mass check-in chunk:", error);
-            totalFailCount += chunk.length;
-            toast({ variant: "destructive", title: "Kesalahan Batch", description: "Gagal memproses sebagian siswa." });
+            console.error(`Gagal memproses absen masuk untuk ${student.nama}:`, error);
+            totalFailCount++;
         }
-        if (i + CHUNK_SIZE < studentsToAttend.length) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        await new Promise(resolve => setTimeout(resolve, 150));
     }
     
     let description = `${totalSuccessCount} notifikasi berhasil dijadwalkan.`;
@@ -351,74 +340,52 @@ export default function AbsensiPage() {
     toast({ title: "Proses Absen Masuk Selesai", description });
 
     await fetchData(date);
-    setIsMassCheckinProcessing(false);
+    setIsMassProcessing(false);
   };
 
   const handleMassCheckOut = async () => {
-    if (!schoolHours) {
-        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
+    if (!schoolHours || filterClass === 'all') {
+        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur atau kelas belum dipilih." });
         return;
     }
-    setIsMassCheckoutProcessing(true);
-    const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
+    setIsMassProcessing(true);
+    const studentsToCheckOut = studentsInSelectedClassBelumPulang;
 
     if (studentsToCheckOut.length === 0) {
-        toast({ title: "Informasi", description: "Tidak ada siswa yang bisa diabsen pulang." });
-        setIsMassCheckoutProcessing(false);
+        toast({ title: "Informasi", description: "Tidak ada siswa di kelas ini yang bisa diabsen pulang." });
+        setIsMassProcessing(false);
         return;
     }
 
     toast({ title: "Memulai Absensi Pulang Massal", description: `Memproses ${studentsToCheckOut.length} siswa...` });
     
-    const CHUNK_SIZE = 25;
     let totalSuccessCount = 0;
     let totalFailCount = 0;
     
-    for (let i = 0; i < studentsToCheckOut.length; i += CHUNK_SIZE) {
-        const chunk = studentsToCheckOut.slice(i, i + CHUNK_SIZE);
+    const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
+    const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+    
+    for (const record of studentsToCheckOut) {
         try {
-            const batch = writeBatch(db);
-            const notificationPayloads: SerializableAttendanceRecord[] = [];
-            
-            const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
-            const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
-          
-            chunk.forEach(record => {
-                if (!record.id) return;
-                const docRef = doc(db, "attendance", record.id);
-                batch.update(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
+            if (!record.id) continue;
+            const docRef = doc(db, "attendance", record.id);
+            await updateDoc(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
 
-                const serializableRecord: SerializableAttendanceRecord = {
-                    ...record,
-                    id: record.id,
-                    studentName: record.studentName!,
-                    timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
-                    timestampPulang: exitTime.toISOString(),
-                    recordDate: (record.recordDate as Timestamp).toDate().toISOString(),
-                };
-                notificationPayloads.push(serializableRecord);
-            });
-
-            await batch.commit();
-
-            for (const payload of notificationPayloads) {
-                try {
-                    await notifyOnAttendance(payload);
-                    totalSuccessCount++;
-                } catch (err) {
-                    console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-                    totalFailCount++;
-                }
-                await new Promise(resolve => setTimeout(resolve, 50));
-            }
+            const serializableRecord: SerializableAttendanceRecord = {
+                ...record,
+                id: record.id,
+                studentName: record.studentName!,
+                timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: exitTime.toISOString(),
+                recordDate: (record.recordDate as Timestamp).toDate().toISOString(),
+            };
+            await notifyOnAttendance(serializableRecord);
+            totalSuccessCount++;
         } catch (error) {
-            console.error("Error during mass checkout chunk:", error);
-            totalFailCount += chunk.length;
-            toast({ variant: "destructive", title: "Kesalahan Batch", description: "Gagal memproses sebagian siswa." });
+            console.error(`Gagal memproses absen pulang untuk ${record.studentName}:`, error);
+            totalFailCount++;
         }
-        if (i + CHUNK_SIZE < studentsToCheckOut.length) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
+        await new Promise(resolve => setTimeout(resolve, 150));
     }
 
     let description = `${totalSuccessCount} notifikasi pulang berhasil dijadwalkan.`;
@@ -428,7 +395,7 @@ export default function AbsensiPage() {
     toast({ title: "Proses Absen Pulang Selesai", description });
 
     await fetchData(date);
-    setIsMassCheckoutProcessing(false);
+    setIsMassProcessing(false);
   };
 
   const openEditDialog = (record: CombinedAttendanceRecord) => {
@@ -715,112 +682,10 @@ export default function AbsensiPage() {
                         <h1 className="font-headline text-3xl font-bold tracking-tight">Manajemen Absensi</h1>
                         <p className="text-muted-foreground">Lacak dan kelola data absensi harian siswa.</p>
                     </div>
-                    <div className="flex flex-col md:flex-row gap-2">
-                        <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                                <Button variant="secondary" className="w-full md:w-auto" disabled={isMassCheckinProcessing || isMassCheckoutProcessing || isLoading || studentsBelumAbsen.length === 0}>
-                                    {isMassCheckinProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
-                                    {isMassCheckinProcessing ? 'Memproses...' : 'Absen Masuk Massal'}
-                                </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Konfirmasi Absen Masuk Massal</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        Tindakan ini akan menandai {studentsBelumAbsen.length} siswa yang 'Belum Absen' sebagai 'Hadir' dan mengirim notifikasi. Anda yakin?
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Batal</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleMassCheckIn}>Ya, Lanjutkan</AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
-
-                         <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                                <Button variant="secondary" className="w-full md:w-auto" disabled={isMassCheckinProcessing || isMassCheckoutProcessing || isLoading || studentsSudahMasukTapiBelumPulang.length === 0}>
-                                    {isMassCheckoutProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
-                                    {isMassCheckoutProcessing ? 'Memproses...' : 'Absen Pulang Massal'}
-                                </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Konfirmasi Absen Pulang Massal</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                        Tindakan ini akan mencatat jam pulang untuk {studentsSudahMasukTapiBelumPulang.length} siswa dan mengirim notifikasi. Anda yakin?
-                                    </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Batal</AlertDialogCancel>
-                                    <AlertDialogAction onClick={handleMassCheckOut}>Ya, Lanjutkan</AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
-
-                        <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
-                            {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                            {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
-                        </Button>
-                    </div>
-                </div>
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <Popover>
-                        <PopoverTrigger asChild>
-                        <Button
-                            variant={"outline"}
-                            className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !date && "text-muted-foreground"
-                            )}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
-                        </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                            mode="single"
-                            selected={date}
-                            onSelect={(d) => d && setDate(d)}
-                            initialFocus
-                            disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
-                        />
-                        </PopoverContent>
-                    </Popover>
-                    <Select value={filterClass} onValueChange={setFilterClass}>
-                        <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Filter berdasarkan kelas" />
-                        </SelectTrigger>
-                        <SelectContent>
-                        <SelectItem value="all">Semua Kelas</SelectItem>
-                        {["X", "XI", "XII"].map(grade => (
-                            <SelectGroup key={grade}>
-                            <SelectLabel>Kelas {grade}</SelectLabel>
-                            {classes.filter(c => c.grade === grade).map(c => (
-                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                            ))}
-                            </SelectGroup>
-                        ))}
-                        </SelectContent>
-                    </Select>
-                     <Select value={filterStatus} onValueChange={(value) => setFilterStatus(value as AttendanceStatus | "all")}>
-                        <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Filter berdasarkan status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">Semua Status</SelectItem>
-                            {ALL_STATUSES.map(status => (
-                                <SelectItem key={status} value={status}>{status}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                     <Input
-                        placeholder="Cari berdasarkan nama siswa..."
-                        value={filterName}
-                        onChange={(e) => setFilterName(e.target.value)}
-                        className="w-full"
-                    />
+                     <Button variant="outline" className="w-full md:w-auto" onClick={handlePrintReport} disabled={isPrinting || isLoading}>
+                        {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                        {isPrinting ? 'Mencetak...' : 'Cetak Laporan Harian'}
+                    </Button>
                 </div>
             </CardHeader>
         </Card>
@@ -828,8 +693,109 @@ export default function AbsensiPage() {
           <CardHeader>
             <CardTitle>Data Absensi - {format(date, "eeee, dd MMMM yyyy", { locale: localeID })}</CardTitle>
             <CardDescription>
-              Menampilkan {filteredRecords.length} dari {attendanceRecords.length + studentsBelumAbsen.length} total catatan.
+              Menampilkan {filteredRecords.length} dari {attendanceRecords.length + studentsBelumAbsen.length} total catatan harian. Gunakan filter untuk mencari data.
             </CardDescription>
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Popover>
+                    <PopoverTrigger asChild>
+                    <Button
+                        variant={"outline"}
+                        className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !date && "text-muted-foreground"
+                        )}
+                    >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {date ? format(date, "PPP", { locale: localeID }) : <span>Pilih tanggal</span>}
+                    </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                        mode="single"
+                        selected={date}
+                        onSelect={(d) => d && setDate(d)}
+                        initialFocus
+                        disabled={(d) => d > new Date() || d < new Date("2024-01-01")}
+                    />
+                    </PopoverContent>
+                </Popover>
+                <Select value={filterClass} onValueChange={setFilterClass}>
+                    <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Filter berdasarkan kelas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                    <SelectItem value="all">Semua Kelas</SelectItem>
+                    {["X", "XI", "XII"].map(grade => (
+                        <SelectGroup key={grade}>
+                        <SelectLabel>Kelas {grade}</SelectLabel>
+                        {classes.filter(c => c.grade === grade).map(c => (
+                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                        </SelectGroup>
+                    ))}
+                    </SelectContent>
+                </Select>
+                    <Select value={filterStatus} onValueChange={(value) => setFilterStatus(value as AttendanceStatus | "all")}>
+                    <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Filter berdasarkan status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="all">Semua Status</SelectItem>
+                        {ALL_STATUSES.map(status => (
+                            <SelectItem key={status} value={status}>{status}</SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                    <Input
+                    placeholder="Cari berdasarkan nama siswa..."
+                    value={filterName}
+                    onChange={(e) => setFilterName(e.target.value)}
+                    className="w-full"
+                />
+            </div>
+             <div className="mt-4 flex flex-col md:flex-row gap-2">
+                <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="secondary" className="w-full md:w-auto" disabled={isMassProcessing || isLoading || filterClass === 'all' || studentsInSelectedClassBelumAbsen.length === 0}>
+                            {isMassProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
+                            {isMassProcessing ? 'Memproses...' : `Absen Masuk Massal (${studentsInSelectedClassBelumAbsen.length})`}
+                        </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Konfirmasi Absen Masuk Massal</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Anda akan menandai {studentsInSelectedClassBelumAbsen.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> sebagai 'Hadir' dan mengirim notifikasi. Lanjutkan?
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleMassCheckIn}>Ya, Lanjutkan</AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+
+                    <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                        <Button variant="secondary" className="w-full md:w-auto" disabled={isMassProcessing || isLoading || filterClass === 'all' || studentsInSelectedClassBelumPulang.length === 0}>
+                            {isMassProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
+                            {isMassProcessing ? 'Memproses...' : `Absen Pulang Massal (${studentsInSelectedClassBelumPulang.length})`}
+                        </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Konfirmasi Absen Pulang Massal</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Anda akan mencatat jam pulang untuk {studentsInSelectedClassBelumPulang.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> dan mengirim notifikasi. Lanjutkan?
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleMassCheckOut}>Ya, Lanjutkan</AlertDialogAction>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="border rounded-md">
