@@ -11,9 +11,9 @@
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, zonedTimeToUtc } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
-import { differenceInMinutes, isSaturday, isSunday } from "date-fns";
+import { differenceInMinutes, isSaturday, isSunday, addMinutes } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
@@ -58,9 +58,10 @@ async function queueNotification(recipient: string, message: string, type: 'atte
         return; // No recipient, so no notification.
     }
     
-    const finalMessage = type === 'recap' 
-        ? message // Recap messages have their own footer now
-        : `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`;
+    // For attendance, we generate the footer here. For recap, the footer is part of the message.
+    const finalMessage = type === 'attendance'
+        ? `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`
+        : message;
 
     const jobPayload = {
         payload: { recipient, message: finalMessage },
@@ -116,25 +117,33 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         if (schoolHoursSnap.exists()) {
             const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
             
-            // 1. Get the student's check-in time as a Date object.
+            // --- TIME-SENSITIVE LOGIC: THIS IS THE CORRECT, ROBUST IMPLEMENTATION ---
+            
+            // The exact moment of check-in, as a universal Date object.
             const checkinTime = new Date(record.timestampMasuk);
 
-            // 2. Get the YYYY-MM-DD part of the check-in date *in the correct timezone*.
-            const checkinDateWIB = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
+            // 1. Get the date part (YYYY-MM-DD) of the check-in, according to WIB.
+            const checkinDateString = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
             
-            // 3. Construct the deadline time for that day in WIB.
-            const [jamMasukHours, jamMasukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
-            const deadlineDate = new Date(`${checkinDateWIB}T00:00:00.000+07:00`); // Start at midnight WIB
-            deadlineDate.setHours(jamMasukHours);
-            deadlineDate.setMinutes(jamMasukMinutes + parseInt(schoolHours.toleransi, 10));
+            // 2. Create the "jamMasuk" time for that specific date as a UTC Date object.
+            // This is done by building a string representing the time in WIB, then parsing it.
+            const jamMasukStringWIB = `${checkinDateString}T${schoolHours.jamMasuk}:00`;
+            const jamMasukTime = zonedTimeToUtc(jamMasukStringWIB, timeZone);
             
-            // 4. Compare the student's check-in time with the deadline time.
-            if (checkinTime <= deadlineDate) {
+            // 3. Add the tolerance minutes to get the final deadline time.
+            // `addMinutes` correctly handles crossing over hours/days.
+            const deadlineTime = addMinutes(jamMasukTime, parseInt(schoolHours.toleransi, 10));
+
+            // 4. Compare the two `Date` objects. They are now both absolute points in time.
+            if (checkinTime <= deadlineTime) {
                 finalStatus = "Hadir (Tepat Waktu)";
             } else {
-                const minutesLate = differenceInMinutes(checkinTime, deadlineDate);
+                // differenceInMinutes calculates `dateLeft - dateRight`.
+                // If checkinTime is later, the result will be positive.
+                const minutesLate = differenceInMinutes(checkinTime, deadlineTime);
                 finalStatus = `Terlambat (${minutesLate} menit)`;
             }
+
         } else {
             // Fallback to the original status if schoolHours aren't set
             finalStatus = record.status;
@@ -223,7 +232,7 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         if (!s) return "";
         const hadir = s.H + s.T;
         // Use a more compact representation for the list
-        return `${index + 1}. ${student.nama}\n   ✅H:${hadir} | ❌A:${s.A} | 🤒S:${s.S} | 📝I:${s.I} | 🏃D:${s.D}`;
+        return `${index + 1}. ${student.nama}\n   ✅ H:${hadir} | ❌ A:${s.A} | 🤒 S:${s.S} | 📝 I:${s.I} | 🏃 D:${s.D}`;
     }).join('\n\n');
     
     const linkSection = classInfo.grade === 'Staf'
