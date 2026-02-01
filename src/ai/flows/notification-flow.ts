@@ -13,7 +13,7 @@ import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writ
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
-import { differenceInMinutes, startOfDay, setHours, setMinutes, setSeconds } from "date-fns";
+import { differenceInMinutes } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
@@ -116,10 +116,15 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         if (schoolHoursSnap.exists()) {
             const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
             const checkinTime = new Date(record.timestampMasuk);
-            const recordDate = startOfDay(checkinTime);
-
+            
+            // Correctly construct the deadline time in a timezone-aware manner
+            const datePart = record.timestampMasuk.split('T')[0];
             const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-            const deadlineTime = setSeconds(setMinutes(setHours(recordDate, hours), minutes + parseInt(schoolHours.toleransi)), 0);
+            const deadlineMinutes = minutes + parseInt(schoolHours.toleransi, 10);
+            
+            // Construct the deadline time as a string with the correct timezone offset for WIB (+07:00)
+            const deadlineStringWIB = `${datePart}T${String(hours).padStart(2, '0')}:${String(deadlineMinutes).padStart(2, '0')}:00.000+07:00`;
+            const deadlineTime = new Date(deadlineStringWIB);
 
             if (checkinTime <= deadlineTime) {
                 finalStatus = "Hadir (Tepat Waktu)";
