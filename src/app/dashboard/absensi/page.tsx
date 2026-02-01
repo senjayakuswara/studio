@@ -92,6 +92,7 @@ type AttendanceRecord = {
   timestampMasuk: Timestamp | null
   timestampPulang: Timestamp | null
   notes?: string
+  recordDate: Timestamp;
 }
 type CombinedAttendanceRecord = Partial<AttendanceRecord> & { 
   studentId: string;
@@ -236,7 +237,7 @@ export default function AbsensiPage() {
 
   const studentsBelumAbsen = useMemo(() => {
     const studentsWithAttendance = new Set(attendanceRecords.map(rec => rec.studentId));
-    return allStudents.filter(student => !studentsWithAttendance.has(student.id))
+    return allStudents.filter(student => !studentsWithAttendance.has(student.id) && student.status === "Aktif")
   }, [allStudents, attendanceRecords]);
 
   const studentsSudahMasukTapiBelumPulang = useMemo(() => {
@@ -268,153 +269,166 @@ export default function AbsensiPage() {
   }, [allStudents, attendanceRecords, studentsBelumAbsen, filterClass, filterName, filterStatus, classes])
   
   const handleMassCheckIn = async () => {
-      if (!schoolHours) {
-          toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
-          return;
-      }
-      setIsMassCheckinProcessing(true);
-      const studentsToAttend = studentsBelumAbsen;
-      if (studentsToAttend.length === 0) {
-          toast({ title: "Informasi", description: "Semua siswa sudah memiliki catatan absensi hari ini." });
-          setIsMassCheckinProcessing(false);
-          return;
-      }
+    if (!schoolHours) {
+        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
+        return;
+    }
+    setIsMassCheckinProcessing(true);
+    const studentsToAttend = studentsBelumAbsen;
+    if (studentsToAttend.length === 0) {
+        toast({ title: "Informasi", description: "Semua siswa sudah memiliki catatan absensi hari ini." });
+        setIsMassCheckinProcessing(false);
+        return;
+    }
 
-      toast({ title: "Memulai Absensi Massal", description: `Memproses ${studentsToAttend.length} siswa... Ini mungkin memakan waktu.` });
+    toast({ title: "Memulai Absensi Masuk Massal", description: `Memproses ${studentsToAttend.length} siswa dalam beberapa batch... Ini mungkin memakan waktu.` });
 
-      try {
-          const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-          const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
-          
-          const batch = writeBatch(db);
-          const notificationPayloads: SerializableAttendanceRecord[] = [];
+    const CHUNK_SIZE = 25;
+    let totalSuccessCount = 0;
+    let totalFailCount = 0;
 
-          studentsToAttend.forEach(student => {
-              const newRecordDocRef = doc(collection(db, "attendance"));
-              const newRecord: Omit<AttendanceRecord, 'id'> & {recordDate: Date} = {
-                  studentId: student.id,
-                  nisn: student.nisn,
-                  studentName: student.nama,
-                  classId: student.classId,
-                  status: "Hadir",
-                  timestampMasuk: Timestamp.fromDate(entryTime),
-                  timestampPulang: null,
-                  notes: "Absensi massal oleh admin",
-                  recordDate: startOfDay(date),
-              };
-              batch.set(newRecordDocRef, newRecord);
+    for (let i = 0; i < studentsToAttend.length; i += CHUNK_SIZE) {
+        const chunk = studentsToAttend.slice(i, i + CHUNK_SIZE);
+        try {
+            const batch = writeBatch(db);
+            const notificationPayloads: SerializableAttendanceRecord[] = [];
+            
+            const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
+            const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
 
-              const serializableRecord: SerializableAttendanceRecord = {
-                  id: newRecordDocRef.id,
-                  ...newRecord,
-                  timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
-                  timestampPulang: null,
-                  recordDate: newRecord.recordDate.toISOString(),
-                  parentWaNumber: student.parentWaNumber
-              };
-              notificationPayloads.push(serializableRecord);
-          });
+            chunk.forEach(student => {
+                const newRecordDocRef = doc(collection(db, "attendance"));
+                const newRecord: Omit<AttendanceRecord, 'id'> = {
+                    studentId: student.id,
+                    nisn: student.nisn,
+                    studentName: student.nama,
+                    classId: student.classId,
+                    status: "Hadir",
+                    timestampMasuk: Timestamp.fromDate(entryTime),
+                    timestampPulang: null,
+                    notes: "Absensi massal oleh admin",
+                    recordDate: Timestamp.fromDate(startOfDay(date)),
+                };
+                batch.set(newRecordDocRef, newRecord);
 
-          await batch.commit();
-          
-          let successCount = 0;
-          let failCount = 0;
-          for (const payload of notificationPayloads) {
-              try {
-                  await notifyOnAttendance(payload);
-                  successCount++;
-              } catch (err) {
-                  console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-                  failCount++;
-              }
-              // Artificial delay to prevent hitting Firestore rate limits.
-              await new Promise(resolve => setTimeout(resolve, 100));
-          }
-          
-          let description = `${successCount} notifikasi berhasil dimasukkan ke antrean.`;
-          if (failCount > 0) {
-              description += ` ${failCount} gagal karena masalah koneksi/database.`;
-          }
-          toast({ title: "Proses Absen Masuk Selesai", description });
+                const serializableRecord: SerializableAttendanceRecord = {
+                    id: newRecordDocRef.id,
+                    ...newRecord,
+                    timestampMasuk: newRecord.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: null,
+                    recordDate: newRecord.recordDate.toDate().toISOString(),
+                    parentWaNumber: student.parentWaNumber
+                };
+                notificationPayloads.push(serializableRecord);
+            });
 
-          await fetchData(date);
+            await batch.commit();
 
-      } catch (error) {
-          console.error("Error during mass check-in:", error);
-          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi masuk massal. Kemungkinan kuota Firestore terlampaui." });
-      } finally {
-          setIsMassCheckinProcessing(false);
-      }
+            for (const payload of notificationPayloads) {
+                try {
+                    await notifyOnAttendance(payload);
+                    totalSuccessCount++;
+                } catch (err) {
+                    console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+                    totalFailCount++;
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        } catch (error) {
+            console.error("Error during mass check-in chunk:", error);
+            totalFailCount += chunk.length;
+            toast({ variant: "destructive", title: "Kesalahan Batch", description: "Gagal memproses sebagian siswa." });
+        }
+        if (i + CHUNK_SIZE < studentsToAttend.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+    
+    let description = `${totalSuccessCount} notifikasi berhasil dijadwalkan.`;
+    if (totalFailCount > 0) {
+        description += ` ${totalFailCount} gagal karena masalah koneksi/database.`;
+    }
+    toast({ title: "Proses Absen Masuk Selesai", description });
+
+    await fetchData(date);
+    setIsMassCheckinProcessing(false);
   };
 
   const handleMassCheckOut = async () => {
-      if (!schoolHours) {
-          toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
-          return;
-      }
-      setIsMassCheckoutProcessing(true);
-      const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
+    if (!schoolHours) {
+        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur." });
+        return;
+    }
+    setIsMassCheckoutProcessing(true);
+    const studentsToCheckOut = studentsSudahMasukTapiBelumPulang;
 
-      if (studentsToCheckOut.length === 0) {
-          toast({ title: "Informasi", description: "Tidak ada siswa yang bisa diabsen pulang." });
-          setIsMassCheckoutProcessing(false);
-          return;
-      }
+    if (studentsToCheckOut.length === 0) {
+        toast({ title: "Informasi", description: "Tidak ada siswa yang bisa diabsen pulang." });
+        setIsMassCheckoutProcessing(false);
+        return;
+    }
 
-      toast({ title: "Memulai Absensi Pulang Massal", description: `Memproses ${studentsToCheckOut.length} siswa...` });
-
-      try {
-          const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
-          const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+    toast({ title: "Memulai Absensi Pulang Massal", description: `Memproses ${studentsToCheckOut.length} siswa...` });
+    
+    const CHUNK_SIZE = 25;
+    let totalSuccessCount = 0;
+    let totalFailCount = 0;
+    
+    for (let i = 0; i < studentsToCheckOut.length; i += CHUNK_SIZE) {
+        const chunk = studentsToCheckOut.slice(i, i + CHUNK_SIZE);
+        try {
+            const batch = writeBatch(db);
+            const notificationPayloads: SerializableAttendanceRecord[] = [];
+            
+            const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
+            const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
           
-          const batch = writeBatch(db);
-          const notificationPayloads: SerializableAttendanceRecord[] = [];
-          
-          studentsToCheckOut.forEach(record => {
-              if (!record.id) return;
-              const docRef = doc(db, "attendance", record.id);
-              batch.update(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
+            chunk.forEach(record => {
+                if (!record.id) return;
+                const docRef = doc(db, "attendance", record.id);
+                batch.update(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
 
-              const serializableRecord: SerializableAttendanceRecord = {
-                  ...record,
-                  id: record.id,
-                  studentName: record.studentName!,
-                  timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
-                  timestampPulang: exitTime.toISOString(),
-                  recordDate: (record.recordDate as any as Timestamp).toDate().toISOString(),
-              };
-              notificationPayloads.push(serializableRecord);
-          });
+                const serializableRecord: SerializableAttendanceRecord = {
+                    ...record,
+                    id: record.id,
+                    studentName: record.studentName!,
+                    timestampMasuk: record.timestampMasuk?.toDate().toISOString() ?? null,
+                    timestampPulang: exitTime.toISOString(),
+                    recordDate: (record.recordDate as Timestamp).toDate().toISOString(),
+                };
+                notificationPayloads.push(serializableRecord);
+            });
 
-          await batch.commit();
-          
-          let successCount = 0;
-          let failCount = 0;
-          for (const payload of notificationPayloads) {
-              try {
-                  await notifyOnAttendance(payload);
-                  successCount++;
-              } catch (err) {
-                  console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
-                  failCount++;
-              }
-              // Artificial delay
-              await new Promise(resolve => setTimeout(resolve, 100));
-          }
+            await batch.commit();
 
-          let description = `${successCount} notifikasi pulang berhasil dimasukkan ke antrean.`;
-          if (failCount > 0) {
-              description += ` ${failCount} gagal karena masalah koneksi/database.`;
-          }
-          toast({ title: "Proses Absen Pulang Selesai", description });
-          await fetchData(date);
+            for (const payload of notificationPayloads) {
+                try {
+                    await notifyOnAttendance(payload);
+                    totalSuccessCount++;
+                } catch (err) {
+                    console.error("Gagal memasukkan notifikasi ke antrean untuk NISN:", payload.nisn, err);
+                    totalFailCount++;
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        } catch (error) {
+            console.error("Error during mass checkout chunk:", error);
+            totalFailCount += chunk.length;
+            toast({ variant: "destructive", title: "Kesalahan Batch", description: "Gagal memproses sebagian siswa." });
+        }
+        if (i + CHUNK_SIZE < studentsToCheckOut.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
 
-      } catch (error) {
-          console.error("Error during mass checkout:", error);
-          toast({ variant: "destructive", title: "Terjadi Kesalahan", description: "Gagal melakukan absensi pulang massal. Kemungkinan kuota Firestore terlampaui." });
-      } finally {
-          setIsMassCheckoutProcessing(false);
-      }
+    let description = `${totalSuccessCount} notifikasi pulang berhasil dijadwalkan.`;
+    if (totalFailCount > 0) {
+        description += ` ${totalFailCount} gagal.`;
+    }
+    toast({ title: "Proses Absen Pulang Selesai", description });
+
+    await fetchData(date);
+    setIsMassCheckoutProcessing(false);
   };
 
   const openEditDialog = (record: CombinedAttendanceRecord) => {
