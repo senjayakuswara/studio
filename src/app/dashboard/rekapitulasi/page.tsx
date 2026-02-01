@@ -679,10 +679,15 @@ export default function RekapitulasiPage() {
     }
 
     const handleTriggerManualRecap = async () => {
+        if (!selectedTarget) {
+            toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih target (kelas/tingkat) terlebih dahulu." });
+            return;
+        }
+
         setIsTriggeringRecap(true);
         toast({
             title: "Memicu Rekap Manual",
-            description: `Mengirim perintah rekap untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
+            description: `Mengirim perintah rekap PDF untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
         });
 
         try {
@@ -690,6 +695,7 @@ export default function RekapitulasiPage() {
                 type: "monthly_recap",
                 year: selectedYear,
                 month: selectedMonth,
+                target: selectedTarget, // Correctly pass the target
                 triggeredAt: serverTimestamp(),
                 status: "pending",
             });
@@ -768,7 +774,7 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleTriggerManualRecap} disabled={isTriggeringRecap || isGenerating || isLoading}>
+                                <Button onClick={handleTriggerManualRecap} disabled={isTriggeringRecap || isGenerating || isLoading || !selectedTarget}>
                                     {isTriggeringRecap ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                     Kirim Rekap ke Grup
                                 </Button>

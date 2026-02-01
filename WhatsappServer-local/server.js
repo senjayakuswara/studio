@@ -8,6 +8,12 @@ const fs = require('fs');
 const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
 
+const { jsPDF } = require("jspdf");
+const autoTable = require("jspdf-autotable").default;
+const { format, getDaysInMonth, getMonth, getYear, eachDayOfInterval, isSunday, isSaturday } = require("date-fns");
+const { id: localeID } = require("date-fns/locale");
+
+
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
   authDomain: "sekolah-ccec3.firebaseapp.com",
@@ -130,9 +136,9 @@ function listenForNotificationJobs() {
             try {
                 await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now() });
 
-                const { recipient, message } = jobData.payload;
-                if (!recipient || !message) {
-                    throw new Error('Payload tidak valid: recipient atau message kosong.');
+                const { recipient, message, file } = jobData.payload;
+                if (!recipient) {
+                    throw new Error('Payload tidak valid: recipient kosong.');
                 }
                 
                 let jid;
@@ -155,7 +161,17 @@ function listenForNotificationJobs() {
                 }
                 
                 logger.info(`[JOB] Mengirim pesan ke ${jid}`);
-                await sock.sendMessage(jid, { text: message });
+                if (file && file.data) {
+                    const buffer = Buffer.from(file.data, 'base64');
+                    await sock.sendMessage(jid, {
+                        document: buffer,
+                        mimetype: file.mimetype,
+                        fileName: file.fileName,
+                        caption: message
+                    });
+                } else {
+                    await sock.sendMessage(jid, { text: message });
+                }
 
                 await updateDoc(jobRef, { status: "sent", updatedAt: Timestamp.now() });
                 logger.info(`[JOB] Tugas ${jobId} berhasil dikirim.`);
@@ -210,12 +226,12 @@ function listenForManualTriggers() {
 
             try {
                 if (triggerData.type === 'monthly_recap') {
-                    const { year, month } = triggerData;
-                    if (typeof year !== 'number' || typeof month !== 'number' || month < 0 || month > 11) {
+                    const { year, month, target } = triggerData;
+                    if (typeof year !== 'number' || typeof month !== 'number' || month < 0 || month > 11 || !target) {
                         throw new Error('Payload tidak valid untuk pemicu rekap bulanan.');
                     }
-                    logger.info(`[MANUAL-TRIGGER] Memulai rekap bulanan manual untuk ${month + 1}-${year}`);
-                    await generateAndQueueAllMonthlyRecaps(year, month);
+                    logger.info(`[MANUAL-TRIGGER] Memulai rekap bulanan manual untuk ${month + 1}-${year} dengan target: ${target}`);
+                    await generateAndQueueAllMonthlyRecaps(year, month, target);
                     logger.info(`[MANUAL-TRIGGER] Rekap bulanan manual untuk ${month + 1}-${year} berhasil dimasukkan ke antrean.`);
                 }
 
@@ -405,31 +421,154 @@ const isWeekend = (date) => {
     return day === 0 || day === 6; // Sunday or Saturday
 }
 
-async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth) {
-    logger.info(`[MONTHLY-RECAP] Memulai proses rekap bulanan untuk ${recapMonth + 1}-${recapYear}...`);
+async function generateMonthlyPdfBuffer(summary, students, classInfo, month, year, reportConfig, holidayDateStrings) {
+    const doc = new jsPDF({ orientation: "landscape" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageMargin = 15;
+    let lastY = 10;
 
-    const year = recapYear;
-    const month = recapMonth;
-    const monthIdentifier = `${year}-${month}`;
-    const dateForMonthName = new Date(year, month);
+    if (reportConfig?.headerImageUrl) {
+        try {
+            // NOTE: jsPDF on Node can't fetch images via URL. The data must be a base64 string.
+            // We assume headerImageUrl is a 'data:image/png;base64,...' string.
+            const base64Image = reportConfig.headerImageUrl;
+            const imageType = base64Image.split(';')[0].split('/')[1].toUpperCase();
+            const imgWidth = pageWidth - pageMargin * 2;
+            const imgHeight = imgWidth * (150 / 950); // Aspect ratio
+            doc.addImage(base64Image, imageType, pageMargin, 10, imgWidth, imgHeight);
+            lastY = 10 + imgHeight + 5;
+        } catch (e) {
+            logger.error('Failed to add header image to PDF. Is it a valid data URI? Error:', e.message);
+            lastY = 40; // Fallback position
+        }
+    } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.text("Laporan Rekapitulasi Absensi", pageWidth / 2, 20, { align: 'center' });
+        lastY = 35;
+    }
+
+    const scopeText = `Kelas: ${classInfo.name}, Tingkat: ${classInfo.grade}`;
+    
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text("REKAPITULASI ABSENSI SISWA", pageWidth / 2, lastY, { align: 'center' });
+    lastY += 6;
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    const textY = lastY + 5;
+    doc.text(scopeText, pageMargin, textY);
+    doc.text(`Bulan: ${format(new Date(year, month), "MMMM yyyy", { locale: localeID })}`, pageWidth - pageMargin, textY, { align: 'right' });
+    lastY = textY + 10;
+
+    const daysInMonth = getDaysInMonth(new Date(year, month));
+    const head = [
+        [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
+        [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
+    ];
+
+    const body = students.map((student, index) => {
+        const studentSummary = summary[student.id];
+        if (!studentSummary) return null;
+        const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '');
+        return [
+            index + 1,
+            student.nama,
+            student.nisn,
+            ...attendanceRow,
+            studentSummary.summary.H + studentSummary.summary.T,
+            studentSummary.summary.T,
+            studentSummary.summary.S,
+            studentSummary.summary.I,
+            studentSummary.summary.A,
+            studentSummary.summary.D,
+        ];
+    }).filter(row => row !== null);
+
+    autoTable(doc, {
+        head: head,
+        body: body,
+        startY: lastY,
+        theme: 'grid',
+        styles: { fontSize: 6, cellPadding: 1, halign: 'center', valign: 'middle' },
+        headStyles: { fillColor: [22, 163, 74], textColor: 255, halign: 'center' },
+        columnStyles: {
+            0: { halign: 'center', cellWidth: 8 }, 1: { halign: 'left', cellWidth: 40 }, 2: { halign: 'center', cellWidth: 20 },
+        },
+        willDrawCell: (data) => {
+            const dayIndex = data.column.index - 3;
+            if(data.section === 'body' && dayIndex >= 0 && dayIndex < daysInMonth) {
+                const currentDate = new Date(year, month, dayIndex + 1);
+                const dateString = format(currentDate, 'yyyy-MM-dd');
+                if (holidayDateStrings.has(dateString) || isSunday(currentDate) || isSaturday(currentDate)) {
+                    doc.setFillColor(229, 231, 235);
+                }
+            }
+        }
+    });
+    lastY = (doc).lastAutoTable.finalY || lastY + 20;
+
+    let signatureY = lastY + 15;
+    if (signatureY > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); signatureY = 40; }
+    const leftX = pageWidth / 4;
+    const rightX = (pageWidth / 4) * 3;
+    doc.setFontSize(10);
+    doc.setFont('times', 'normal');
+    if(reportConfig){
+        doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
+        doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+        doc.setFont('times', 'bold');
+        doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
+        doc.setFont('times', 'normal');
+        doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
+        doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
+        doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+        doc.setFont('times', 'bold');
+        doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
+        doc.setFont('times', 'normal');
+        doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
+    }
+    
+    return Buffer.from(doc.output('arraybuffer'));
+}
+
+async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth, target) {
+    logger.info(`[MONTHLY-RECAP] Memulai proses rekap bulanan untuk ${recapMonth + 1}-${recapYear} dengan target: ${target}`);
 
     try {
-        const [studentsSnapshot, classesSnapshot, holidaysSnapshot] = await Promise.all([
-            getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
+        const [allClassesSnapshot, studentsSnapshot, holidaysSnapshot, reportConfigSnap] = await Promise.all([
             getDocs(collection(db, "classes")),
-            getDocs(collection(db, "holidays"))
+            getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
+            getDocs(collection(db, "holidays")),
+            getDoc(doc(db, "settings", "reportConfig"))
         ]);
-        
-        const classes = classesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const classMap = new Map(classes.map(c => [c.id, c]));
-        const students = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        // Group students by classId
+        const reportConfig = reportConfigSnap.exists() ? reportConfigSnap.data() : null;
+        if (!reportConfig) throw new Error("Pengaturan laporan (reportConfig) tidak ditemukan di database.");
+        
+        const allClasses = allClassesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const classMap = new Map(allClasses.map(c => [c.id, c]));
+
+        let classIdsToQuery = [];
+        if (target.startsWith("grade-")) {
+            const grade = target.split('-')[1];
+            classIdsToQuery = allClasses.filter(c => c.grade === grade).map(c => c.id);
+        } else if (target === "all-grades") {
+            classIdsToQuery = allClasses.map(c => c.id);
+        } else {
+            classIdsToQuery = [target];
+        }
+
+        if (classIdsToQuery.length === 0) {
+            logger.warn(`[MONTHLY-RECAP] Tidak ada kelas yang cocok dengan target: ${target}.`);
+            return;
+        }
+
+        const students = studentsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })).filter(s => classIdsToQuery.includes(s.classId));
         const studentsByClass = {};
         students.forEach(student => {
-            if (!studentsByClass[student.classId]) {
-                studentsByClass[student.classId] = [];
-            }
+            if (!studentsByClass[student.classId]) studentsByClass[student.classId] = [];
             studentsByClass[student.classId].push(student);
         });
         
@@ -439,16 +578,15 @@ async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth) {
             const start = holiday.startDate.toDate();
             const end = holiday.endDate.toDate();
             for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                 if (d.getMonth() === month && d.getFullYear() === year) {
+                 if (getMonth(d) === recapMonth && getYear(d) === recapYear) {
                      holidayDateStrings.add(d.toISOString().split('T')[0]);
                  }
             }
         });
 
-        const monthStart = new Date(year, month, 1);
-        const monthEnd = new Date(year, month + 1, 0);
+        const monthStart = new Date(recapYear, recapMonth, 1);
+        const monthEnd = new Date(recapYear, recapMonth + 1, 0);
 
-        // Fetch all attendance for all students in one go (or chunked)
         const allStudentIds = students.map(s => s.id);
         const allAttendance = [];
         for (let i = 0; i < allStudentIds.length; i += 30) {
@@ -461,71 +599,88 @@ async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth) {
         
         logger.info(`[MONTHLY-RECAP] Memproses rekap untuk ${Object.keys(studentsByClass).length} kelas...`);
 
-        // Now, iterate over classes
-        for (const classId in studentsByClass) {
+        for (const classId of classIdsToQuery) {
             const classInfo = classMap.get(classId);
-            if (!classInfo || !classInfo.whatsappGroupName) {
-                logger.warn(`[MONTHLY-RECAP] Melewati kelas ${classInfo?.name || classId} karena tidak ada nama grup WhatsApp.`);
+            const studentsInClass = studentsByClass[classId];
+
+            if (!classInfo || !classInfo.whatsappGroupName || !studentsInClass || studentsInClass.length === 0) {
+                logger.warn(`[MONTHLY-RECAP] Melewati kelas ${classInfo?.name || classId} karena tidak ada grup WA atau tidak ada siswa.`);
                 continue;
             }
 
-            const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(dateForMonthName);
-            let classMessage = `🏫 *SMAS PGRI Naringgul*\n*Rekap Absensi Bulanan: ${monthName}*\n*Kelas: ${classInfo.grade} ${classInfo.name}*\n--------------------------------\n\n`;
+            const summary = {};
+            const daysInMonth = getDaysInMonth(new Date(recapYear, recapMonth));
             
-            const studentsInClass = studentsByClass[classId].sort((a,b) => a.nama.localeCompare(b.nama));
-
-            for (const student of studentsInClass) {
-                const summary = { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 };
+            studentsInClass.forEach(student => {
+                summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 } };
                 const studentRecords = allAttendance.filter(r => r.studentId === student.id);
                 const studentRecordsByDate = new Map(studentRecords.map(r => [r.recordDate.toDate().toISOString().split('T')[0], r]));
 
-                const daysInMonth = monthEnd.getDate();
-                for (let day = 1; day <= daysInMonth; day++) {
-                    const currentDate = new Date(year, month, day);
+                for(let day = 1; day <= daysInMonth; day++) {
+                    const currentDate = new Date(recapYear, recapMonth, day);
                     const dateString = currentDate.toISOString().split('T')[0];
-
+                    
                     if (holidayDateStrings.has(dateString) || isWeekend(currentDate)) {
-                        summary.L++; continue;
+                        summary[student.id].attendance[day] = 'L';
+                        summary[student.id].summary.L++;
+                        continue;
                     }
 
-                    const record = studentRecordsByDate.get(dateString);
-                    if (record) {
-                        switch (record.status) {
-                            case "Hadir": summary.H++; break;
-                            case "Terlambat": summary.T++; break;
-                            case "Sakit": summary.S++; break;
-                            case "Izin": summary.I++; break;
-                            case "Alfa": summary.A++; break;
-                            case "Dispen": summary.D++; break;
+                    const recordForDay = studentRecordsByDate.get(dateString);
+                    if (recordForDay) {
+                        let statusChar = '';
+                        switch (recordForDay.status) {
+                            case "Hadir": statusChar = 'H'; summary[student.id].summary.H++; break;
+                            case "Terlambat": statusChar = 'T'; summary[student.id].summary.T++; break;
+                            case "Sakit": statusChar = 'S'; summary[student.id].summary.S++; break;
+                            case "Izin": statusChar = 'I'; summary[student.id].summary.I++; break;
+                            case "Alfa": statusChar = 'A'; summary[student.id].summary.A++; break;
+                            case "Dispen": statusChar = 'D'; summary[student.id].summary.D++; break;
                         }
+                         if (statusChar) summary[student.id].attendance[day] = statusChar;
                     } else {
-                        summary.A++;
+                        summary[student.id].attendance[day] = 'A';
+                        summary[student.id].summary.A++;
                     }
                 }
-                
-                const totalHadir = summary.H + summary.T;
-                classMessage += `*${student.nama}*\n H:${totalHadir}, T:${summary.T}, S:${summary.S}, I:${summary.I}, A:${summary.A}, D:${summary.D}\n\n`;
-            }
+            });
+            
+            const pdfBuffer = await generateMonthlyPdfBuffer(summary, studentsInClass, classInfo, recapMonth, recapYear, reportConfig, holidayDateStrings);
+            
+            const monthName = format(new Date(recapYear, recapMonth), "MMMM yyyy", { locale: localeID });
+            const caption = `Rekap Absensi Bulanan: ${monthName}\nKelas: ${classInfo.grade} ${classInfo.name}`;
+            const fileName = `Rekap_${classInfo.name.replace(/ /g, '_')}_${monthName.replace(/ /g, '_')}.pdf`;
             
             const jobPayload = {
-                payload: { recipient: classInfo.whatsappGroupName, message: classMessage },
-                type: 'recap',
-                metadata: { reportType: 'monthly_class_recap', classId: classId },
+                payload: {
+                    recipient: classInfo.whatsappGroupName,
+                    message: caption,
+                    file: {
+                        data: pdfBuffer.toString('base64'),
+                        mimetype: 'application/pdf',
+                        fileName: fileName,
+                    },
+                },
+                type: 'recap_pdf',
+                metadata: { reportType: 'monthly_class_recap_pdf', classId: classId },
                 status: 'pending',
                 createdAt: Timestamp.now(),
                 updatedAt: Timestamp.now(),
                 errorMessage: '',
             };
+
             await addDoc(collection(db, "notification_queue"), jobPayload);
-            logger.info(`[MONTHLY-RECAP] Rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`);
+            logger.info(`[MONTHLY-RECAP] Rekap PDF untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`);
+             // Add delay to prevent hitting write limits if processing many classes
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
 
         const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
-        await setDoc(statusDocRef, { lastRun: monthIdentifier }, { merge: true });
-        logger.info(`[MONTHLY-RECAP] Selesai: Semua rekap bulanan per kelas berhasil dimasukkan ke antrean.`);
+        await setDoc(statusDocRef, { [`lastRun_${target}`]: `${recapYear}-${recapMonth}` }, { merge: true });
+        logger.info(`[MONTHLY-RECAP] Selesai: Semua rekap PDF untuk target ${target} berhasil dimasukkan ke antrean.`);
 
     } catch (e) {
-        logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan: ${e.message}`);
+        logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan PDF: ${e.message}`);
         throw e;
     }
 }
@@ -536,7 +691,7 @@ async function runMonthlyRecapScheduler() {
     const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     // Run on the last day of the month at 8 PM (20:00)
     if (now.getDate() === lastDayOfMonth && now.getHours() === 20) {
-        logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan. Memeriksa status...');
+        logger.info('[MONTHLY-RECAP-SCHEDULER] Waktu untuk rekap bulanan otomatis. Memulai proses...');
         const year = now.getFullYear();
         const month = now.getMonth();
         const monthIdentifier = `${year}-${month}`;
@@ -544,12 +699,13 @@ async function runMonthlyRecapScheduler() {
         try {
             const statusDocRef = doc(db, "settings", "monthlyRecapStatus");
             const statusDocSnap = await getDoc(statusDocRef);
-            if (statusDocSnap.exists() && statusDocSnap.data().lastRun === monthIdentifier) {
-                logger.info(`[MONTHLY-RECAP-SCHEDULER] Rekap bulanan untuk ${monthIdentifier} sudah pernah dijalankan. Melewati.`);
+            if (statusDocSnap.exists() && statusDocSnap.data().lastRun_all === monthIdentifier) {
+                logger.info(`[MONTHLY-RECAP-SCHEDULER] Rekap bulanan otomatis untuk ${monthIdentifier} sudah pernah dijalankan. Melewati.`);
                 return;
             }
-            logger.info('[MONTHLY-RECAP-SCHEDULER] Memulai pembuatan rekap otomatis...');
-            await generateAndQueueAllMonthlyRecaps(year, month);
+            logger.info('[MONTHLY-RECAP-SCHEDULER] Memulai pembuatan rekap PDF otomatis untuk semua kelas...');
+            await generateAndQueueAllMonthlyRecaps(year, month, 'all-grades');
+            await setDoc(statusDocRef, { lastRun_all: monthIdentifier }, { merge: true });
         } catch(e) {
             logger.error(`[MONTHLY-RECAP-SCHEDULER] Gagal menjalankan rekap otomatis: ${e.message}`);
         }
