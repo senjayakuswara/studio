@@ -35,7 +35,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { queueClassRecapNotification } from "@/ai/flows/notification-flow"
+import { queueClassRecapNotification, queueMonthlyRecapToParent } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
@@ -115,7 +115,7 @@ export default function RekapitulasiPage() {
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
-    const [isSendingToGroup, setIsSendingToGroup] = useState(false);
+    const [isSendingNotifs, setIsSendingNotifs] = useState(false);
     const { toast } = useToast()
     
     const individualStudentOptions = useMemo(() => {
@@ -426,40 +426,62 @@ export default function RekapitulasiPage() {
         return doc;
     }
 
-    const handleSendGroupRecap = async () => {
+    const handleSendRecapNotifications = async () => {
         if (!isSingleClassSelected) {
-            toast({ variant: "destructive", title: "Aksi Tidak Valid", description: "Harap pilih satu kelas spesifik untuk mengirim rekap ke grup." });
+            toast({ variant: "destructive", title: "Aksi Tidak Valid", description: "Harap pilih satu kelas spesifik untuk mengirim rekap." });
             return;
         }
         
         const classInfo = classMap.get(selectedTarget);
-        if (!classInfo || !classInfo.whatsappGroupName) {
-            toast({ variant: "destructive", title: "Grup Tidak Ditemukan", description: "Nama grup WhatsApp belum diatur untuk kelas ini di menu Pengaturan Kelas." });
-            return;
-        }
+        if (!classInfo) return;
         
-        setIsSendingToGroup(true);
-        toast({ title: "Memulai Pengiriman...", description: `Mempersiapkan notifikasi rekap untuk grup kelas ${classInfo.name}.` });
+        const hasGroup = !!classInfo.whatsappGroupName;
+
+        setIsSendingNotifs(true);
+        toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi untuk kelas ${classInfo.name}. Ini mungkin memakan waktu.` });
 
         try {
-            await queueClassRecapNotification(
-                classInfo.whatsappGroupName,
-                classInfo.name,
-                selectedMonth,
-                selectedYear,
-                GOOGLE_DRIVE_LINK
+            const data = await generateSummaryData();
+            if (!data || !data.summary) {
+                throw new Error("Gagal menghasilkan data rekapitulasi untuk pengiriman.");
+            }
+            
+            const { summary } = data;
+            
+            // Queue notifications for parents
+            const parentPromises = Object.values(summary).map(studentData => 
+                queueMonthlyRecapToParent(studentData, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK)
             );
+
+            // Queue notification for the class group, if it exists
+            if (hasGroup) {
+                const groupPromise = queueClassRecapNotification(
+                    classInfo.whatsappGroupName!,
+                    classInfo.name,
+                    selectedMonth,
+                    selectedYear,
+                    GOOGLE_DRIVE_LINK
+                );
+                await Promise.all([...parentPromises, groupPromise]);
+            } else {
+                await Promise.all(parentPromises);
+                toast({
+                    variant: "default",
+                    title: "Info",
+                    description: "Notifikasi grup dilewati karena nama grup WhatsApp belum diatur untuk kelas ini.",
+                })
+            }
 
             toast({
                 title: "Tugas Terkirim",
-                description: `Notifikasi rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
+                description: `Semua notifikasi rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
             });
 
-        } catch (error) {
-            console.error("Error during handleSendGroupRecap:", error);
-            toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan tak terduga saat mengirim tugas." });
+        } catch (error: any) {
+            console.error("Error during handleSendRecapNotifications:", error);
+            toast({ variant: "destructive", title: "Proses Gagal", description: error.message || "Terjadi kesalahan saat mengirim tugas." });
         } finally {
-            setIsSendingToGroup(false);
+            setIsSendingNotifs(false);
         }
     }
 
@@ -810,11 +832,11 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleSendGroupRecap} disabled={isSendingToGroup || isGenerating || isLoading || !isSingleClassSelected}>
-                                    {isSendingToGroup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    Kirim Rekap ke Grup Kelas
+                                <Button onClick={handleSendRecapNotifications} disabled={isSendingNotifs || isGenerating || isLoading || !isSingleClassSelected}>
+                                    {isSendingNotifs ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    Kirim Notif Rekap
                                 </Button>
-                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingToGroup || isLoading || !selectedTarget}>
+                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingNotifs || isLoading || !selectedTarget}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
                                 </Button>

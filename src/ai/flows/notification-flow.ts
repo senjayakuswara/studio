@@ -38,7 +38,7 @@ export type SerializableAttendanceRecord = {
 
 type MonthlySummaryData = {
     studentInfo: { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; },
-    attendance: { [day: number]: string },
+    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D', 'L'
     summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
 }
 
@@ -173,12 +173,12 @@ export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData,
         `*NISN*: ${studentInfo.nisn}`,
         "",
         "*Rincian Kehadiran:*",
-        `  - Hadir       : ${totalHadir} hari`,
-        `  - Terlambat   : ${summary.T} hari`,
-        `  - Sakit       : ${summary.S} hari`,
-        `  - Izin        : ${summary.I} hari`,
-        `  - Tanpa Keterangan (Alfa) : ${summary.A} hari`,
-        `  - Dispensasi  : ${summary.D} hari`,
+        `  ✅ Hadir       : ${totalHadir} hari`,
+        `  ⏰ Terlambat   : ${summary.T} hari`,
+        `  🤒 Sakit       : ${summary.S} hari`,
+        `  📄 Izin        : ${summary.I} hari`,
+        `  ❌ Tanpa Keterangan (Alfa) : ${summary.A} hari`,
+        `  🏃 Dispensasi  : ${summary.D} hari`,
         "",
         "Untuk melihat atau mengunduh laporan PDF lengkap, silakan kunjungi tautan berikut:",
         googleDriveLink,
