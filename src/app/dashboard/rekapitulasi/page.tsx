@@ -211,7 +211,7 @@ export default function RekapitulasiPage() {
                 const classA = studentClassMap.get(a.classId);
                 const classB = studentClassMap.get(b.classId);
                 const classAKey = classA ? `${classA.grade}-${classA.name}` : '';
-                const classBKey = classB ? `${classB.grade}-${b.name}` : '';
+                const classBKey = classB ? `${b.grade}-${b.name}` : '';
                 if (classAKey !== classBKey) return classAKey.localeCompare(classBKey);
                 return a.nama.localeCompare(b.nama);
             });
@@ -685,7 +685,7 @@ export default function RekapitulasiPage() {
         });
 
         try {
-            const response = await fetch('http://localhost:8000/trigger-monthly-recap', {
+            const response = await fetch('/api/trigger-monthly-recap', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ year: selectedYear, month: selectedMonth }),
