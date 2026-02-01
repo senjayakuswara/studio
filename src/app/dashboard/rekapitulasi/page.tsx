@@ -229,10 +229,22 @@ export default function RekapitulasiPage() {
 
             const summary: MonthlySummary = {};
             const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
-            
+
+            // --- REFACTORED LOGIC ---
+            // 1. Create a map of records for fast, unique lookups.
+            const recordsMap = new Map<string, AttendanceRecord>();
+            attendanceRecords.forEach(record => {
+                const dateString = format(record.recordDate.toDate(), 'yyyy-MM-dd');
+                const key = `${record.studentId}-${dateString}`;
+                // Only store the first record found for a student on a specific day to prevent duplicates.
+                if (!recordsMap.has(key)) {
+                    recordsMap.set(key, record);
+                }
+            });
+
+            // 2. Loop through students and days, using the map for calculation.
             studentsToQuery.forEach(student => {
                 summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 } };
-                const studentRecords = attendanceRecords.filter(r => r.studentId === student.id);
                 
                 for(let day = 1; day <= daysInMonth; day++) {
                     const currentDate = new Date(selectedYear, selectedMonth, day);
@@ -244,7 +256,9 @@ export default function RekapitulasiPage() {
                         continue;
                     }
 
-                    const recordForDay = studentRecords.find(r => getDate(r.recordDate.toDate()) === day);
+                    const recordKey = `${student.id}-${dateString}`;
+                    const recordForDay = recordsMap.get(recordKey);
+
                     if (recordForDay) {
                         let statusChar = '';
                         switch (recordForDay.status) {
@@ -448,6 +462,8 @@ export default function RekapitulasiPage() {
                 // generateSummaryData already shows a toast on failure
                 return;
             }
+            
+            const isForStaff = classInfo.grade === 'Staf';
 
             await queueDetailedClassRecapNotification({
                 classInfo,
@@ -455,6 +471,7 @@ export default function RekapitulasiPage() {
                 year: selectedYear,
                 summaryData: data.summary,
                 students: data.students,
+                forTeachers: isForStaff,
             });
 
             toast({
