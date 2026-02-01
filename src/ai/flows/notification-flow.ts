@@ -13,7 +13,7 @@ import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writ
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
-import { differenceInMinutes } from "date-fns";
+import { differenceInMinutes, isSaturday, isSunday } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
@@ -58,9 +58,9 @@ async function queueNotification(recipient: string, message: string, type: 'atte
         return; // No recipient, so no notification.
     }
     
-    // The footer for recaps is now built inside queueDetailedClassRecapNotification.
-    // The footer for attendance is added here.
-    const finalMessage = type === 'recap' ? message : `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`;
+    const finalMessage = type === 'recap' 
+        ? message // Recap messages have their own footer now
+        : `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`;
 
     const jobPayload = {
         payload: { recipient, message: finalMessage },
@@ -115,21 +115,24 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
         if (schoolHoursSnap.exists()) {
             const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
+            
+            // 1. Get the student's check-in time as a Date object.
             const checkinTime = new Date(record.timestampMasuk);
-            
-            // Correctly construct the deadline time in a timezone-aware manner
-            const datePart = record.timestampMasuk.split('T')[0];
-            const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
-            const deadlineMinutes = minutes + parseInt(schoolHours.toleransi, 10);
-            
-            // Construct the deadline time as a string with the correct timezone offset for WIB (+07:00)
-            const deadlineStringWIB = `${datePart}T${String(hours).padStart(2, '0')}:${String(deadlineMinutes).padStart(2, '0')}:00.000+07:00`;
-            const deadlineTime = new Date(deadlineStringWIB);
 
-            if (checkinTime <= deadlineTime) {
+            // 2. Get the YYYY-MM-DD part of the check-in date *in the correct timezone*.
+            const checkinDateWIB = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
+            
+            // 3. Construct the deadline time for that day in WIB.
+            const [jamMasukHours, jamMasukMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+            const deadlineDate = new Date(`${checkinDateWIB}T00:00:00.000+07:00`); // Start at midnight WIB
+            deadlineDate.setHours(jamMasukHours);
+            deadlineDate.setMinutes(jamMasukMinutes + parseInt(schoolHours.toleransi, 10));
+            
+            // 4. Compare the student's check-in time with the deadline time.
+            if (checkinTime <= deadlineDate) {
                 finalStatus = "Hadir (Tepat Waktu)";
             } else {
-                const minutesLate = differenceInMinutes(checkinTime, deadlineTime);
+                const minutesLate = differenceInMinutes(checkinTime, deadlineDate);
                 finalStatus = `Terlambat (${minutesLate} menit)`;
             }
         } else {
@@ -212,14 +215,15 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
     });
 
     const totalPossibleAttendance = students.length * schoolDays;
-    const averageKehadiran = totalPossibleAttendance > 0 ? ((totalHadir / totalPossibleAttendance) * 100).toFixed(1) : "0.0";
+    const averageKehadiran = totalPossibleAttendance > 0 ? (((totalHadir) / totalPossibleAttendance) * 100).toFixed(1) : "0.0";
     
     // --- Build Student List ---
     const studentListString = students.map((student, index) => {
         const s = summaryData[student.id]?.summary;
         if (!s) return "";
         const hadir = s.H + s.T;
-        return `${index + 1}. ${student.nama}\n   ✅ H: ${hadir} | ❌ A: ${s.A} | 🤒 S: ${s.S} | 📝 I: ${s.I} | 🏃 D: ${s.D}`;
+        // Use a more compact representation for the list
+        return `${index + 1}. ${student.nama}\n   ✅H:${hadir} | ❌A:${s.A} | 🤒S:${s.S} | 📝I:${s.I} | 🏃D:${s.D}`;
     }).join('\n\n');
     
     const linkSection = classInfo.grade === 'Staf'
