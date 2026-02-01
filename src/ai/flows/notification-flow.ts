@@ -6,13 +6,14 @@
  * - notifyOnAttendance: Queues a real-time attendance notification to a parent.
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
  * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
- * - queueClassRecapNotification: Queues a monthly recap message to a class group.
+ * - queueDetailedClassRecapNotification: Queues a detailed monthly recap message to a class group.
  */
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
+import type { MonthlySummary, MonthlySummaryData } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
 type Class = { 
@@ -20,7 +21,10 @@ type Class = {
     name: string; 
     grade: string;
     whatsappGroupName?: string; 
+    waliKelas?: string;
 };
+type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
+
 
 export type SerializableAttendanceRecord = {
   id?: string
@@ -53,8 +57,8 @@ async function queueNotification(recipient: string, message: string, type: 'atte
         return; // No recipient, so no notification.
     }
     
-    const randomFooter = footerVariations[Math.floor(Math.random() * footerVariations.length)];
-    const finalMessage = `${message}\n\n--------------------------------\n${randomFooter}`;
+    // The footer is now part of the main message builder for recaps
+    const finalMessage = type === 'recap' ? message : `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`;
 
     const jobPayload = {
         payload: { recipient, message: finalMessage },
@@ -144,59 +148,88 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     });
 }
 
-/**
- * Queues a monthly attendance recap to a class WhatsApp group.
- * @param groupName The name of the WhatsApp group.
- * @param className The name of the class for the recap.
- * @param month The month of the recap (0-11).
- * @param year The year of the recap.
- * @param targetGrade The grade of the target class ('X', 'XI', 'XII', or 'Staf').
- */
-export async function queueClassRecapNotification(
-    groupName: string, 
-    className: string,
-    month: number, 
-    year: number,
-    targetGrade: string
-): Promise<void> {
-    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
-    
-    let messageLines = [];
+type DetailedRecapParams = {
+    classInfo: Class;
+    month: number;
+    year: number;
+    summaryData: MonthlySummary;
+    students: Student[];
+}
 
-    // Logic to create different messages based on the target's grade
-    if (targetGrade === 'Staf') {
-        // Message for teachers
-        messageLines = [
-            "🏫 *Rekapitulasi Absensi Bulanan (Akses Guru)*",
-            "====================",
-            `*Laporan Untuk*: Semua Kelas`,
-            `*Periode*: ${monthName}`,
-            "",
-            "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi absensi siswa terperinci untuk analisis internal.",
-            "",
-            "🔗 *Akses Laporan Guru:*",
-            GOOGLE_DRIVE_LINK_GURU,
-            "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
-        ];
-    } else {
-        // Message for students/parents in a specific class group
-        messageLines = [
-            "🏫 *Informasi Rekapitulasi Absensi Bulanan*",
-            "====================",
-            `*Kelas*: ${className}`,
-            `*Periode*: ${monthName}`,
-            "",
-            "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi kehadiran.",
-            "",
-            "🔗 *Akses Laporan Siswa:*",
-            GOOGLE_DRIVE_LINK_SISWA,
-            "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
-        ];
+/**
+ * Queues a detailed monthly attendance recap to a class WhatsApp group.
+ * @param params The parameters for generating the detailed recap.
+ */
+export async function queueDetailedClassRecapNotification(params: DetailedRecapParams): Promise<void> {
+    const { classInfo, month, year, summaryData, students } = params;
+
+    if (!classInfo.whatsappGroupName) {
+        throw new Error("Nama grup WhatsApp tidak ditemukan untuk kelas ini.");
     }
 
+    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
+
+    // --- Calculate Class-wide Stats ---
+    let totalHadir = 0, totalAlfa = 0, totalSakit = 0, totalIzin = 0, totalDispen = 0, totalDays = 0;
+    
+    students.forEach(student => {
+        const studentSummary = summaryData[student.id]?.summary;
+        if (studentSummary) {
+            totalHadir += studentSummary.H + studentSummary.T;
+            totalAlfa += studentSummary.A;
+            totalSakit += studentSummary.S;
+            totalIzin += studentSummary.I;
+            totalDispen += studentSummary.D;
+            totalDays += studentSummary.H + studentSummary.T + studentSummary.A + studentSummary.S + studentSummary.I + studentSummary.D;
+        }
+    });
+    
+    const averageKehadiran = totalDays > 0 ? ((totalHadir / totalDays) * 100).toFixed(1) : "0.0";
+    
+    // --- Build Student List ---
+    const studentListString = students.map((student, index) => {
+        const s = summaryData[student.id]?.summary;
+        if (!s) return "";
+        const hadir = s.H + s.T;
+        return `${index + 1}. ${student.nama}\n   ✅ H: ${hadir} | ❌ A: ${s.A} | 🤒 S: ${s.S} | 📝 I: ${s.I}`;
+    }).join('\n\n');
+    
+    const linkSection = classInfo.grade === 'Staf'
+        ? `*Akses Laporan Guru:*\n${GOOGLE_DRIVE_LINK_GURU}`
+        : `*Akses Laporan Siswa:*\n${GOOGLE_DRIVE_LINK_SISWA}\n\n*Akses Laporan Guru:*\n${GOOGLE_DRIVE_LINK_GURU}`;
+
+    // --- Assemble Final Message ---
+    const messageLines = [
+        "📊 *REKAP ABSENSI BULANAN KELAS*",
+        "🏫 SMAS PGRI NARINGGUL",
+        "━━━━━━━━━━━━━━━━━━",
+        `🏷️ *Kelas*: ${classInfo.name}`,
+        `📅 *Bulan*: ${monthName}`,
+        `👩‍🏫 *Wali Kelas*: ${classInfo.waliKelas || '-'}`,
+        "━━━━━━━━━━━━━━━━━━",
+        "📌 *Ringkasan Kehadiran Kelas*",
+        `👥 Jumlah Siswa: ${students.length}`,
+        "",
+        `✅ Hadir: ${totalHadir} hari`,
+        `❌ Alpha: ${totalAlfa} hari`,
+        `🤒 Sakit: ${totalSakit} hari`,
+        `📝 Izin: ${totalIzin} hari`,
+        `📊 Rata-rata Kehadiran: ${averageKehadiran}%`,
+        "━━━━━━━━━━━━━━━━━━",
+        "📋 *Daftar Siswa (Ringkas)*",
+        studentListString,
+        "━━━━━━━━━━━━━━━━━━",
+        "🔗 *Tautan Unduh Laporan Lengkap*",
+        linkSection,
+        "━━━━━━━━━━━━━━━━━━",
+        "🙏 Terima kasih atas kerja sama Bapak/Ibu.",
+        "📍 SMAS PGRI NARINGGUL"
+    ];
+
     const message = messageLines.join('\n');
-    await queueNotification(groupName, message, 'recap', { className, month, year, targetGrade });
+    await queueNotification(classInfo.whatsappGroupName, message, 'recap', { className: classInfo.name, month, year, targetGrade: classInfo.grade });
 }
+
 
 
 /**

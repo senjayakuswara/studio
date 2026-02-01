@@ -35,10 +35,10 @@ import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { queueClassRecapNotification } from "@/ai/flows/notification-flow"
+import { queueDetailedClassRecapNotification } from "@/ai/flows/notification-flow"
 
 // Types
-type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
+type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; waliKelas?: string; }
 type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
@@ -60,12 +60,12 @@ type ReportConfig = {
     principalNpa: string
     principalSignatureUrl: string | null
 }
-type MonthlySummaryData = {
+export type MonthlySummaryData = {
     studentInfo: Student,
     attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D', 'L'
     summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
 }
-type MonthlySummary = {
+export type MonthlySummary = {
     [studentId: string]: MonthlySummaryData
 }
 
@@ -430,9 +430,7 @@ export default function RekapitulasiPage() {
         }
         
         const classInfo = classMap.get(selectedTarget);
-        if (!classInfo) return;
-
-        if (!classInfo.whatsappGroupName) {
+        if (!classInfo || !classInfo.whatsappGroupName) {
             toast({
                 variant: "destructive",
                 title: "Grup Tidak Ditemukan",
@@ -442,20 +440,26 @@ export default function RekapitulasiPage() {
         }
         
         setIsSendingNotifs(true);
-        toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi rekap untuk grup kelas ${classInfo.name}.` });
+        toast({ title: "Memproses Rekapitulasi...", description: `Menyiapkan rekapitulasi untuk kelas ${classInfo.name}. Ini mungkin memakan waktu...` });
 
         try {
-            await queueClassRecapNotification(
-                classInfo.whatsappGroupName,
-                classInfo.name,
-                selectedMonth,
-                selectedYear,
-                classInfo.grade
-            );
+            const data = await generateSummaryData();
+            if (!data) {
+                // generateSummaryData already shows a toast on failure
+                return;
+            }
+
+            await queueDetailedClassRecapNotification({
+                classInfo,
+                month: selectedMonth,
+                year: selectedYear,
+                summaryData: data.summary,
+                students: data.students,
+            });
 
             toast({
-                title: "Tugas Terkirim",
-                description: `Notifikasi rekap untuk grup ${classInfo.name} berhasil dimasukkan ke antrean.`,
+                title: "Tugas Terkirim ke Antrean",
+                description: `Notifikasi rekap detail untuk grup ${classInfo.name} berhasil dijadwalkan untuk dikirim.`,
             });
 
         } catch (error: any) {

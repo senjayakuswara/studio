@@ -67,6 +67,7 @@ const classSchema = z.object({
   name: z.string().min(1, "Nama kelas tidak boleh kosong."),
   grade: z.enum(["X", "XI", "XII", "Staf"], { required_error: "Tingkat kelas harus dipilih."}),
   whatsappGroupName: z.string().optional(),
+  waliKelas: z.string().optional(),
 })
 
 type Class = z.infer<typeof classSchema> & { id: string }
@@ -87,6 +88,7 @@ export default function KelasPage() {
       name: "",
       grade: undefined,
       whatsappGroupName: "",
+      waliKelas: "",
     },
   })
 
@@ -174,7 +176,7 @@ export default function KelasPage() {
 
   const openAddDialog = () => {
     setEditingClass(null)
-    form.reset({ name: "", grade: undefined, whatsappGroupName: "" })
+    form.reset({ name: "", grade: undefined, whatsappGroupName: "", waliKelas: "" })
     setIsFormDialogOpen(true)
   }
 
@@ -183,6 +185,7 @@ export default function KelasPage() {
     form.reset({
       ...cls,
       whatsappGroupName: cls.whatsappGroupName || "",
+      waliKelas: cls.waliKelas || "",
     })
     setIsFormDialogOpen(true)
   }
@@ -253,6 +256,19 @@ export default function KelasPage() {
               />
                <FormField
                 control={form.control}
+                name="waliKelas"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nama Wali Kelas (Opsional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Contoh: Budi Santoso, S.Pd." {...field} value={field.value || ''} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+               <FormField
+                control={form.control}
                 name="whatsappGroupName"
                 render={({ field }) => (
                   <FormItem>
@@ -311,6 +327,7 @@ export default function KelasPage() {
                     <TableRow>
                     <TableHead>Tingkat</TableHead>
                     <TableHead>Nama Kelas</TableHead>
+                    <TableHead>Wali Kelas</TableHead>
                     <TableHead>Grup WhatsApp</TableHead>
                     <TableHead>
                         <span className="sr-only">Aksi</span>
@@ -323,6 +340,7 @@ export default function KelasPage() {
                         <TableRow key={cls.id}>
                         <TableCell className="font-medium">{cls.grade}</TableCell>
                         <TableCell>{cls.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{cls.waliKelas || "-"}</TableCell>
                         <TableCell className="text-muted-foreground">{cls.whatsappGroupName || "-"}</TableCell>
                         <TableCell>
                             <DropdownMenu>
@@ -347,7 +365,7 @@ export default function KelasPage() {
                     ))
                     ) : (
                     <TableRow>
-                        <TableCell colSpan={4} className="h-24 text-center">
+                        <TableCell colSpan={5} className="h-24 text-center">
                         Belum ada data kelas. Silakan tambahkan kelas baru.
                         </TableCell>
                     </TableRow>
