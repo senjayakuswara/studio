@@ -766,5 +766,3 @@ process.on("unhandledRejection", err => {
 process.on("uncaughtException", err => {
   logger.error("UNCAUGHT EXCEPTION:", err);
 });
-
-    
