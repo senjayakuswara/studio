@@ -2,13 +2,11 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
-const express = require('express');
-const cors = require('cors');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
 
 const firebaseConfig = {
   apiKey: "AIzaSyD9rX2jO_5bQ2ezK7sGv0QTMLcvy6aIhXE",
@@ -79,6 +77,7 @@ async function connectToWhatsApp() {
             }
 
             listenForNotificationJobs();
+            listenForManualTriggers(); // Start the new listener
         }
     });
 }
@@ -186,6 +185,52 @@ function listenForNotificationJobs() {
             await new Promise(resolve => setTimeout(resolve, delay));
         }
         logger.info(`[QUEUE] Selesai memproses batch saat ini.`);
+    });
+}
+
+function listenForManualTriggers() {
+    const q = query(collection(db, "manual_triggers"), where("status", "==", "pending"));
+
+    onSnapshot(q, async (snapshot) => {
+        if (snapshot.empty) {
+            return;
+        }
+
+        logger.info(`[MANUAL-TRIGGER] Ditemukan ${snapshot.size} pemicu manual. Memproses...`);
+
+        for (const triggerDoc of snapshot.docs) {
+            const triggerData = triggerDoc.data();
+            const triggerId = triggerDoc.id;
+            const triggerRef = doc(db, "manual_triggers", triggerId);
+
+            logger.info(`[MANUAL-TRIGGER] Mengambil pemicu: ${triggerId}`);
+            
+            // Mark as processing to prevent re-triggering
+            await updateDoc(triggerRef, { status: "processing" });
+
+            try {
+                if (triggerData.type === 'monthly_recap') {
+                    const { year, month } = triggerData;
+                    if (typeof year !== 'number' || typeof month !== 'number' || month < 0 || month > 11) {
+                        throw new Error('Payload tidak valid untuk pemicu rekap bulanan.');
+                    }
+                    logger.info(`[MANUAL-TRIGGER] Memulai rekap bulanan manual untuk ${month + 1}-${year}`);
+                    await generateAndQueueAllMonthlyRecaps(year, month);
+                    logger.info(`[MANUAL-TRIGGER] Rekap bulanan manual untuk ${month + 1}-${year} berhasil dimasukkan ke antrean.`);
+                }
+
+                // Delete the trigger after successful processing
+                await deleteDoc(triggerRef);
+                logger.info(`[MANUAL-TRIGGER] Pemicu ${triggerId} berhasil diproses dan dihapus.`);
+
+            } catch (error) {
+                logger.error(`[MANUAL-TRIGGER] Gagal memproses pemicu ${triggerId}: ${error.message}`);
+                // Mark as failed for inspection
+                await updateDoc(triggerRef, { status: "failed", errorMessage: error.message });
+            }
+             // Add a small delay before next trigger
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     });
 }
 
@@ -517,39 +562,6 @@ setInterval(runScheduledTasks, 5 * 60 * 1000);
 setInterval(runMonthlyRecapScheduler, 60 * 60 * 1000);
 
 // --- END MONTHLY RECAP TASKS ---
-
-
-const expressApp = express();
-expressApp.use(cors());
-expressApp.use(express.json());
-
-expressApp.post('/trigger-monthly-recap', async (req, res) => {
-    try {
-        const { year, month } = req.body;
-        // Basic validation
-        if (typeof year !== 'number' || typeof month !== 'number' || month < 0 || month > 11) {
-            return res.status(400).json({ message: 'Payload tidak valid: `year` dan `month` (0-11) diperlukan.' });
-        }
-
-        logger.info(`[MANUAL-RECAP] Memicu rekap manual untuk bulan ${month + 1}, tahun ${year}`);
-        
-        await generateAndQueueAllMonthlyRecaps(year, month);
-        
-        res.status(200).json({ message: 'Proses rekap bulanan berhasil dipicu. Notifikasi akan dimasukkan ke dalam antrean.' });
-    } catch (error) {
-        logger.error(`[MANUAL-RECAP] Gagal memicu rekap manual: ${error.message}`);
-        res.status(500).json({ message: 'Terjadi kesalahan internal saat memicu rekap.' });
-    }
-});
-
-
-const PORT = 8000;
-expressApp.get('/', (req, res) => {
-    res.send('WhatsApp Server (Baileys) is running.');
-});
-expressApp.listen(PORT, () => {
-    logger.info(`Server Express berjalan di port ${PORT}`);
-});
 
 connectToWhatsApp();
 

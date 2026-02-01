@@ -13,13 +13,20 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
-    // 2. Izinkan siapa saja untuk MEMBACA (get) konfigurasi aplikasi.
+    // 2. Izinkan server notifikasi untuk mengelola pemicu manual.
+    // Server (unauth) perlu read/update/delete. Admin (auth) perlu create.
+    match /manual_triggers/{triggerId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if true;
+    }
+
+    // 3. Izinkan siapa saja untuk MEMBACA (get) konfigurasi aplikasi.
     //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi.
     match /settings/appConfig {
       allow get: if true;
     }
     
-    // 3. Izinkan Server Action atau proses lain untuk MEMBACA (get) nama kelas.
+    // 4. Izinkan Server Action atau proses lain untuk MEMBACA (get) nama kelas.
     //    Contoh: untuk menampilkan nama kelas dalam pesan notifikasi.
     match /classes/{classId} {
         allow get: if true;

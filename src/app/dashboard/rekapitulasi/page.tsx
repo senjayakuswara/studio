@@ -1,9 +1,10 @@
 
+
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy, addDoc, serverTimestamp } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
@@ -681,25 +682,21 @@ export default function RekapitulasiPage() {
         setIsTriggeringRecap(true);
         toast({
             title: "Memicu Rekap Manual",
-            description: `Memulai proses rekap untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
+            description: `Mengirim perintah rekap untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
         });
 
         try {
-            const response = await fetch('/api/trigger-monthly-recap', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ year: selectedYear, month: selectedMonth }),
+            await addDoc(collection(db, "manual_triggers"), {
+                type: "monthly_recap",
+                year: selectedYear,
+                month: selectedMonth,
+                triggeredAt: serverTimestamp(),
+                status: "pending",
             });
 
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.message || 'Gagal terhubung ke server notifikasi.');
-            }
-
             toast({
-                title: "Sukses",
-                description: result.message,
+                title: "Perintah Terkirim",
+                description: "Server notifikasi akan segera memproses rekapitulasi. Periksa antrean notifikasi untuk statusnya.",
             });
 
         } catch (error: any) {
@@ -707,7 +704,7 @@ export default function RekapitulasiPage() {
             toast({
                 variant: "destructive",
                 title: "Gagal Memicu Rekap",
-                description: error.message || 'Pastikan server notifikasi sedang berjalan dan dapat diakses.',
+                description: "Gagal mengirim perintah ke database. Periksa koneksi dan izin Firestore.",
             });
         } finally {
             setIsTriggeringRecap(false);
