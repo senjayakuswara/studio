@@ -10,7 +10,7 @@ const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
 
 const { jsPDF } = require("jspdf");
-const autoTable = require("jspdf-autotable");
+const { default: autoTable } = require("jspdf-autotable");
 const { format, getDaysInMonth, getMonth, getYear, eachDayOfInterval, isSunday, isSaturday } = require("date-fns");
 const { id: localeID } = require("date-fns/locale");
 
