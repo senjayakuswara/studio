@@ -27,8 +27,10 @@ type ReportSettings = {
   reportLocation: string
   signatoryName: string
   signatoryNpa: string
+  signatorySignatureUrl: string | null
   principalName: string
   principalNpa: string
+  principalSignatureUrl: string | null
 }
 
 export default function LaporanPage() {
@@ -38,8 +40,10 @@ export default function LaporanPage() {
     reportLocation: "Naringgul",
     signatoryName: "(.........................)",
     signatoryNpa: "NPA: .....................",
+    signatorySignatureUrl: null,
     principalName: "(.........................)",
     principalNpa: "NIP: ......................",
+    principalSignatureUrl: null,
   })
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
@@ -52,7 +56,6 @@ export default function LaporanPage() {
         const docRef = doc(db, "settings", "reportConfig")
         const docSnap = await getDoc(docRef)
         if (docSnap.exists()) {
-          // Merge fetched data with defaults to avoid missing fields if DB is old
           const fetchedData = docSnap.data() as Partial<ReportSettings>;
           setSettings(prev => ({...prev, ...fetchedData}));
         }
@@ -91,20 +94,20 @@ export default function LaporanPage() {
     }
   }
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>, fieldName: keyof ReportSettings) => {
     const file = e.target.files?.[0]
     if (file) {
-      if (file.size > 2 * 1024 * 1024) { // 2MB limit
+      if (file.size > 1 * 1024 * 1024) { // 1MB limit
         toast({
           variant: "destructive",
           title: "Ukuran File Terlalu Besar",
-          description: "Ukuran gambar kop surat tidak boleh melebihi 2MB.",
+          description: "Ukuran gambar tidak boleh melebihi 1MB.",
         });
         return;
       }
       const reader = new FileReader()
       reader.onloadend = () => {
-        setSettings((prev) => ({ ...prev, headerImageUrl: reader.result as string }))
+        setSettings((prev) => ({ ...prev, [fieldName]: reader.result as string }))
       }
       reader.readAsDataURL(file)
     }
@@ -115,22 +118,22 @@ export default function LaporanPage() {
     setSettings(prev => ({...prev, [id]: value}));
   }
 
-  const renderLogoUploader = () => (
+  const renderImageUploader = (label: string, fieldName: keyof ReportSettings, currentUrl: string | null, description: string, heightClass = 'h-48') => (
       <div className="space-y-2">
-          <Label htmlFor="header-image-upload">Gambar Kop Surat</Label>
-          <p className="text-sm text-muted-foreground">Unggah gambar kop surat dalam format PNG atau JPG. Ukuran rekomendasi 2100x350 piksel (lebar A4).</p>
+          <Label htmlFor={`${fieldName}-upload`}>{label}</Label>
+          <p className="text-sm text-muted-foreground">{description}</p>
           <div className="flex items-center justify-center w-full">
-              <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative">
-                  {settings.headerImageUrl ? (
-                      <Image src={settings.headerImageUrl} alt="Header Preview" fill style={{objectFit:"contain"}} className="rounded-lg p-2" />
+              <label htmlFor={`${fieldName}-dropzone-file`} className={`flex flex-col items-center justify-center w-full ${heightClass} border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-muted relative`}>
+                  {currentUrl ? (
+                      <Image src={currentUrl} alt="Image Preview" fill style={{objectFit:"contain"}} className="rounded-lg p-2" />
                   ) : (
                       <div className="flex flex-col items-center justify-center pt-5 pb-6">
                           <UploadCloud className="w-8 h-8 mb-4 text-muted-foreground" />
                           <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Klik untuk unggah</span> atau seret dan lepas</p>
-                          <p className="text-xs text-muted-foreground">PNG atau JPG (Maks. 2MB)</p>
+                          <p className="text-xs text-muted-foreground">PNG atau JPG (Maks. 1MB)</p>
                       </div>
                   )}
-                  <Input id="dropzone-file" type="file" className="hidden" onChange={handleFileChange} accept="image/png, image/jpeg" />
+                  <Input id={`${fieldName}-dropzone-file`} type="file" className="hidden" onChange={(e) => handleFileChange(e, fieldName)} accept="image/png, image/jpeg" />
               </label>
           </div>
       </div>
@@ -158,7 +161,7 @@ export default function LaporanPage() {
         <CardContent>
           {isLoading ? <Skeleton className="h-64 w-full" /> : (
             <div className="space-y-6">
-                {renderLogoUploader()}
+                {renderImageUploader('Gambar Kop Surat', 'headerImageUrl', settings.headerImageUrl, 'Unggah gambar kop surat dalam format PNG atau JPG. Ukuran rekomendasi 2100x350 piksel (lebar A4).')}
                 <Separator />
                 <div className="space-y-2">
                     <Label htmlFor="reportTitle">Judul Utama Laporan</Label>
@@ -178,7 +181,7 @@ export default function LaporanPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-            {isLoading ? <Skeleton className="h-48 w-full" /> : (
+            {isLoading ? <Skeleton className="h-96 w-full" /> : (
             <div className="space-y-6">
                 <div className="space-y-2">
                     <Label htmlFor="reportLocation">Lokasi Penerbitan Laporan</Label>
@@ -186,7 +189,7 @@ export default function LaporanPage() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                      <div className="space-y-4">
-                        <h3 className="text-sm font-medium">Penandatangan (Kolom Kiri)</h3>
+                        <h3 className="text-base font-medium">Penandatangan (Kolom Kiri)</h3>
                          <div className="space-y-2">
                             <Label htmlFor="principalName">Nama Kepala Sekolah</Label>
                             <Input id="principalName" placeholder="(.........................)" value={settings.principalName} onChange={handleChange} />
@@ -195,10 +198,11 @@ export default function LaporanPage() {
                             <Label htmlFor="principalNpa">NIP/NPA Kepala Sekolah</Label>
                             <Input id="principalNpa" placeholder="NIP: ........................" value={settings.principalNpa} onChange={handleChange} />
                         </div>
+                        {renderImageUploader('Tanda Tangan Kepala Sekolah', 'principalSignatureUrl', settings.principalSignatureUrl, 'Unggah gambar tanda tangan dengan latar transparan (PNG).', 'h-32')}
                     </div>
                     
                     <div className="space-y-4">
-                         <h3 className="text-sm font-medium">Penandatangan (Kolom Kanan)</h3>
+                         <h3 className="text-base font-medium">Penandatangan (Kolom Kanan)</h3>
                          <div className="space-y-2">
                             <Label htmlFor="signatoryName">Nama Petugas</Label>
                             <Input id="signatoryName" placeholder="(.........................)" value={settings.signatoryName} onChange={handleChange} />
@@ -207,6 +211,7 @@ export default function LaporanPage() {
                             <Label htmlFor="signatoryNpa">NPA/NIP Petugas</Label>
                             <Input id="signatoryNpa" placeholder="NPA: ....................." value={settings.signatoryNpa} onChange={handleChange} />
                         </div>
+                         {renderImageUploader('Tanda Tangan Petugas', 'signatorySignatureUrl', settings.signatorySignatureUrl, 'Unggah gambar tanda tangan dengan latar transparan (PNG).', 'h-32')}
                     </div>
                 </div>
             </div>

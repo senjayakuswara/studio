@@ -10,7 +10,7 @@ const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
 
 const { jsPDF } = require("jspdf");
-require("jspdf-autotable");
+const autoTable = require("jspdf-autotable");
 const { format, getDaysInMonth, getMonth, getYear, eachDayOfInterval, isSunday, isSaturday } = require("date-fns");
 const { id: localeID } = require("date-fns/locale");
 
@@ -430,8 +430,6 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
 
     if (reportConfig?.headerImageUrl) {
         try {
-            // NOTE: jsPDF on Node can't fetch images via URL. The data must be a base64 string.
-            // We assume headerImageUrl is a 'data:image/png;base64,...' string.
             const base64Image = reportConfig.headerImageUrl;
             const imageType = base64Image.split(';')[0].split('/')[1].toUpperCase();
             const imgWidth = pageWidth - pageMargin * 2;
@@ -487,7 +485,7 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
         ];
     }).filter(row => row !== null);
 
-    doc.autoTable({
+    autoTable(doc, {
         head: head,
         body: body,
         startY: lastY,
@@ -519,12 +517,23 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
     if(reportConfig){
         doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
         doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+        if (reportConfig.principalSignatureUrl) {
+            try {
+                doc.addImage(reportConfig.principalSignatureUrl, 'PNG', leftX - 25, signatureY + 8, 50, 20);
+            } catch(e) { logger.error("Gagal menambahkan gambar ttd kepala sekolah", e.message); }
+        }
         doc.setFont('times', 'bold');
         doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
         doc.setFont('times', 'normal');
         doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
+
         doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
         doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+        if (reportConfig.signatorySignatureUrl) {
+            try {
+                doc.addImage(reportConfig.signatorySignatureUrl, 'PNG', rightX - 25, signatureY + 8, 50, 20);
+            } catch(e) { logger.error("Gagal menambahkan gambar ttd petugas", e.message); }
+        }
         doc.setFont('times', 'bold');
         doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
         doc.setFont('times', 'normal');
@@ -729,5 +738,3 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
-
-    

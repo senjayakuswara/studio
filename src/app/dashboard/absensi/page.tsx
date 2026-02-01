@@ -109,8 +109,10 @@ type ReportConfig = {
     reportLocation: string
     signatoryName: string
     signatoryNpa: string
+    signatorySignatureUrl: string | null
     principalName: string
     principalNpa: string
+    principalSignatureUrl: string | null
 }
 
 type SchoolHoursSettings = {
@@ -566,6 +568,11 @@ export default function AbsensiPage() {
 
       doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
       doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+      if (reportConfig.principalSignatureUrl) {
+        try {
+          doc.addImage(reportConfig.principalSignatureUrl, 'PNG', leftX - 25, signatureY + 8, 50, 20);
+        } catch(e) { console.error("Failed to add principal signature image", e); }
+      }
       doc.setFont('times', 'bold');
       doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
       doc.setFont('times', 'normal');
@@ -573,6 +580,11 @@ export default function AbsensiPage() {
 
       doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
       doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+      if (reportConfig.signatorySignatureUrl) {
+         try {
+          doc.addImage(reportConfig.signatorySignatureUrl, 'PNG', rightX - 25, signatureY + 8, 50, 20);
+        } catch(e) { console.error("Failed to add signatory signature image", e); }
+      }
       doc.setFont('times', 'bold');
       doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
       doc.setFont('times', 'normal');

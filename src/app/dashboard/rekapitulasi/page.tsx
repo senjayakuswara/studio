@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
@@ -55,8 +54,10 @@ type ReportConfig = {
     reportLocation: string
     signatoryName: string
     signatoryNpa: string
+    signatorySignatureUrl: string | null
     principalName: string
     principalNpa: string
+    principalSignatureUrl: string | null
 }
 type MonthlySummaryData = {
     studentInfo: Student,
@@ -410,12 +411,23 @@ export default function RekapitulasiPage() {
         if(reportConfig){
             doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
             doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+            if (reportConfig.principalSignatureUrl) {
+                try {
+                doc.addImage(reportConfig.principalSignatureUrl, 'PNG', leftX - 25, signatureY + 8, 50, 20);
+                } catch(e) { console.error("Failed to add principal signature image", e); }
+            }
             doc.setFont('times', 'bold');
             doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
             doc.setFont('times', 'normal');
             doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
+
             doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
             doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+            if (reportConfig.signatorySignatureUrl) {
+                try {
+                doc.addImage(reportConfig.signatorySignatureUrl, 'PNG', rightX - 25, signatureY + 8, 50, 20);
+                } catch(e) { console.error("Failed to add signatory signature image", e); }
+            }
             doc.setFont('times', 'bold');
             doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
             doc.setFont('times', 'normal');
@@ -456,7 +468,7 @@ export default function RekapitulasiPage() {
                 return;
             }
             
-            generateIndividualPdf(selectedStudent, records, dateRange);
+            generateIndividualPdf(selectedStudent, records, dateRange, reportConfig);
 
         } catch (e) {
              console.error("Error generating individual report:", e);
@@ -466,13 +478,13 @@ export default function RekapitulasiPage() {
         }
     }
 
-    const generateIndividualPdf = (student: Student, records: AttendanceRecord[], range: DateRange) => {
+    const generateIndividualPdf = (student: Student, records: AttendanceRecord[], range: DateRange, reportConfig: ReportConfig) => {
         const doc = new jsPDF();
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageMargin = 15;
         let lastY = 10;
 
-        if (reportConfig?.headerImageUrl) {
+        if (reportConfig.headerImageUrl) {
             try {
                 const imgWidth = pageWidth - pageMargin * 2;
                 const imgHeight = imgWidth * (150 / 950);
@@ -535,6 +547,37 @@ export default function RekapitulasiPage() {
         const summaryText = `Hadir: ${summary.H + summary.T} | Terlambat: ${summary.T} | Sakit: ${summary.S} | Izin: ${summary.I} | Alfa: ${summary.A} | Dispen: ${summary.D}`;
         doc.text(summaryText, pageMargin, lastY);
 
+        let signatureY = lastY + 15;
+        if (signatureY > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); signatureY = 40; }
+        const leftX = pageWidth / 4;
+        const rightX = (pageWidth / 4) * 3;
+        doc.setFontSize(10);
+        doc.setFont('times', 'normal');
+        
+        doc.text("Mengetahui,", leftX, signatureY, { align: 'center' });
+        doc.text("Kepala Sekolah,", leftX, signatureY + 6, { align: 'center' });
+        if (reportConfig.principalSignatureUrl) {
+            try {
+            doc.addImage(reportConfig.principalSignatureUrl, 'PNG', leftX - 25, signatureY + 8, 50, 20);
+            } catch(e) { console.error("Failed to add principal signature image", e); }
+        }
+        doc.setFont('times', 'bold');
+        doc.text(reportConfig.principalName, leftX, signatureY + 28, { align: 'center' });
+        doc.setFont('times', 'normal');
+        doc.text(reportConfig.principalNpa, leftX, signatureY + 34, { align: 'center' });
+
+        doc.text(`${reportConfig.reportLocation}, ` + format(new Date(), "dd MMMM yyyy", { locale: localeID }), rightX, signatureY, { align: 'center' });
+        doc.text("Petugas,", rightX, signatureY + 6, { align: 'center' });
+        if (reportConfig.signatorySignatureUrl) {
+            try {
+            doc.addImage(reportConfig.signatorySignatureUrl, 'PNG', rightX - 25, signatureY + 8, 50, 20);
+            } catch(e) { console.error("Failed to add signatory signature image", e); }
+        }
+        doc.setFont('times', 'bold');
+        doc.text(reportConfig.signatoryName, rightX, signatureY + 28, { align: 'center' });
+        doc.setFont('times', 'normal');
+        doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
+        
         doc.save(`Laporan_Individual_${student.nama.replace(/ /g, '_')}.pdf`);
     };
 
@@ -668,6 +711,11 @@ export default function RekapitulasiPage() {
 
         const rightX = (pageWidth / 4) * 3;
         doc.text(`Kepala Sekolah,`, rightX, lastY, { align: 'center' });
+        if (reportConfig.principalSignatureUrl) {
+            try {
+            doc.addImage(reportConfig.principalSignatureUrl, 'PNG', rightX - 25, lastY + 2, 50, 20);
+            } catch(e) { console.error("Failed to add principal signature image", e); }
+        }
         lastY += 25;
         doc.setFont('times', 'bold');
         doc.text(reportConfig.principalName, rightX, lastY, { align: 'center' });
@@ -946,5 +994,3 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
-
-    
