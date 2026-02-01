@@ -200,6 +200,15 @@ export default function DashboardLayout({
                         </SidebarMenuSubButton>
                       </Link>
                     </SidebarMenuSubItem>
+                     <SidebarMenuSubItem>
+                      <Link href="/dashboard/e-absensi/staf">
+                        <SidebarMenuSubButton
+                          isActive={pathname === "/dashboard/e-absensi/staf"}
+                        >
+                          Staf / Guru
+                        </SidebarMenuSubButton>
+                      </Link>
+                    </SidebarMenuSubItem>
                   </SidebarMenuSub>
                 </CollapsibleContent>
               </Collapsible>

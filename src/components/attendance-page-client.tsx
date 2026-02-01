@@ -74,7 +74,7 @@ type FeedbackOverlayState = {
 }
 
 type AttendancePageClientProps = {
-  grade: "X" | "XI" | "XII"
+  grade: "X" | "XI" | "XII" | "Staf"
 }
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
@@ -478,7 +478,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
             <div>
-            <h1 className="font-headline text-3xl font-bold tracking-tight">E-Absensi Kelas {grade}</h1>
+            <h1 className="font-headline text-3xl font-bold tracking-tight">{grade === 'Staf' ? 'E-Absensi Staf & Guru' : `E-Absensi Kelas ${grade}`}</h1>
             <p className="text-muted-foreground">Fokuskan kursor pada kolom input untuk menggunakan pemindai barcode USB.</p>
             </div>
         </div>
@@ -533,9 +533,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         <Card>
             <CardHeader>
-            <CardTitle>Daftar Hadir Siswa Kelas {grade}</CardTitle>
+            <CardTitle>{grade === 'Staf' ? 'Daftar Hadir Staf & Guru' : `Daftar Hadir Siswa Kelas ${grade}`}</CardTitle>
             <CardDescription>
-                Daftar absensi akan diperbarui secara otomatis setelah pemindaian.
+                Daftar akan diperbarui secara otomatis setelah pemindaian.
             </CardDescription>
             </CardHeader>
             <CardContent>
@@ -607,7 +607,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         ) : (
                             <TableRow>
                                 <TableCell colSpan={7} className="h-24 text-center">
-                                    Tidak ada siswa terdaftar untuk Kelas {grade}.
+                                    {grade === 'Staf' ? 'Tidak ada staf terdaftar.' : `Tidak ada siswa terdaftar untuk Kelas ${grade}.`}
                                 </TableCell>
                             </TableRow>
                         )}
