@@ -423,19 +423,22 @@ export default function AbsensiPage() {
   }
 
   const handleSaveAttendance = async (values: z.infer<typeof attendanceEditSchema>) => {
-    if (!editingRecord || !editingRecord.id) return
+    if (!editingRecord || !editingRecord.id) return;
     setIsLoading(true);
+
     try {
         const { status, jamMasuk, jamPulang } = values;
         const docRef = doc(db, "attendance", editingRecord.id);
 
         const updatePayload: { [key: string]: any } = {};
         const recordDate = startOfDay(date);
+        let finalStatus: AttendanceStatus;
 
         if (["Sakit", "Izin", "Alfa", "Dispen"].includes(status)) {
             updatePayload.timestampMasuk = null;
             updatePayload.timestampPulang = null;
             updatePayload.status = status;
+            finalStatus = status;
         } else {
             const [hMasuk, mMasuk] = jamMasuk!.split(':').map(Number);
             const newTimestampMasuk = Timestamp.fromDate(setMinutes(setHours(recordDate, hMasuk), mMasuk));
@@ -444,10 +447,11 @@ export default function AbsensiPage() {
             if (schoolHours) {
                 const [shHours, shMinutes] = schoolHours.jamMasuk.split(':').map(Number);
                 const deadlineTime = setMinutes(setHours(recordDate, shHours), shMinutes + parseInt(schoolHours.toleransi));
-                updatePayload.status = newTimestampMasuk.toDate() > deadlineTime ? "Terlambat" : "Hadir";
+                finalStatus = newTimestampMasuk.toDate() > deadlineTime ? "Terlambat" : "Hadir";
             } else {
-                updatePayload.status = status; // Fallback
+                finalStatus = status as "Hadir" | "Terlambat"; // Fallback
             }
+            updatePayload.status = finalStatus;
 
             if (jamPulang) {
                 const [hPulang, mPulang] = jamPulang.split(':').map(Number);
@@ -460,8 +464,34 @@ export default function AbsensiPage() {
         await updateDoc(docRef, updatePayload);
         
         toast({ title: "Sukses", description: "Data absensi berhasil diperbarui." });
+        
+        // Send notification about the update
+        try {
+             const recordForNotif: SerializableAttendanceRecord = {
+                id: editingRecord.id,
+                studentId: editingRecord.studentId,
+                nisn: editingRecord.nisn,
+                studentName: editingRecord.studentName,
+                classId: editingRecord.classId,
+                status: finalStatus,
+                timestampMasuk: (updatePayload.timestampMasuk as Timestamp | null)?.toDate().toISOString() ?? null,
+                timestampPulang: (updatePayload.timestampPulang as Timestamp | null)?.toDate().toISOString() ?? null,
+                recordDate: recordDate.toISOString(),
+                parentWaNumber: editingRecord.parentWaNumber
+            };
+            await notifyOnAttendance(recordForNotif);
+            toast({ title: "Notifikasi Terkirim", description: `Notifikasi pembaruan status untuk ${editingRecord.studentName} telah dijadwalkan.` });
+        } catch (notifError) {
+            console.error("Failed to send update notification:", notifError);
+            toast({
+                variant: "destructive",
+                title: "Gagal Mengirim Notifikasi",
+                description: "Pembaruan data berhasil, tetapi notifikasi gagal dikirim.",
+            });
+        }
+
         await fetchData(date);
-        setIsFormDialogOpen(false)
+        setIsFormDialogOpen(false);
 
     } catch (error) {
       console.error("Error updating attendance:", error)

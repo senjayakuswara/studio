@@ -57,7 +57,8 @@ async function queueNotification(recipient: string, message: string, type: 'atte
         return; // No recipient, so no notification.
     }
     
-    // The footer is now part of the main message builder for recaps
+    // The footer for recaps is now built inside queueDetailedClassRecapNotification.
+    // The footer for attendance is added here.
     const finalMessage = type === 'recap' ? message : `${message}\n\n--------------------------------\n${footerVariations[Math.floor(Math.random() * footerVariations.length)]}`;
 
     const jobPayload = {
@@ -289,5 +290,3 @@ export async function deleteAllPendingAndProcessingJobs(): Promise<{ success: bo
         return { success: false, count: 0, error: e.message };
     }
 }
-
-    
