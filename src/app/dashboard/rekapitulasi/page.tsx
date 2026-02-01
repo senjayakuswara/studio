@@ -353,7 +353,7 @@ export default function RekapitulasiPage() {
         const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
         const head = [
             [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Kelas', rowSpan: 2 }, { content: 'Tingkat', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
-            [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
+            [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'Hadir', 'Telat', 'Sakit', 'Izin', 'Alfa', 'Dispen']
         ];
         
         const studentClassMap = new Map(classes.map(c => [c.id, c]));
@@ -946,3 +946,5 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
+
+    

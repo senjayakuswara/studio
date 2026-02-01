@@ -1,4 +1,5 @@
 
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
@@ -465,7 +466,7 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
     const daysInMonth = getDaysInMonth(new Date(year, month));
     const head = [
         [{ content: 'No', rowSpan: 2 }, { content: 'Nama Siswa', rowSpan: 2 }, { content: 'NISN', rowSpan: 2 }, { content: 'Tanggal', colSpan: daysInMonth }, { content: 'Jumlah', colSpan: 6 }],
-        [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'H', 'T', 'S', 'I', 'A', 'D']
+        [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'Hadir', 'Telat', 'Sakit', 'Izin', 'Alfa', 'Dispen']
     ];
 
     const body = students.map((student, index) => {
@@ -728,3 +729,5 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
+
+    
