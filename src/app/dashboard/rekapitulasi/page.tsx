@@ -83,7 +83,8 @@ const months = Array.from({ length: 12 }, (_, i) => ({
   label: format(new Date(0, i), "MMMM", { locale: localeID }),
 }));
 
-const GOOGLE_DRIVE_LINK = "https://drive.google.com/drive/folders/1d3XcTvOT79KxlUQRO5sZVvEB-3-qBXwY?usp=sharing";
+const GOOGLE_DRIVE_LINK_GURU = "https://drive.google.com/drive/folders/1VxZT3XF4pWfrWXtzYCQL8GHUT5u2tvci?usp=drive_link";
+const GOOGLE_DRIVE_LINK_SISWA = "https://drive.google.com/drive/folders/1zMSiJZvcNz1E8isgS-ZOT2F9CN8ehJta?usp=drive_link";
 
 
 export default function RekapitulasiPage() {
@@ -435,12 +436,10 @@ export default function RekapitulasiPage() {
         const classInfo = classMap.get(selectedTarget);
         if (!classInfo) return;
         
-        const hasGroup = !!classInfo.whatsappGroupName;
-
         setIsSendingNotifs(true);
-        toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi untuk kelas ${classInfo.name}. Ini mungkin memakan waktu.` });
-
         try {
+            toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi untuk kelas ${classInfo.name}. Ini mungkin memakan waktu.` });
+
             const data = await generateSummaryData();
             if (!data || !data.summary) {
                 throw new Error("Gagal menghasilkan data rekapitulasi untuk pengiriman.");
@@ -448,19 +447,19 @@ export default function RekapitulasiPage() {
             
             const { summary } = data;
             
-            // Queue notifications for parents
+            // Queue notifications for parents with the student link
             const parentPromises = Object.values(summary).map(studentData => 
-                queueMonthlyRecapToParent(studentData, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK)
+                queueMonthlyRecapToParent(studentData, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK_SISWA)
             );
 
-            // Queue notification for the class group, if it exists
-            if (hasGroup) {
+            // Queue notification for the class group, if it exists, with the teacher link
+            if (classInfo.whatsappGroupName) {
                 const groupPromise = queueClassRecapNotification(
-                    classInfo.whatsappGroupName!,
+                    classInfo.whatsappGroupName,
                     classInfo.name,
                     selectedMonth,
                     selectedYear,
-                    GOOGLE_DRIVE_LINK
+                    GOOGLE_DRIVE_LINK_GURU
                 );
                 await Promise.all([...parentPromises, groupPromise]);
             } else {
