@@ -3,10 +3,10 @@
 
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy, addDoc } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
+import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, eachDayOfInterval, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Download, Loader2, Printer, Search, Send } from "lucide-react"
 import jsPDF from "jspdf"
@@ -230,19 +230,15 @@ export default function RekapitulasiPage() {
             const summary: MonthlySummary = {};
             const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
 
-            // --- REFACTORED LOGIC ---
-            // 1. Create a map of records for fast, unique lookups.
             const recordsMap = new Map<string, AttendanceRecord>();
             attendanceRecords.forEach(record => {
                 const dateString = format(record.recordDate.toDate(), 'yyyy-MM-dd');
                 const key = `${record.studentId}-${dateString}`;
-                // Only store the first record found for a student on a specific day to prevent duplicates.
                 if (!recordsMap.has(key)) {
                     recordsMap.set(key, record);
                 }
             });
 
-            // 2. Loop through students and days, using the map for calculation.
             studentsToQuery.forEach(student => {
                 summary[student.id] = { studentInfo: student, attendance: {}, summary: { H: 0, T: 0, S: 0, I: 0, A: 0, D: 0, L: 0 } };
                 
@@ -460,18 +456,16 @@ export default function RekapitulasiPage() {
             const data = await generateSummaryData();
             if (!data) {
                 // generateSummaryData already shows a toast on failure
+                setIsSendingNotifs(false);
                 return;
             }
             
-            const isForStaff = classInfo.grade === 'Staf';
-
             await queueDetailedClassRecapNotification({
                 classInfo,
                 month: selectedMonth,
                 year: selectedYear,
                 summaryData: data.summary,
                 students: data.students,
-                forTeachers: isForStaff,
             });
 
             toast({
@@ -516,6 +510,7 @@ export default function RekapitulasiPage() {
 
             if(records.length === 0){
                 toast({ title: "Tidak Ada Data", description: "Tidak ditemukan catatan absensi untuk siswa pada periode ini." });
+                setIsGenerating(false);
                 return;
             }
             
@@ -646,6 +641,7 @@ export default function RekapitulasiPage() {
 
             if (studentsToScan.length === 0) {
                 toast({ title: "Tidak Ada Siswa", description: "Tidak ada siswa pada kelas yang dipilih." });
+                setIsSearchingWarnings(false);
                 return;
             }
             
@@ -870,7 +866,7 @@ export default function RekapitulasiPage() {
                                     >
                                         <SelectTrigger><SelectValue placeholder="Pilih kelas" /></SelectTrigger>
                                         <SelectContent>
-                                            {["X", "XI", "XII"].map(grade => (
+                                            {["X", "XI", "XII", "Staf"].map(grade => (
                                                 <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
                                                     {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
                                                 </SelectGroup>

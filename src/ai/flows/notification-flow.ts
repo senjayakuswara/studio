@@ -1,4 +1,3 @@
-
 'use server';
 
 /**
@@ -13,7 +12,7 @@ import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writ
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
-import type { MonthlySummary, MonthlySummaryData } from "@/app/dashboard/rekapitulasi/page";
+import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
 type Class = { 
@@ -170,7 +169,7 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
     const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
 
     // --- Calculate Class-wide Stats ---
-    let totalHadir = 0, totalAlfa = 0, totalSakit = 0, totalIzin = 0, totalDispen = 0, totalDays = 0;
+    let totalHadir = 0, totalAlfa = 0, totalSakit = 0, totalIzin = 0, totalDispen = 0;
     
     students.forEach(student => {
         const studentSummary = summaryData[student.id]?.summary;
@@ -180,11 +179,11 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
             totalSakit += studentSummary.S;
             totalIzin += studentSummary.I;
             totalDispen += studentSummary.D;
-            totalDays += studentSummary.H + studentSummary.T + studentSummary.A + studentSummary.S + studentSummary.I + studentSummary.D;
         }
     });
-    
-    const averageKehadiran = totalDays > 0 ? ((totalHadir / totalDays) * 100).toFixed(1) : "0.0";
+
+    const totalDaysForAvg = totalHadir + totalAlfa + totalSakit + totalIzin + totalDispen;
+    const averageKehadiran = totalDaysForAvg > 0 ? ((totalHadir / totalDaysForAvg) * 100).toFixed(1) : "0.0";
     
     // --- Build Student List ---
     const studentListString = students.map((student, index) => {
@@ -207,14 +206,14 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         `📅 *Bulan*: ${monthName}`,
         `👩‍🏫 *Wali Kelas*: ${classInfo.waliKelas || '-'}`,
         "━━━━━━━━━━━━━━━━━━",
-        "📌 *Ringkasan Kehadiran Kelas*",
-        `👥 Jumlah Siswa: ${students.length}`,
+        "📌 *Ringkasan Akumulatif Kelas*",
+        `Total entri kehadiran dari ${students.length} siswa selama sebulan.`,
         "",
-        `✅ Hadir: ${totalHadir} hari`,
-        `❌ Alpha: ${totalAlfa} hari`,
-        `🤒 Sakit: ${totalSakit} hari`,
-        `📝 Izin: ${totalIzin} hari`,
-        `🏃 Dispen: ${totalDispen} hari`,
+        `✅ Total Hadir: ${totalHadir} entri`,
+        `❌ Total Alpha: ${totalAlfa} entri`,
+        `🤒 Total Sakit: ${totalSakit} entri`,
+        `📝 Total Izin: ${totalIzin} entri`,
+        `🏃 Total Dispen: ${totalDispen} entri`,
         `📊 Rata-rata Kehadiran: ${averageKehadiran}%`,
         "━━━━━━━━━━━━━━━━━━",
         "📋 *Daftar Siswa (Ringkas)*",
