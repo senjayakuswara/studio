@@ -35,7 +35,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { queueMonthlyRecapToParent } from "@/ai/flows/notification-flow"
+import { queueClassRecapNotification } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
@@ -115,7 +115,7 @@ export default function RekapitulasiPage() {
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
-    const [isSendingToParents, setIsSendingToParents] = useState(false);
+    const [isSendingToGroup, setIsSendingToGroup] = useState(false);
     const { toast } = useToast()
     
     const individualStudentOptions = useMemo(() => {
@@ -129,6 +129,8 @@ export default function RekapitulasiPage() {
     }, [allStudents, individualReportClassId]);
 
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
+
+    const isSingleClassSelected = useMemo(() => !selectedTarget.startsWith("grade-") && selectedTarget !== "all-grades" && selectedTarget !== "", [selectedTarget]);
 
     useEffect(() => {
         async function fetchInitialData() {
@@ -424,52 +426,40 @@ export default function RekapitulasiPage() {
         return doc;
     }
 
-    const handleSendParentRecaps = async () => {
-        setIsSendingToParents(true);
+    const handleSendGroupRecap = async () => {
+        if (!isSingleClassSelected) {
+            toast({ variant: "destructive", title: "Aksi Tidak Valid", description: "Harap pilih satu kelas spesifik untuk mengirim rekap ke grup." });
+            return;
+        }
+        
+        const classInfo = classMap.get(selectedTarget);
+        if (!classInfo || !classInfo.whatsappGroupName) {
+            toast({ variant: "destructive", title: "Grup Tidak Ditemukan", description: "Nama grup WhatsApp belum diatur untuk kelas ini di menu Pengaturan Kelas." });
+            return;
+        }
+        
+        setIsSendingToGroup(true);
+        toast({ title: "Memulai Pengiriman...", description: `Mempersiapkan notifikasi rekap untuk grup kelas ${classInfo.name}.` });
+
         try {
-            const data = await generateSummaryData();
-            if (!data || data.students.length === 0) {
-                toast({ title: "Tidak ada data untuk dikirim." });
-                return;
-            }
-
-            toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan rekap untuk ${data.students.length} siswa. Ini mungkin memakan waktu.` });
-
-            let successCount = 0;
-            let noWaCount = 0;
-            let errorCount = 0;
-            
-            for (const student of data.students) {
-                const studentSummary = data.summary[student.id];
-                if (student.parentWaNumber) {
-                    try {
-                        await queueMonthlyRecapToParent(studentSummary, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK);
-                        successCount++;
-                    } catch (e) {
-                        console.error(`Gagal mengirim rekap untuk ${student.nama}`, e);
-                        errorCount++;
-                    }
-                } else {
-                    noWaCount++;
-                }
-                // Small delay to prevent overwhelming the backend function invocation
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-
-            let finalDescription = `${successCount} notifikasi rekap berhasil dimasukkan ke antrean.`;
-            if (noWaCount > 0) finalDescription += ` ${noWaCount} siswa dilewati karena tidak ada nomor WA.`;
-            if (errorCount > 0) finalDescription += ` ${errorCount} gagal karena kesalahan sistem.`;
+            await queueClassRecapNotification(
+                classInfo.whatsappGroupName,
+                classInfo.name,
+                selectedMonth,
+                selectedYear,
+                GOOGLE_DRIVE_LINK
+            );
 
             toast({
-                title: "Proses Selesai",
-                description: finalDescription,
+                title: "Tugas Terkirim",
+                description: `Notifikasi rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
             });
 
         } catch (error) {
-            console.error("Error during handleSendParentRecaps:", error);
-            toast({ variant: "destructive", title: "Proses Gagal Total", description: "Terjadi kesalahan tak terduga saat memproses data." });
+            console.error("Error during handleSendGroupRecap:", error);
+            toast({ variant: "destructive", title: "Proses Gagal", description: "Terjadi kesalahan tak terduga saat mengirim tugas." });
         } finally {
-            setIsSendingToParents(false);
+            setIsSendingToGroup(false);
         }
     }
 
@@ -820,11 +810,11 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleSendParentRecaps} disabled={isSendingToParents || isGenerating || isLoading || !selectedTarget}>
-                                    {isSendingToParents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                    Kirim Notifikasi ke Ortu
+                                <Button onClick={handleSendGroupRecap} disabled={isSendingToGroup || isGenerating || isLoading || !isSingleClassSelected}>
+                                    {isSendingToGroup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                    Kirim Rekap ke Grup Kelas
                                 </Button>
-                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingToParents || isLoading || !selectedTarget}>
+                                <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isSendingToGroup || isLoading || !selectedTarget}>
                                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                                     {isGenerating ? 'Membuat...' : 'Cetak Laporan Bulanan'}
                                 </Button>

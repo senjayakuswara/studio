@@ -7,6 +7,7 @@
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
  * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
  * - queueMonthlyRecapToParent: Queues a monthly recap message to a parent.
+ * - queueClassRecapNotification: Queues a monthly recap message to a class group.
  */
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
@@ -185,6 +186,41 @@ export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData,
 
     const message = messageLines.join('\n');
     await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
+}
+
+/**
+ * Queues a monthly attendance recap to a class WhatsApp group.
+ * @param groupName The name of the WhatsApp group.
+ * @param className The name of the class.
+ * @param month The month of the recap (0-11).
+ * @param year The year of the recap.
+ * @param googleDriveLink The public link to the Google Drive folder.
+ */
+export async function queueClassRecapNotification(
+    groupName: string, 
+    className: string,
+    month: number, 
+    year: number,
+    googleDriveLink: string
+): Promise<void> {
+    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
+    
+    const messageLines = [
+        "Assalamualaikum Wr. Wb.",
+        "Dengan hormat, kami sampaikan pemberitahuan rekapitulasi absensi bulanan untuk:",
+        "",
+        `*Kelas*: ${className}`,
+        `*Periode*: ${monthName}`,
+        "====================",
+        "Untuk mengunduh laporan PDF rekapitulasi absensi yang terperinci, silakan akses tautan Google Drive di bawah ini.",
+        "Laporan ini berisi catatan kehadiran seluruh siswa di kelas tersebut selama satu bulan.",
+        "",
+        googleDriveLink,
+        "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
+    ];
+
+    const message = messageLines.join('\n');
+    await queueNotification(groupName, message, 'recap', { className, month, year });
 }
 
 
