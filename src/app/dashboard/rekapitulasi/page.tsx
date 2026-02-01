@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
-import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
+import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy, addDoc } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
