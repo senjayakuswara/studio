@@ -13,6 +13,7 @@ import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writ
 import { db } from "@/lib/firebase";
 import { formatInTimeZone } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
+import { differenceInMinutes, startOfDay, setHours, setMinutes, setSeconds } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
@@ -101,6 +102,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     let timestampStr: string | null = null;
     let title: string;
     let finalStatus: string;
+    const timeZone = "Asia/Jakarta";
 
     if (record.timestampPulang) {
         timestampStr = record.timestampPulang;
@@ -109,7 +111,27 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     } else if (record.timestampMasuk) {
         timestampStr = record.timestampMasuk;
         title = `Absensi Masuk`;
-        finalStatus = record.status;
+
+        const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
+        if (schoolHoursSnap.exists()) {
+            const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
+            const checkinTime = new Date(record.timestampMasuk);
+            const recordDate = startOfDay(checkinTime);
+
+            const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
+            const deadlineTime = setSeconds(setMinutes(setHours(recordDate, hours), minutes + parseInt(schoolHours.toleransi)), 0);
+
+            if (checkinTime <= deadlineTime) {
+                finalStatus = "Hadir (Tepat Waktu)";
+            } else {
+                const minutesLate = differenceInMinutes(checkinTime, deadlineTime);
+                finalStatus = `Terlambat (${minutesLate} menit)`;
+            }
+        } else {
+            // Fallback to the original status if schoolHours aren't set
+            finalStatus = record.status;
+        }
+
     } else {
         // This case is for manual entries like Sakit/Izin/Alfa
         timestampStr = record.recordDate; 
@@ -122,7 +144,6 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         return;
     }
 
-    const timeZone = "Asia/Jakarta";
     const date = new Date(timestampStr);
     
     const formattedDate = formatInTimeZone(date, timeZone, "eeee, dd MMMM yyyy", { locale: localeID });
