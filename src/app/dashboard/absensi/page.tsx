@@ -330,7 +330,7 @@ export default function AbsensiPage() {
             console.error(`Gagal memproses absen masuk untuk ${student.nama}:`, error);
             totalFailCount++;
         }
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 500));
     }
     
     let description = `${totalSuccessCount} notifikasi berhasil dijadwalkan.`;
@@ -385,7 +385,7 @@ export default function AbsensiPage() {
             console.error(`Gagal memproses absen pulang untuk ${record.studentName}:`, error);
             totalFailCount++;
         }
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     let description = `${totalSuccessCount} notifikasi pulang berhasil dijadwalkan.`;
