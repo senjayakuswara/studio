@@ -83,10 +83,6 @@ const months = Array.from({ length: 12 }, (_, i) => ({
   label: format(new Date(0, i), "MMMM", { locale: localeID }),
 }));
 
-const GOOGLE_DRIVE_LINK_GURU = "https://drive.google.com/drive/folders/1VxZT3XF4pWfrWXtzYCQL8GHUT5u2tvci?usp=drive_link";
-const GOOGLE_DRIVE_LINK_SISWA = "https://drive.google.com/drive/folders/1zMSiJZvcNz1E8isgS-ZOT2F9CN8ehJta?usp=drive_link";
-
-
 export default function RekapitulasiPage() {
     // State for Monthly Report
     const [selectedTarget, setSelectedTarget] = useState<string>("")
@@ -454,13 +450,12 @@ export default function RekapitulasiPage() {
                 classInfo.name,
                 selectedMonth,
                 selectedYear,
-                GOOGLE_DRIVE_LINK_GURU,
-                GOOGLE_DRIVE_LINK_SISWA
+                classInfo.grade
             );
 
             toast({
                 title: "Tugas Terkirim",
-                description: `Notifikasi rekap untuk grup kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
+                description: `Notifikasi rekap untuk grup ${classInfo.name} berhasil dimasukkan ke antrean.`,
             });
 
         } catch (error: any) {
@@ -809,10 +804,13 @@ export default function RekapitulasiPage() {
                                                 <SelectItem value="grade-XII">Semua Kelas XII</SelectItem>
                                             </SelectGroup>
                                             {["X", "XI", "XII"].map(grade => (
-                                                <SelectGroup key={grade}><SelectLabel>Per Kelas - Tingkat {grade}</SelectLabel>
+                                                <SelectGroup key={grade}><SelectLabel>Kelas {grade}</SelectLabel>
                                                     {classes.filter(c => c.grade === grade).map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
                                                 </SelectGroup>
                                             ))}
+                                            <SelectGroup><SelectLabel>Staf</SelectLabel>
+                                                {classes.filter(c => c.grade === 'Staf').map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                                            </SelectGroup>
                                         </SelectContent>
                                     </Select>
                                 </div>

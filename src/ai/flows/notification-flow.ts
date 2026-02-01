@@ -41,6 +41,10 @@ const footerVariations = [
     "_Mohon simpan nomor ini untuk menerima informasi selanjutnya._"
 ];
 
+const GOOGLE_DRIVE_LINK_GURU = "https://drive.google.com/drive/folders/1VxZT3XF4pWfrWXtzYCQL8GHUT5u2tvci?usp=drive_link";
+const GOOGLE_DRIVE_LINK_SISWA = "https://drive.google.com/drive/folders/1zMSiJZvcNz1E8isgS-ZOT2F9CN8ehJta?usp=drive_link";
+
+
 // Internal helper to queue a notification
 async function queueNotification(recipient: string, message: string, type: 'attendance' | 'recap', metadata: Record<string, any>): Promise<void> {
     if (!recipient) {
@@ -143,42 +147,55 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 /**
  * Queues a monthly attendance recap to a class WhatsApp group.
  * @param groupName The name of the WhatsApp group.
- * @param className The name of the class.
+ * @param className The name of the class for the recap.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
- * @param teacherDriveLink The public link to the Google Drive folder for teachers.
- * @param studentDriveLink The public link to the Google Drive folder for students.
+ * @param targetGrade The grade of the target class ('X', 'XI', 'XII', or 'Staf').
  */
 export async function queueClassRecapNotification(
     groupName: string, 
     className: string,
     month: number, 
     year: number,
-    teacherDriveLink: string,
-    studentDriveLink: string
+    targetGrade: string
 ): Promise<void> {
     const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
     
-    const messageLines = [
-        "🏫 *Rekapitulasi Absensi Bulanan*",
-        "====================",
-        `*Kelas*: ${className}`,
-        `*Periode*: ${monthName}`,
-        "",
-        "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi absensi siswa.",
-        "",
-        "🔗 *Untuk Guru/Wali Kelas:*",
-        "Laporan terperinci untuk analisis internal dapat diakses di:",
-        teacherDriveLink,
-        "",
-        "🔗 *Untuk Siswa/Orang Tua:*",
-        "Akses laporan kehadiran putra/i Anda di:",
-        studentDriveLink,
-        "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
-    ];
+    let messageLines = [];
+
+    // Logic to create different messages based on the target's grade
+    if (targetGrade === 'Staf') {
+        // Message for teachers
+        messageLines = [
+            "🏫 *Rekapitulasi Absensi Bulanan (Akses Guru)*",
+            "====================",
+            `*Laporan Untuk*: Semua Kelas`,
+            `*Periode*: ${monthName}`,
+            "",
+            "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi absensi siswa terperinci untuk analisis internal.",
+            "",
+            "🔗 *Akses Laporan Guru:*",
+            GOOGLE_DRIVE_LINK_GURU,
+            "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
+        ];
+    } else {
+        // Message for students/parents in a specific class group
+        messageLines = [
+            "🏫 *Informasi Rekapitulasi Absensi Bulanan*",
+            "====================",
+            `*Kelas*: ${className}`,
+            `*Periode*: ${monthName}`,
+            "",
+            "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi kehadiran.",
+            "",
+            "🔗 *Akses Laporan Siswa:*",
+            GOOGLE_DRIVE_LINK_SISWA,
+            "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
+        ];
+    }
 
     const message = messageLines.join('\n');
-    await queueNotification(groupName, message, 'recap', { className, month, year });
+    await queueNotification(groupName, message, 'recap', { className, month, year, targetGrade });
 }
 
 

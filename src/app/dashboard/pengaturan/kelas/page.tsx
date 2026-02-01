@@ -65,7 +65,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 const classSchema = z.object({
   name: z.string().min(1, "Nama kelas tidak boleh kosong."),
-  grade: z.enum(["X", "XI", "XII"], { required_error: "Tingkat kelas harus dipilih."}),
+  grade: z.enum(["X", "XI", "XII", "Staf"], { required_error: "Tingkat kelas harus dipilih."}),
   whatsappGroupName: z.string().optional(),
 })
 
@@ -231,6 +231,7 @@ export default function KelasPage() {
                         <SelectItem value="X">Kelas X</SelectItem>
                         <SelectItem value="XI">Kelas XI</SelectItem>
                         <SelectItem value="XII">Kelas XII</SelectItem>
+                        <SelectItem value="Staf">Staf / Guru</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -244,7 +245,7 @@ export default function KelasPage() {
                   <FormItem>
                     <FormLabel>Nama Kelas</FormLabel>
                     <FormControl>
-                      <Input placeholder="Contoh: MIPA 1, IPS 2, atau X-1" {...field} />
+                      <Input placeholder="Contoh: MIPA 1, atau Dewan Guru" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
