@@ -3,7 +3,7 @@
 
 /**
  * @fileOverview Handles queuing notifications to Firestore for WhatsApp delivery.
- * - notifyOnAttendance: Queues a real-time attendance notification to a parent.
+ * - notifyOnAttendance: Queues a real-time attendance notification to a class WhatsApp group.
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
  * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
  * - queueDetailedClassRecapNotification: Queues a detailed monthly recap message to a class group.
@@ -81,22 +81,22 @@ async function queueNotification(recipient: string, message: string, type: 'atte
 
 
 /**
- * Queues a real-time attendance notification to a parent's WhatsApp.
+ * Queues a real-time attendance notification to a class WhatsApp group.
  * @param record The attendance record that triggered the notification.
  */
 export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
-    const waNumber = record.parentWaNumber;
-    if (!waNumber) {
-        console.log(`No WhatsApp number for student ${record.studentName}, skipping parent notification.`);
-        return;
-    }
-    
     const classSnap = await getDoc(doc(db, "classes", record.classId));
     if (!classSnap.exists()) {
         console.error(`Class with ID ${record.classId} not found for notification.`);
         return;
     }
     const classInfo = classSnap.data() as Class;
+    
+    const recipient = classInfo.whatsappGroupName;
+    if (!recipient) {
+        console.log(`WhatsApp group for class "${classInfo.name}" not set, skipping notification.`);
+        return;
+    }
     
     let timestampStr: string | null = null;
     let title: string;
@@ -141,7 +141,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
     
     const message = messageLines.join("\n");
     
-    await queueNotification(waNumber, message, 'attendance', { 
+    await queueNotification(recipient, message, 'attendance', { 
         studentName: record.studentName, 
         nisn: record.nisn, 
         studentId: record.studentId,
