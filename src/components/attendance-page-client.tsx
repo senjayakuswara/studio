@@ -36,13 +36,14 @@ import { cn } from "@/lib/utils"
 import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 // Types
-type Class = { id: string; name: string; grade: string }
+type Grade = "X" | "XI" | "XII" | "Staf";
+type Class = { id: string; name: string; grade: Grade }
 type Student = { 
     id: string; 
     nisn: string; 
     nama: string; 
     classId: string, 
-    grade: string, 
+    grade: Grade, 
     jenisKelamin: "Laki-laki" | "Perempuan", 
     status?: "Aktif" | "Lulus" | "Pindah",
     parentWaNumber?: string,
@@ -74,7 +75,7 @@ type FeedbackOverlayState = {
 }
 
 type AttendancePageClientProps = {
-  grade: "X" | "XI" | "XII" | "Staf"
+  grades: Grade[]
 }
 
 const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | 'secondary' | 'outline'> = {
@@ -87,7 +88,7 @@ const statusBadgeVariant: Record<AttendanceStatus, 'default' | 'destructive' | '
     "Belum Absen": "outline",
 }
 
-export function AttendancePageClient({ grade }: AttendancePageClientProps) {
+export function AttendancePageClient({ grades }: AttendancePageClientProps) {
     const [classes, setClasses] = useState<Class[]>([])
     const [allStudents, setAllStudents] = useState<Student[]>([])
     const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null)
@@ -107,8 +108,26 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     const classMap = useMemo(() => new Map(classes.map(c => [c.id, c])), [classes]);
     
     const sortedStudents = useMemo(() => {
-        return [...allStudents].sort((a, b) => a.nama.localeCompare(b.nama));
+        return [...allStudents].sort((a, b) => {
+            // Sort by grade first (X, XI, XII, Staf), then by name
+            const gradeOrder: Grade[] = ["X", "XI", "XII", "Staf"];
+            const gradeA = gradeOrder.indexOf(a.grade);
+            const gradeB = gradeOrder.indexOf(b.grade);
+            if (gradeA !== gradeB) return gradeA - gradeB;
+            return a.nama.localeCompare(b.nama)
+        });
     }, [allStudents]);
+
+    const pageTitle = useMemo(() => {
+        if (grades.includes("XII") && grades.includes("Staf")) {
+            return "E-Absensi Kelas XII & Staf";
+        }
+        if (grades.length === 1) {
+            const grade = grades[0];
+            return grade === 'Staf' ? 'E-Absensi Staf & Guru' : `E-Absensi Kelas ${grade}`;
+        }
+        return "E-Absensi";
+    }, [grades]);
 
     const addLog = useCallback((message: string, type: LogMessage['type']) => {
         const newLog: LogMessage = {
@@ -196,7 +215,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
         async function fetchData() {
             setIsLoading(true)
             try {
-                const classQuery = query(collection(db, "classes"), where("grade", "==", grade))
+                const classQuery = query(collection(db, "classes"), where("grade", "in", grades))
                 const classSnapshot = await getDocs(classQuery)
                 const classList = classSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
                 classList.sort((a, b) => a.name.localeCompare(b.name));
@@ -269,7 +288,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             }
         }
         fetchData();
-    }, [grade, toast, addLog])
+    }, [grades, toast, addLog])
     
     const handleScan = useCallback(async (nisn: string) => {
         const trimmedNisn = nisn.trim();
@@ -298,9 +317,9 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
             student = allStudents.find(s => s.nisn === trimmedNisn);
             if (!student) {
-                throw new Error(`Siswa dengan NISN ${trimmedNisn} tidak ditemukan di tingkat ini.`);
+                throw new Error(`Siswa dengan NISN ${trimmedNisn} tidak ditemukan di sistem.`);
             }
-            if (student.grade !== grade) {
+            if (!grades.includes(student.grade)) {
                 throw new Error(`Siswa salah ruang absen. Seharusnya di Kelas ${student.grade}.`);
             }
 
@@ -397,7 +416,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
             })
             cleanup('error', student, errorMessage);
         }
-    }, [schoolHours, allStudents, grade, attendanceData, addLog, playSound, toast]);
+    }, [schoolHours, allStudents, grades, attendanceData, addLog, playSound, toast]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
@@ -478,7 +497,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
     <div className="flex flex-col gap-6">
         <div className="flex items-center justify-between">
             <div>
-            <h1 className="font-headline text-3xl font-bold tracking-tight">{grade === 'Staf' ? 'E-Absensi Staf & Guru' : `E-Absensi Kelas ${grade}`}</h1>
+            <h1 className="font-headline text-3xl font-bold tracking-tight">{pageTitle}</h1>
             <p className="text-muted-foreground">Fokuskan kursor pada kolom input untuk menggunakan pemindai barcode USB.</p>
             </div>
         </div>
@@ -491,7 +510,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                 <CardContent>
                     <Input
                         ref={scannerInputRef}
-                        id={`nisn-input-${grade}`}
+                        id={`nisn-input-${grades.join('-')}`}
                         placeholder={isLoading ? "Memuat data..." : "Pindai NISN atau ketik lalu tekan Enter..."}
                         disabled={isLoading || isProcessing}
                         onKeyDown={(e) => {
@@ -533,7 +552,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
 
         <Card>
             <CardHeader>
-            <CardTitle>{grade === 'Staf' ? 'Daftar Hadir Staf & Guru' : `Daftar Hadir Siswa Kelas ${grade}`}</CardTitle>
+            <CardTitle>{pageTitle}</CardTitle>
             <CardDescription>
                 Daftar akan diperbarui secara otomatis setelah pemindaian.
             </CardDescription>
@@ -607,7 +626,7 @@ export function AttendancePageClient({ grade }: AttendancePageClientProps) {
                         ) : (
                             <TableRow>
                                 <TableCell colSpan={7} className="h-24 text-center">
-                                    {grade === 'Staf' ? 'Tidak ada staf terdaftar.' : `Tidak ada siswa terdaftar untuk Kelas ${grade}.`}
+                                    Tidak ada siswa atau staf yang terdaftar untuk tingkat ini.
                                 </TableCell>
                             </TableRow>
                         )}
