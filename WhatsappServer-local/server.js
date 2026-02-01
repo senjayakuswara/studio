@@ -10,7 +10,7 @@ const { initializeApp } = require('firebase/app');
 const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
 
 const { jsPDF } = require("jspdf");
-const autoTable = require("jspdf-autotable").default;
+require("jspdf-autotable");
 const { format, getDaysInMonth, getMonth, getYear, eachDayOfInterval, isSunday, isSaturday } = require("date-fns");
 const { id: localeID } = require("date-fns/locale");
 
@@ -487,7 +487,7 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
         ];
     }).filter(row => row !== null);
 
-    autoTable(doc, {
+    doc.autoTable({
         head: head,
         body: body,
         startY: lastY,
