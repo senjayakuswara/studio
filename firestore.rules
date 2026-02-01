@@ -7,17 +7,13 @@ service cloud.firestore {
     // --- ATURAN AKSES SERVER / PUBLIK (TANPA LOGIN) ---
 
     // Izinkan server notifikasi untuk membaca dan menulis ke antrean notifikasi.
+    // Pengguna yang login (admin) juga bisa menulis (untuk membuat tugas dari klien).
     match /notification_queue/{jobId} {
-      allow read, write: if true;
-    }
-
-    // Izinkan server notifikasi untuk mengelola pemicu manual.
-    match /manual_triggers/{triggerId} {
-      allow create: if request.auth != null; // Admin creates trigger
-      allow read, update, delete: if true;   // Server processes it
+      allow read: if true;
+      allow write: if true;
     }
     
-    // Izinkan server (dan siapa saja) untuk MEMBACA data untuk membuat laporan
+    // Izinkan siapa saja untuk MEMBACA data untuk membuat laporan
     match /students/{studentId} {
       allow read: if true;
       allow write: if request.auth != null;
@@ -39,12 +35,8 @@ service cloud.firestore {
     match /settings/{settingId} {
       // Izinkan siapa saja membaca pengaturan (dibutuhkan oleh server dan klien)
       allow read: if true;
-      
-      // Izinkan MENULIS hanya jika:
-      // 1. Pengguna adalah admin (request.auth != null)
-      // ATAU
-      // 2. Dokumen yang dituju adalah 'monthlyRecapStatus' (untuk server)
-      allow write: if request.auth != null || settingId == 'monthlyRecapStatus';
+      // Izinkan MENULIS hanya jika pengguna adalah admin (request.auth != null)
+      allow write: if request.auth != null;
     }
   }
 }

@@ -460,7 +460,6 @@ export default function RekapitulasiPage() {
 
                         const pdfDoc = generateMonthlyPdf(singleClassSummary, studentsInClass, classId, data.holidayDateStrings);
                         const pdfBlob = pdfDoc.output('blob');
-
                         const monthName = format(new Date(selectedYear, selectedMonth), "MMMM_yyyy", { locale: localeID });
                         const fileName = `Rekap_${classInfo.name.replace(/ /g, '_')}_${monthName}.pdf`;
                         const storagePath = `monthly-recaps/${selectedYear}-${selectedMonth + 1}/${fileName}`;
@@ -480,11 +479,9 @@ export default function RekapitulasiPage() {
                                 fileName: fileName,
                             },
                             type: 'recap_pdf',
-                            metadata: { reportType: 'monthly_class_recap_pdf', classId: classId },
                             status: 'pending',
                             createdAt: Timestamp.now(),
                             updatedAt: Timestamp.now(),
-                            errorMessage: '',
                         };
 
                         await addDoc(collection(db, "notification_queue"), jobPayload);
@@ -727,7 +724,7 @@ export default function RekapitulasiPage() {
             try {
                 const imgWidth = pageWidth - pageMargin * 2;
                 const imgHeight = imgWidth * (150 / 950);
-                doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, lastY, imgWidth, imgHeight);
+                doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, lastY, imgHeight);
                 lastY += imgHeight + 10;
             } catch (e) { lastY = 50; }
         }
@@ -1029,5 +1026,3 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
-
-    
