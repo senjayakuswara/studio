@@ -8,55 +8,48 @@ service cloud.firestore {
     // Aturan ini hanya berlaku untuk proses yang berjalan tanpa otentikasi.
 
     // 1. Izinkan server notifikasi untuk membaca dan menulis ke antrean notifikasi.
-    //    Ini WAJIB agar server bisa mengambil dan memperbarui status pekerjaan.
     match /notification_queue/{jobId} {
       allow read, write: if true;
     }
 
     // 2. Izinkan server notifikasi untuk mengelola pemicu manual.
-    // Server (unauth) perlu read/update/delete. Admin (auth) perlu create.
     match /manual_triggers/{triggerId} {
-      allow create: if request.auth != null;
-      allow read, update, delete: if true;
+      allow create: if request.auth != null; // Admin creates trigger
+      allow read, update, delete: if true;   // Server processes it
     }
 
     // 3. Izinkan siapa saja untuk MEMBACA (get) konfigurasi aplikasi.
-    //    Ini diperlukan agar halaman Login bisa menampilkan nama dan logo aplikasi.
     match /settings/appConfig {
       allow get: if true;
     }
     
-    // 4. Izinkan Server Action atau proses lain untuk MEMBACA (get) nama kelas.
-    //    Contoh: untuk menampilkan nama kelas dalam pesan notifikasi.
-    match /classes/{classId} {
-        allow get: if true;
-    }
+    // 4. Aturan untuk data utama aplikasi.
+    // Izinkan server (dan siapa saja) untuk MEMBACA data untuk membuat laporan,
+    // tetapi hanya admin yang bisa MENULIS (mengubah) data.
     
-    // --- ATURAN AKSES ADMIN (MEMBUTUHKAN LOGIN) ---
-    // Aturan di bawah ini memberikan akses penuh ke koleksi yang relevan HANYA
-    // jika pengguna (admin) sudah login (request.auth != null).
-
     match /students/{studentId} {
-      allow read, write: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
     
-    // Untuk koleksi 'classes', 'get' sudah diizinkan di atas.
-    // Aturan ini menambahkan izin 'list' dan 'write' untuk admin.
     match /classes/{classId} {
-      allow list, write: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
     
     match /attendance/{recordId} {
-      allow read, write: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
     
     match /holidays/{holidayId} {
-      allow read, write: if request.auth != null;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
 
-    // Untuk koleksi 'settings', 'get' untuk 'appConfig' sudah diizinkan di atas.
-    // Aturan ini memberikan akses penuh ke semua dokumen lain di 'settings'
-    // dan izin 'write' ke 'appConfig' untuk admin.
+    // 5. Aturan untuk Pengaturan (Settings)
+    // Izinkan admin untuk membaca dan menulis semua pengaturan.
+    // Pengguna publik hanya bisa membaca 'appConfig' (diatur di aturan #3).
     match /settings/{settingId} {
       allow read, write: if request.auth != null;
     }
