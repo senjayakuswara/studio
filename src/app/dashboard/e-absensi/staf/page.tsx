@@ -1,5 +1,7 @@
-import { AttendancePageClient } from "@/components/attendance-page-client"
+
+import { redirect } from 'next/navigation';
 
 export default function EAbsensiStafPage() {
-  return <AttendancePageClient grade="Staf" />
+  redirect('/dashboard/e-absensi/xi');
+  return null;
 }

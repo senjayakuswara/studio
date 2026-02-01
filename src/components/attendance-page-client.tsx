@@ -119,12 +119,13 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
     }, [allStudents]);
 
     const pageTitle = useMemo(() => {
-        if (grades.includes("XII") && grades.includes("Staf")) {
-            return "E-Absensi Kelas XII & Staf";
+        if (!grades) return "E-Absensi"; // Defensive guard
+        if (grades.includes("XI") && grades.includes("Staf")) {
+            return "E-Absensi Kelas XI & Staf";
         }
         if (grades.length === 1) {
             const grade = grades[0];
-            return grade === 'Staf' ? 'E-Absensi Staf & Guru' : `E-Absensi Kelas ${grade}`;
+            return `E-Absensi Kelas ${grade}`;
         }
         return "E-Absensi";
     }, [grades]);
@@ -510,7 +511,7 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
                 <CardContent>
                     <Input
                         ref={scannerInputRef}
-                        id={`nisn-input-${grades.join('-')}`}
+                        id={`nisn-input-${grades?.join('-')}`}
                         placeholder={isLoading ? "Memuat data..." : "Pindai NISN atau ketik lalu tekan Enter..."}
                         disabled={isLoading || isProcessing}
                         onKeyDown={(e) => {
