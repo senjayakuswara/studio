@@ -11,7 +11,7 @@
 
 import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { formatInTimeZone, zonedTimeToUtc } from "date-fns-tz";
+import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
 import { differenceInMinutes, isSaturday, isSunday, addMinutes } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
@@ -128,7 +128,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
             // 2. Create the "jamMasuk" time for that specific date as a UTC Date object.
             // This is done by building a string representing the time in WIB, then parsing it.
             const jamMasukStringWIB = `${checkinDateString}T${schoolHours.jamMasuk}:00`;
-            const jamMasukTime = zonedTimeToUtc(jamMasukStringWIB, timeZone);
+            const jamMasukTime = toZonedTime(jamMasukStringWIB, timeZone);
             
             // 3. Add the tolerance minutes to get the final deadline time.
             // `addMinutes` correctly handles crossing over hours/days.
