@@ -4,7 +4,8 @@
 import { useState, useEffect, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy, addDoc, serverTimestamp } from "firebase/firestore"
-import { db } from "@/lib/firebase"
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, app } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
 import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, getDate, eachDayOfInterval, getDay, isSunday, isSaturday } from "date-fns"
 import { id as localeID } from "date-fns/locale"
@@ -37,7 +38,7 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 // Types
-type Class = { id: string; name: string; grade: string }
+type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
 type Student = { id: string; nisn: string; nama: string; classId: string; }
 type Holiday = { id: string; name: string; startDate: Timestamp; endDate: Timestamp };
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen"
@@ -81,6 +82,7 @@ const months = Array.from({ length: 12 }, (_, i) => ({
   value: i,
   label: format(new Date(0, i), "MMMM", { locale: localeID }),
 }));
+const storage = getStorage(app);
 
 export default function RekapitulasiPage() {
     // State for Monthly Report
@@ -111,7 +113,7 @@ export default function RekapitulasiPage() {
     const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isLoading, setIsLoading] = useState(true)
-    const [isTriggeringRecap, setIsTriggeringRecap] = useState(false);
+    const [isSendingToGroup, setIsSendingToGroup] = useState(false);
     const { toast } = useToast()
     
     const individualStudentOptions = useMemo(() => {
@@ -170,7 +172,10 @@ export default function RekapitulasiPage() {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat." });
             return null;
         }
-        setIsGenerating(true);
+        
+        let currentProcess: 'print' | 'send' = isGenerating ? 'print' : 'send';
+        if (currentProcess === 'print') setIsGenerating(true);
+        else setIsSendingToGroup(true);
 
         try {
             let classIdsToQuery: string[] = [];
@@ -208,10 +213,9 @@ export default function RekapitulasiPage() {
                 return null;
             }
 
-            const studentClassMap = new Map(classes.map(c => [c.id, c]));
             students.sort((a, b) => {
-                const classA = studentClassMap.get(a.classId);
-                const classB = studentClassMap.get(b.classId);
+                const classA = classMap.get(a.classId);
+                const classB = classMap.get(b.classId);
                 const classAKey = classA ? `${classA.grade}-${classA.name}` : '';
                 const classBKey = classB ? `${b.grade}-${b.name}` : '';
                 if (classAKey !== classBKey) return classAKey.localeCompare(classBKey);
@@ -287,7 +291,8 @@ export default function RekapitulasiPage() {
              toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat memproses data absensi." });
              return null;
         } finally {
-            setIsGenerating(false);
+            if (currentProcess === 'print') setIsGenerating(false);
+            else setIsSendingToGroup(false);
         }
     }
 
@@ -298,11 +303,17 @@ export default function RekapitulasiPage() {
         }
         const data = await generateSummaryData();
         if (data) {
-            generateMonthlyPdf(data.summary, data.students, selectedTarget, data.holidayDateStrings);
+            const pdfDoc = generateMonthlyPdf(data.summary, data.students, selectedTarget, data.holidayDateStrings);
+            const monthName = format(new Date(selectedYear, selectedMonth), "MMMM_yyyy");
+            let fileNameScope = "Laporan_Bulanan";
+            if (selectedTarget.startsWith("grade-")) fileNameScope = `Tingkat_${selectedTarget.split('-')[1]}`;
+            else if (selectedTarget !== "all-grades") fileNameScope = `Kelas_${classMap.get(selectedTarget)?.name.replace(/ /g, '_')}`;
+
+            pdfDoc.save(`${fileNameScope}_${monthName}.pdf`);
         }
     }
 
-    const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string, holidayDateStrings: Set<string>) => {
+    const generateMonthlyPdf = (summary: MonthlySummary, students: Student[], target: string, holidayDateStrings: Set<string>): jsPDF => {
         const doc = new jsPDF({ orientation: "landscape" });
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageMargin = 15;
@@ -323,19 +334,15 @@ export default function RekapitulasiPage() {
         }
 
         let scopeText = "";
-        let fileNameScope = "Laporan"
         if (target.startsWith("grade-")) {
             const grade = target.split('-')[1];
             scopeText = `Tingkat: ${grade}`;
-            fileNameScope = `Tingkat_${grade}`
         } else if (target === "all-grades") {
             scopeText = `Tingkat: Semua`;
-            fileNameScope = `Semua_Tingkat`
         } else {
             const selectedClassInfo = classes.find(c => c.id === target);
             if (selectedClassInfo) {
                 scopeText = `Kelas: ${selectedClassInfo.name}, Tingkat: ${selectedClassInfo.grade}`;
-                fileNameScope = `Kelas_${selectedClassInfo.name.replace(/ /g, '_')}`
             }
         }
 
@@ -357,11 +364,10 @@ export default function RekapitulasiPage() {
             [...Array.from({ length: daysInMonth }, (_, i) => String(i + 1)), 'Hadir', 'Telat', 'Sakit', 'Izin', 'Alfa', 'Dispen']
         ];
         
-        const studentClassMap = new Map(classes.map(c => [c.id, c]));
         const body = students.map((student, index) => {
             const studentSummary = summary[student.id];
             const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '');
-            const studentClass = studentClassMap.get(student.classId);
+            const studentClass = classMap.get(student.classId);
             return [
                 index + 1,
                 student.nama,
@@ -434,7 +440,90 @@ export default function RekapitulasiPage() {
             doc.text(reportConfig.signatoryNpa, rightX, signatureY + 34, { align: 'center' });
         }
         
-        doc.save(`Laporan_Bulanan_${fileNameScope}_${format(new Date(selectedYear, selectedMonth), "MMMM_yyyy")}.pdf`);
+        return doc;
+    }
+
+    const handleSendRecapToGroup = async () => {
+        if (!reportConfig) {
+            toast({ variant: "destructive", title: "Pengaturan Belum Lengkap", description: "Harap lengkapi pengaturan desain laporan." });
+            return;
+        }
+
+        const data = await generateSummaryData();
+        if (!data) return;
+
+        setIsSendingToGroup(true);
+        toast({ title: "Memproses Laporan...", description: "Membuat PDF untuk semua kelas target. Ini mungkin memakan waktu." });
+
+        const studentsByClass = data.students.reduce((acc, student) => {
+            if (!acc[student.classId]) acc[student.classId] = [];
+            acc[student.classId].push(student);
+            return acc;
+        }, {} as Record<string, Student[]>);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const classId in studentsByClass) {
+            const classInfo = classMap.get(classId);
+            const studentsInClass = studentsByClass[classId];
+
+            if (!classInfo || !classInfo.whatsappGroupName) {
+                console.warn(`Melewati kelas ${classInfo?.name || classId} karena tidak ada nama grup WA.`);
+                continue;
+            }
+
+            try {
+                const singleClassSummary = Object.fromEntries(
+                    Object.entries(data.summary).filter(([studentId]) => studentsInClass.some(s => s.id === studentId))
+                );
+
+                const pdfDoc = generateMonthlyPdf(singleClassSummary, studentsInClass, classId, data.holidayDateStrings);
+                const pdfBlob = pdfDoc.output('blob');
+
+                const monthName = format(new Date(selectedYear, selectedMonth), "MMMM_yyyy", { locale: localeID });
+                const fileName = `Rekap_${classInfo.name.replace(/ /g, '_')}_${monthName}.pdf`;
+                const storagePath = `monthly-recaps/${selectedYear}-${selectedMonth + 1}/${fileName}`;
+                const fileRef = ref(storage, storagePath);
+
+                await uploadBytes(fileRef, pdfBlob, { contentType: 'application/pdf' });
+                const pdfUrl = await getDownloadURL(fileRef);
+
+                const caption = `Rekap Absensi Bulanan: ${format(new Date(selectedYear, selectedMonth), "MMMM yyyy", { locale: localeID })}\nKelas: ${classInfo.grade} ${classInfo.name}`;
+                
+                const jobPayload = {
+                    payload: {
+                        recipient: classInfo.whatsappGroupName,
+                        message: caption,
+                        fileUrl: pdfUrl,
+                        fileMimetype: 'application/pdf',
+                        fileName: fileName,
+                    },
+                    type: 'recap_pdf',
+                    metadata: { reportType: 'monthly_class_recap_pdf', classId: classId },
+                    status: 'pending',
+                    createdAt: Timestamp.now(),
+                    updatedAt: Timestamp.now(),
+                    errorMessage: '',
+                };
+
+                await addDoc(collection(db, "notification_queue"), jobPayload);
+                successCount++;
+            } catch (error) {
+                console.error(`Gagal memproses PDF untuk kelas ${classInfo.name}:`, error);
+                failCount++;
+            }
+            // Add a small delay between processing each class
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        if (successCount > 0) {
+            toast({ title: "Proses Selesai", description: `${successCount} laporan kelas berhasil dimasukkan ke antrean kirim. ${failCount > 0 ? `${failCount} gagal.` : ''}` });
+        } else {
+            toast({ variant: "destructive", title: "Proses Gagal", description: "Tidak ada laporan yang berhasil dibuat. Periksa log konsol untuk detail." });
+        }
+
+        setIsSendingToGroup(false);
     }
 
     const handleGenerateIndividualReport = async () => {
@@ -726,45 +815,6 @@ export default function RekapitulasiPage() {
         doc.save(`SP_${studentData.studentInfo.nama.replace(/ /g, '_')}_${warningMonth+1}_${warningYear}.pdf`);
     }
 
-    const handleTriggerManualRecap = async () => {
-        if (!selectedTarget) {
-            toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih target (kelas/tingkat) terlebih dahulu." });
-            return;
-        }
-
-        setIsTriggeringRecap(true);
-        toast({
-            title: "Memicu Rekap Manual",
-            description: `Mengirim perintah rekap PDF untuk bulan ${months.find(m => m.value === selectedMonth)?.label} ${selectedYear}...`,
-        });
-
-        try {
-            await addDoc(collection(db, "manual_triggers"), {
-                type: "monthly_recap",
-                year: selectedYear,
-                month: selectedMonth,
-                target: selectedTarget, // Correctly pass the target
-                triggeredAt: serverTimestamp(),
-                status: "pending",
-            });
-
-            toast({
-                title: "Perintah Terkirim",
-                description: "Server notifikasi akan segera memproses rekapitulasi. Periksa antrean notifikasi untuk statusnya.",
-            });
-
-        } catch (error: any) {
-            console.error("Error triggering manual recap:", error);
-            toast({
-                variant: "destructive",
-                title: "Gagal Memicu Rekap",
-                description: "Gagal mengirim perintah ke database. Periksa koneksi dan izin Firestore.",
-            });
-        } finally {
-            setIsTriggeringRecap(false);
-        }
-    }
-
     return (
         <div className="flex flex-col gap-6">
             <div>
@@ -822,8 +872,8 @@ export default function RekapitulasiPage() {
                                 </div>
                             </div>
                             <div className="flex justify-end gap-2">
-                                <Button onClick={handleTriggerManualRecap} disabled={isTriggeringRecap || isGenerating || isLoading || !selectedTarget}>
-                                    {isTriggeringRecap ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                <Button onClick={handleSendRecapToGroup} disabled={isSendingToGroup || isGenerating || isLoading || !selectedTarget}>
+                                    {isSendingToGroup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                     Kirim Rekap ke Grup
                                 </Button>
                                 <Button onClick={handleGenerateMonthlyReport} disabled={isGenerating || isLoading || !selectedTarget}>

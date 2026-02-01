@@ -3,13 +3,11 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Izinkan siapa saja untuk menulis ke path rekap bulanan.
-    // Ini diperlukan agar server notifikasi (yang berjalan anonim) bisa mengunggah PDF.
-    // Bacaan dibatasi hanya untuk pengguna terautentikasi (admin),
-    // namun URL unduhan yang dibuat akan dapat diakses publik untuk waktu terbatas.
+    // Izinkan pengguna yang sudah login (admin) untuk menulis ke path rekap bulanan.
+    // Izin baca publik diperlukan agar URL unduhan dapat diakses oleh server WhatsApp.
     match /monthly-recaps/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if true;
+      allow read;
+      allow write: if request.auth != null;
     }
   }
 }
