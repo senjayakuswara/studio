@@ -6,7 +6,8 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const { initializeApp } = require('firebase/app');
-const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc, deleteDoc } = require('firebase/firestore');
+const { getFirestore, collection, query, where, onSnapshot, doc, updateDoc, getDocs, Timestamp, getDoc, writeBatch, addDoc, setDoc } = require('firebase/firestore');
+const { getStorage, ref, uploadBytes, getDownloadURL } = require("firebase/storage");
 
 const { jsPDF } = require("jspdf");
 const { default: autoTable } = require("jspdf-autotable");
@@ -25,6 +26,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 const logger = pino({ level: 'info' });
 
@@ -120,7 +122,6 @@ function listenForNotificationJobs() {
 
         // Use a for...of loop to process jobs one by one to prevent rate limits
         for (const jobDoc of snapshot.docs) {
-            const jobData = jobDoc.data();
             const jobId = jobDoc.id;
             const jobRef = doc(db, "notification_queue", jobId);
 
@@ -136,7 +137,8 @@ function listenForNotificationJobs() {
             try {
                 await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now() });
 
-                const { recipient, message, fileData, fileMimetype, fileName } = jobData.payload;
+                const jobData = jobDoc.data();
+                const { recipient, message, fileUrl, fileMimetype, fileName } = jobData.payload;
 
                 if (!recipient) {
                     throw new Error('Payload tidak valid: recipient kosong.');
@@ -162,8 +164,10 @@ function listenForNotificationJobs() {
                 }
                 
                 logger.info(`[JOB] Mengirim pesan ke ${jid}`);
-                if (fileData) {
-                    const buffer = Buffer.from(fileData, 'base64');
+                
+                if (fileUrl) {
+                    const res = await fetch(fileUrl);
+                    const buffer = Buffer.from(await res.arrayBuffer());
                     await sock.sendMessage(jid, {
                         document: buffer,
                         mimetype: fileMimetype,
@@ -179,20 +183,29 @@ function listenForNotificationJobs() {
 
             } catch (error) {
                 logger.error(`[JOB] Gagal memproses tugas ${jobId}: ${error.message}`);
-                // If it's a rate limit error, reset to pending so the fail-safe or next run can pick it up.
+                
+                const errorPayload = {
+                    status: "failed",
+                    errorMessage: error.message,
+                    updatedAt: Timestamp.now()
+                };
+
                 if (error.message && (error.message.includes('rate-overlimit') || error.message.includes('too-many-messages'))) {
                     logger.warn(`[RATE-LIMIT] Terkena rate-limit. Mereset tugas ${jobId} ke 'pending' untuk dicoba lagi nanti.`);
-                    await updateDoc(jobRef, {
-                        status: "pending",
-                        errorMessage: `Rate limit hit. Will be retried automatically.`,
-                        updatedAt: Timestamp.now()
-                    });
-                } else {
-                    await updateDoc(jobRef, {
-                        status: "failed",
-                        errorMessage: error.message,
-                        updatedAt: Timestamp.now()
-                    });
+                    errorPayload.status = "pending";
+                    errorPayload.errorMessage = `Rate limit hit. Will be retried automatically.`;
+                }
+
+                try {
+                    const docToUpdate = doc(db, "notification_queue", jobId);
+                    const docSnapshot = await getDoc(docToUpdate);
+                    if (docSnapshot.exists()) {
+                         await updateDoc(docToUpdate, errorPayload);
+                    } else {
+                        logger.error(`[JOB] Dokumen ${jobId} tidak ditemukan untuk ditandai gagal. Mungkin sudah dihapus atau diproses.`);
+                    }
+                } catch(updateError) {
+                     logger.error(`[JOB] KRITIS: Gagal menandai tugas ${jobId} sebagai gagal: ${updateError.message}`);
                 }
             }
             
@@ -236,9 +249,9 @@ function listenForManualTriggers() {
                     logger.info(`[MANUAL-TRIGGER] Rekap bulanan manual untuk ${month + 1}-${year} berhasil dimasukkan ke antrean.`);
                 }
 
-                // Delete the trigger after successful processing
-                await deleteDoc(triggerRef);
-                logger.info(`[MANUAL-TRIGGER] Pemicu ${triggerId} berhasil diproses dan dihapus.`);
+                // Mark the trigger as done after successful processing
+                await updateDoc(triggerRef, { status: "done", processedAt: Timestamp.now() });
+                logger.info(`[MANUAL-TRIGGER] Pemicu ${triggerId} berhasil diproses dan ditandai 'done'.`);
 
             } catch (error) {
                 logger.error(`[MANUAL-TRIGGER] Gagal memproses pemicu ${triggerId}: ${error.message}`);
@@ -430,6 +443,9 @@ async function generateMonthlyPdfBuffer(summary, students, classInfo, month, yea
 
     if (reportConfig?.headerImageUrl) {
         try {
+            // Since we get a URL, we need to fetch it first. But jsPDF can handle URLs if correctly configured.
+            // Let's assume the URL is a data URL for simplicity first. If it's a gs:// URL we'd need to fetch it.
+            // The safest bet is fetching and converting to a base64 data URI.
             const base64Image = reportConfig.headerImageUrl;
             const imageType = base64Image.split(';')[0].split('/')[1].toUpperCase();
             const imgWidth = pageWidth - pageMargin * 2;
@@ -660,12 +676,17 @@ async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth, target) {
             const monthName = format(new Date(recapYear, recapMonth), "MMMM yyyy", { locale: localeID });
             const caption = `Rekap Absensi Bulanan: ${monthName}\nKelas: ${classInfo.grade} ${classInfo.name}`;
             const fileName = `Rekap_${classInfo.name.replace(/ /g, '_')}_${monthName.replace(/ /g, '_')}.pdf`;
+
+            const storagePath = `monthly-recaps/${recapYear}-${recapMonth + 1}/${fileName}`;
+            const fileRef = ref(storage, storagePath);
+            await uploadBytes(fileRef, pdfBuffer, { contentType: 'application/pdf' });
+            const pdfUrl = await getDownloadURL(fileRef);
             
             const jobPayload = {
                 payload: {
                     recipient: classInfo.whatsappGroupName,
                     message: caption,
-                    fileData: pdfBuffer.toString('base64'),
+                    fileUrl: pdfUrl,
                     fileMimetype: 'application/pdf',
                     fileName: fileName,
                 },
@@ -689,7 +710,7 @@ async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth, target) {
 
     } catch (e) {
         logger.error(`[MONTHLY-RECAP] Gagal menjalankan proses rekap bulanan PDF: ${e.message}`);
-        throw e;
+        throw e; // Rethrow to be caught by manual trigger handler
     }
 }
 
@@ -736,3 +757,14 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
+
+// Global error handlers
+process.on("unhandledRejection", err => {
+  logger.error("UNHANDLED PROMISE REJECTION:", err);
+});
+
+process.on("uncaughtException", err => {
+  logger.error("UNCAUGHT EXCEPTION:", err);
+});
+
+    
