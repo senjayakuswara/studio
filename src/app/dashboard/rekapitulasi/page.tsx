@@ -168,7 +168,7 @@ export default function RekapitulasiPage() {
         fetchInitialData();
     }, [toast]);
 
-    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[], holidayDateStrings: Set<string>} | null> => {
+    const generateSummaryData = async (): Promise<{summary: MonthlySummary; students: Student[]; holidayDateStrings: Set<string>; schoolDays: number} | null> => {
         if (!selectedTarget) {
             toast({ variant: "destructive", title: "Pilih Target Laporan", description: "Anda harus memilih kelas, tingkat, atau semua tingkat." });
             return null;
@@ -229,6 +229,15 @@ export default function RekapitulasiPage() {
 
             const summary: MonthlySummary = {};
             const daysInMonth = getDaysInMonth(new Date(selectedYear, selectedMonth));
+            
+            let schoolDays = 0;
+            for (let day = 1; day <= daysInMonth; day++) {
+                const currentDate = new Date(selectedYear, selectedMonth, day);
+                const dateString = format(currentDate, 'yyyy-MM-dd');
+                if (!(holidayDateStrings.has(dateString) || isSunday(currentDate) || isSaturday(currentDate))) {
+                    schoolDays++;
+                }
+            }
 
             const recordsMap = new Map<string, AttendanceRecord>();
             attendanceRecords.forEach(record => {
@@ -265,15 +274,18 @@ export default function RekapitulasiPage() {
                             case "Alfa": statusChar = 'A'; summary[student.id].summary.A++; break;
                             case "Dispen": statusChar = 'D'; summary[student.id].summary.D++; break;
                         }
-                         if (statusChar) summary[student.id].attendance[day] = statusChar;
+                         if (statusChar) {
+                            summary[student.id].attendance[day] = statusChar;
+                         }
                     } else {
-                        summary[student.id].attendance[day] = 'A';
-                        summary[student.id].summary.A++;
+                        // If no record exists for a school day, do not count it as Alfa.
+                        // Mark it as empty in the PDF, but it won't be in the summary counts.
+                        summary[student.id].attendance[day] = '-';
                     }
                 }
             });
 
-            return { summary, students: studentsToQuery, holidayDateStrings };
+            return { summary, students: studentsToQuery, holidayDateStrings, schoolDays };
         } catch(e) {
              console.error("Error generating summary data:", e);
              toast({ variant: "destructive", title: "Gagal Memproses Data", description: "Terjadi kesalahan saat memproses data absensi." });
@@ -356,7 +368,7 @@ export default function RekapitulasiPage() {
         
         const body = students.map((student, index) => {
             const studentSummary = summary[student.id];
-            const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '');
+            const attendanceRow = Array.from({ length: daysInMonth }, (_, i) => studentSummary.attendance[i + 1] || '-');
             const studentClass = classMap.get(student.classId);
             return [
                 index + 1,
@@ -466,6 +478,7 @@ export default function RekapitulasiPage() {
                 year: selectedYear,
                 summaryData: data.summary,
                 students: data.students,
+                schoolDays: data.schoolDays,
             });
 
             toast({
@@ -1005,3 +1018,5 @@ export default function RekapitulasiPage() {
         </div>
     )
 }
+
+    

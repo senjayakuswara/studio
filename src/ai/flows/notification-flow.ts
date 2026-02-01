@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -153,6 +154,7 @@ type DetailedRecapParams = {
     year: number;
     summaryData: MonthlySummary;
     students: Student[];
+    schoolDays: number;
 }
 
 /**
@@ -160,7 +162,7 @@ type DetailedRecapParams = {
  * @param params The parameters for generating the detailed recap.
  */
 export async function queueDetailedClassRecapNotification(params: DetailedRecapParams): Promise<void> {
-    const { classInfo, month, year, summaryData, students } = params;
+    const { classInfo, month, year, summaryData, students, schoolDays } = params;
 
     if (!classInfo.whatsappGroupName) {
         throw new Error("Nama grup WhatsApp tidak ditemukan untuk kelas ini.");
@@ -182,8 +184,8 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         }
     });
 
-    const totalDaysForAvg = totalHadir + totalAlfa + totalSakit + totalIzin + totalDispen;
-    const averageKehadiran = totalDaysForAvg > 0 ? ((totalHadir / totalDaysForAvg) * 100).toFixed(1) : "0.0";
+    const totalPossibleAttendance = students.length * schoolDays;
+    const averageKehadiran = totalPossibleAttendance > 0 ? ((totalHadir / totalPossibleAttendance) * 100).toFixed(1) : "0.0";
     
     // --- Build Student List ---
     const studentListString = students.map((student, index) => {
@@ -207,7 +209,7 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         `👩‍🏫 *Wali Kelas*: ${classInfo.waliKelas || '-'}`,
         "━━━━━━━━━━━━━━━━━━",
         "📌 *Ringkasan Akumulatif Kelas*",
-        `Total entri kehadiran dari ${students.length} siswa selama sebulan.`,
+        `Total entri dari ${students.length} siswa selama ${schoolDays} hari sekolah efektif.`,
         "",
         `✅ Total Hadir: ${totalHadir} entri`,
         `❌ Total Alpha: ${totalAlfa} entri`,
@@ -287,3 +289,5 @@ export async function deleteAllPendingAndProcessingJobs(): Promise<{ success: bo
         return { success: false, count: 0, error: e.message };
     }
 }
+
+    
