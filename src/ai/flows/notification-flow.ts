@@ -6,7 +6,6 @@
  * - notifyOnAttendance: Queues a real-time attendance notification to a parent.
  * - retryAllFailedJobs: Retries all failed notification jobs at once.
  * - deleteAllPendingAndProcessingJobs: Deletes all pending and processing jobs.
- * - queueMonthlyRecapToParent: Queues a monthly recap message to a parent.
  * - queueClassRecapNotification: Queues a monthly recap message to a class group.
  */
 
@@ -35,12 +34,6 @@ export type SerializableAttendanceRecord = {
   recordDate: string
   parentWaNumber?: string;
 };
-
-type MonthlySummaryData = {
-    studentInfo: { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; },
-    attendance: { [day: number]: string }, // 'H', 'S', 'I', 'A', 'T', 'D', 'L'
-    summary: { H: number, T: number, S: number, I: number, A: number, D: number, L: number }
-}
 
 const footerVariations = [
     "_Pesan ini dikirim oleh sistem dan tidak untuk dibalas._",
@@ -148,74 +141,39 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 }
 
 /**
- * Queues a monthly attendance recap to a parent.
- * @param studentData The student's monthly summary data.
- * @param month The month of the recap (0-11).
- * @param year The year of the recap.
- * @param googleDriveLink The public link to the Google Drive folder.
- */
-export async function queueMonthlyRecapToParent(studentData: MonthlySummaryData, month: number, year: number, googleDriveLink: string): Promise<void> {
-    const waNumber = studentData.studentInfo.parentWaNumber;
-    if (!waNumber) {
-        // This is handled in the calling function, but as a safeguard.
-        return;
-    }
-
-    const { summary, studentInfo } = studentData;
-    const totalHadir = summary.H + summary.T;
-    const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
-
-    const messageLines = [
-        "🏫 *SMAS PGRI Naringgul*",
-        `*Laporan Rekap Absensi: ${monthName}*`,
-        "--------------------------------",
-        `*Nama Siswa*: ${studentInfo.nama}`,
-        `*NISN*: ${studentInfo.nisn}`,
-        "",
-        "*Rincian Kehadiran:*",
-        `  ✅ Hadir       : ${totalHadir} hari`,
-        `  ⏰ Terlambat   : ${summary.T} hari`,
-        `  🤒 Sakit       : ${summary.S} hari`,
-        `  📄 Izin        : ${summary.I} hari`,
-        `  ❌ Tanpa Keterangan (Alfa) : ${summary.A} hari`,
-        `  🏃 Dispensasi  : ${summary.D} hari`,
-        "",
-        "Untuk melihat atau mengunduh laporan PDF lengkap, silakan kunjungi tautan berikut:",
-        googleDriveLink,
-    ];
-
-    const message = messageLines.join('\n');
-    await queueNotification(waNumber, message, 'recap', { studentName: studentInfo.nama, month, year, studentId: studentInfo.id });
-}
-
-/**
  * Queues a monthly attendance recap to a class WhatsApp group.
  * @param groupName The name of the WhatsApp group.
  * @param className The name of the class.
  * @param month The month of the recap (0-11).
  * @param year The year of the recap.
- * @param googleDriveLink The public link to the Google Drive folder.
+ * @param teacherDriveLink The public link to the Google Drive folder for teachers.
+ * @param studentDriveLink The public link to the Google Drive folder for students.
  */
 export async function queueClassRecapNotification(
     groupName: string, 
     className: string,
     month: number, 
     year: number,
-    googleDriveLink: string
+    teacherDriveLink: string,
+    studentDriveLink: string
 ): Promise<void> {
     const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
     
     const messageLines = [
-        "Assalamualaikum Wr. Wb.",
-        "Dengan hormat, kami sampaikan pemberitahuan rekapitulasi absensi bulanan untuk:",
-        "",
+        "🏫 *Rekapitulasi Absensi Bulanan*",
+        "====================",
         `*Kelas*: ${className}`,
         `*Periode*: ${monthName}`,
-        "====================",
-        "Untuk mengunduh laporan PDF rekapitulasi absensi yang terperinci, silakan akses tautan Google Drive di bawah ini.",
-        "Laporan ini berisi catatan kehadiran seluruh siswa di kelas tersebut selama satu bulan.",
         "",
-        googleDriveLink,
+        "Dengan hormat, kami sampaikan tautan untuk mengunduh laporan rekapitulasi absensi siswa.",
+        "",
+        "🔗 *Untuk Guru/Wali Kelas:*",
+        "Laporan terperinci untuk analisis internal dapat diakses di:",
+        teacherDriveLink,
+        "",
+        "🔗 *Untuk Siswa/Orang Tua:*",
+        "Akses laporan kehadiran putra/i Anda di:",
+        studentDriveLink,
         "\nAtas perhatian Bapak/Ibu, kami ucapkan terima kasih."
     ];
 

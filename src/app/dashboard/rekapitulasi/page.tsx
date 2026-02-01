@@ -35,7 +35,7 @@ import { DateRangePicker } from "@/components/ui/date-range-picker"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { queueClassRecapNotification, queueMonthlyRecapToParent } from "@/ai/flows/notification-flow"
+import { queueClassRecapNotification } from "@/ai/flows/notification-flow"
 
 // Types
 type Class = { id: string; name: string; grade: string; whatsappGroupName?: string; }
@@ -435,45 +435,32 @@ export default function RekapitulasiPage() {
         
         const classInfo = classMap.get(selectedTarget);
         if (!classInfo) return;
+
+        if (!classInfo.whatsappGroupName) {
+            toast({
+                variant: "destructive",
+                title: "Grup Tidak Ditemukan",
+                description: "Nama grup WhatsApp belum diatur untuk kelas ini di menu Pengaturan Kelas.",
+            });
+            return;
+        }
         
         setIsSendingNotifs(true);
+        toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi rekap untuk grup kelas ${classInfo.name}.` });
+
         try {
-            toast({ title: "Memulai Pengiriman Notifikasi...", description: `Mempersiapkan notifikasi untuk kelas ${classInfo.name}. Ini mungkin memakan waktu.` });
-
-            const data = await generateSummaryData();
-            if (!data || !data.summary) {
-                throw new Error("Gagal menghasilkan data rekapitulasi untuk pengiriman.");
-            }
-            
-            const { summary } = data;
-            
-            // Queue notifications for parents with the student link
-            const parentPromises = Object.values(summary).map(studentData => 
-                queueMonthlyRecapToParent(studentData, selectedMonth, selectedYear, GOOGLE_DRIVE_LINK_SISWA)
+            await queueClassRecapNotification(
+                classInfo.whatsappGroupName,
+                classInfo.name,
+                selectedMonth,
+                selectedYear,
+                GOOGLE_DRIVE_LINK_GURU,
+                GOOGLE_DRIVE_LINK_SISWA
             );
-
-            // Queue notification for the class group, if it exists, with the teacher link
-            if (classInfo.whatsappGroupName) {
-                const groupPromise = queueClassRecapNotification(
-                    classInfo.whatsappGroupName,
-                    classInfo.name,
-                    selectedMonth,
-                    selectedYear,
-                    GOOGLE_DRIVE_LINK_GURU
-                );
-                await Promise.all([...parentPromises, groupPromise]);
-            } else {
-                await Promise.all(parentPromises);
-                toast({
-                    variant: "default",
-                    title: "Info",
-                    description: "Notifikasi grup dilewati karena nama grup WhatsApp belum diatur untuk kelas ini.",
-                })
-            }
 
             toast({
                 title: "Tugas Terkirim",
-                description: `Semua notifikasi rekap untuk kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
+                description: `Notifikasi rekap untuk grup kelas ${classInfo.name} berhasil dimasukkan ke antrean.`,
             });
 
         } catch (error: any) {
