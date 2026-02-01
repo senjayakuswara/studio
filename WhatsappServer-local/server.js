@@ -1,5 +1,4 @@
 
-
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { Boom } = require('@hapi/boom');
@@ -137,7 +136,8 @@ function listenForNotificationJobs() {
             try {
                 await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now() });
 
-                const { recipient, message, file } = jobData.payload;
+                const { recipient, message, fileData, fileMimetype, fileName } = jobData.payload;
+
                 if (!recipient) {
                     throw new Error('Payload tidak valid: recipient kosong.');
                 }
@@ -162,12 +162,12 @@ function listenForNotificationJobs() {
                 }
                 
                 logger.info(`[JOB] Mengirim pesan ke ${jid}`);
-                if (file && file.data) {
-                    const buffer = Buffer.from(file.data, 'base64');
+                if (fileData) {
+                    const buffer = Buffer.from(fileData, 'base64');
                     await sock.sendMessage(jid, {
                         document: buffer,
-                        mimetype: file.mimetype,
-                        fileName: file.fileName,
+                        mimetype: fileMimetype,
+                        fileName: fileName,
                         caption: message
                     });
                 } else {
@@ -665,11 +665,9 @@ async function generateAndQueueAllMonthlyRecaps(recapYear, recapMonth, target) {
                 payload: {
                     recipient: classInfo.whatsappGroupName,
                     message: caption,
-                    file: {
-                        data: pdfBuffer.toString('base64'),
-                        mimetype: 'application/pdf',
-                        fileName: fileName,
-                    },
+                    fileData: pdfBuffer.toString('base64'),
+                    fileMimetype: 'application/pdf',
+                    fileName: fileName,
                 },
                 type: 'recap_pdf',
                 metadata: { reportType: 'monthly_class_recap_pdf', classId: classId },
@@ -738,3 +736,5 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
+
+    
