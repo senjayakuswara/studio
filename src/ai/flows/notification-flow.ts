@@ -117,7 +117,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         if (schoolHoursSnap.exists()) {
             const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
             
-            // --- TIME-SENSITIVE LOGIC: THIS IS THE CORRECT, ROBUST IMPLEMENTATION ---
+            // --- ROBUST TIME-SENSITIVE LOGIC ---
             
             // The exact moment of check-in, as a universal Date object.
             const checkinTime = new Date(record.timestampMasuk);
@@ -125,23 +125,20 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
             // 1. Get the date part (YYYY-MM-DD) of the check-in, according to WIB.
             const checkinDateString = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
             
-            // 2. Create the "jamMasuk" time for that specific date as a UTC Date object.
-            // This is done by building a string representing the time in WIB, then parsing it.
+            // 2. Create the "jamMasuk" time for that specific date by building a string 
+            // representing the wall time in WIB, then parsing it into a universal Date object.
             const jamMasukStringWIB = `${checkinDateString}T${schoolHours.jamMasuk}:00`;
             const jamMasukTime = toZonedTime(jamMasukStringWIB, timeZone);
             
             // 3. Add the tolerance minutes to get the final deadline time.
-            // `addMinutes` correctly handles crossing over hours/days.
             const deadlineTime = addMinutes(jamMasukTime, parseInt(schoolHours.toleransi, 10));
 
-            // 4. Compare the two `Date` objects. They are now both absolute points in time.
-            if (checkinTime <= deadlineTime) {
+            // 4. Compare the two absolute Date objects.
+            if (checkinTime.getTime() <= deadlineTime.getTime()) {
                 finalStatus = "Hadir (Tepat Waktu)";
             } else {
-                // differenceInMinutes calculates `dateLeft - dateRight`.
-                // If checkinTime is later, the result will be positive.
                 const minutesLate = differenceInMinutes(checkinTime, deadlineTime);
-                finalStatus = `Terlambat (${minutesLate} menit)`;
+                finalStatus = `Terlambat (${minutesLate > 0 ? minutesLate : 1} menit)`;
             }
 
         } else {
