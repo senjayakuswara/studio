@@ -79,7 +79,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flows/notification-flow"
 
 // Types
-type Class = { id: string; name: string; grade: string }
+type Class = { id: string; name: string; grade: string, whatsappGroupName?: string, waliKelas?: string }
 type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; status: "Aktif" | "Lulus" | "Pindah" }
 type AttendanceStatus = "Hadir" | "Terlambat" | "Sakit" | "Izin" | "Alfa" | "Dispen" | "Belum Absen"
 type AttendanceRecord = {
@@ -316,6 +316,13 @@ export default function AbsensiPage() {
         return;
     }
 
+    const classInfo = classes.find(c => c.id === filterClass);
+    if (!classInfo) {
+        toast({ variant: "destructive", title: "Gagal", description: "Informasi kelas tidak ditemukan." });
+        setIsMassProcessing(false);
+        return;
+    }
+
     toast({ title: "Memulai Absen Masuk Massal", description: `Memproses ${studentsToAttend.length} siswa... Ini mungkin memakan waktu.` });
     
     let totalSuccessCount = 0;
@@ -352,7 +359,7 @@ export default function AbsensiPage() {
                 parentWaNumber: student.parentWaNumber
             };
             
-            await notifyOnAttendance(serializableRecord);
+            await notifyOnAttendance(serializableRecord, classInfo, schoolHours);
             totalSuccessCount++;
         } catch (error) {
             console.error(`Gagal memproses absen masuk untuk ${student.nama}:`, error);
@@ -385,6 +392,13 @@ export default function AbsensiPage() {
         return;
     }
 
+    const classInfo = classes.find(c => c.id === filterClass);
+    if (!classInfo) {
+        toast({ variant: "destructive", title: "Gagal", description: "Informasi kelas tidak ditemukan." });
+        setIsMassProcessing(false);
+        return;
+    }
+
     toast({ title: "Memulai Absensi Pulang Massal", description: `Memproses ${studentsToCheckOut.length} siswa...` });
     
     let totalSuccessCount = 0;
@@ -411,7 +425,7 @@ export default function AbsensiPage() {
                 timestampPulang: exitTime.toISOString(),
                 recordDate: (record.recordDate as Timestamp).toDate().toISOString(),
             };
-            await notifyOnAttendance(serializableRecord);
+            await notifyOnAttendance(serializableRecord, classInfo, schoolHours);
             totalSuccessCount++;
         } catch (error) {
             console.error(`Gagal memproses absen pulang untuk ${record.studentName}:`, error);
@@ -527,7 +541,7 @@ export default function AbsensiPage() {
                 recordDate: recordDate.toISOString(),
                 parentWaNumber: editingRecord.parentWaNumber
             };
-            await notifyOnAttendance(recordForNotif);
+            await notifyOnAttendance(recordForNotif, editingRecord.classInfo, schoolHours || undefined);
             toast({ title: "Notifikasi Terkirim", description: `Notifikasi pembaruan status untuk ${editingRecord.studentName} telah dijadwalkan.` });
         } catch (notifError) {
             console.error("Failed to send update notification:", notifError);

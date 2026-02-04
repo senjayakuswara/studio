@@ -17,15 +17,18 @@ import { differenceInMinutes, isSaturday, isSunday, addMinutes } from "date-fns"
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
-type Class = { 
+type ClassInfo = { 
     id: string; 
     name: string; 
     grade: string;
     whatsappGroupName?: string; 
     waliKelas?: string;
 };
-type Student = { id: string; nisn: string; nama: string; classId: string; parentWaNumber?: string; }
-
+type SchoolHours = {
+  jamMasuk: string;
+  toleransi: string;
+  jamPulang: string;
+};
 
 export type SerializableAttendanceRecord = {
   id?: string
@@ -86,13 +89,19 @@ async function queueNotification(recipient: string, message: string, type: 'atte
  * Queues a real-time attendance notification to a class WhatsApp group.
  * @param record The attendance record that triggered the notification.
  */
-export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
-    const classSnap = await getDoc(doc(db, "classes", record.classId));
-    if (!classSnap.exists()) {
-        console.error(`Class with ID ${record.classId} not found for notification.`);
-        return;
+export async function notifyOnAttendance(
+    record: SerializableAttendanceRecord,
+    classInfo?: ClassInfo,
+    schoolHours?: SchoolHours
+) {
+     if (!classInfo) {
+        const classSnap = await getDoc(doc(db, "classes", record.classId));
+        if (!classSnap.exists()) {
+            console.error(`Class with ID ${record.classId} not found for notification.`);
+            return;
+        }
+        classInfo = classSnap.data() as ClassInfo;
     }
-    const classInfo = classSnap.data() as Class;
     
     const recipient = classInfo.whatsappGroupName;
     if (!recipient) {
@@ -113,10 +122,14 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
         timestampStr = record.timestampMasuk;
         title = `Absensi Masuk`;
 
-        const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
-        if (schoolHoursSnap.exists()) {
-            const schoolHours = schoolHoursSnap.data() as { jamMasuk: string; toleransi: string; };
-            
+        if (!schoolHours) {
+            const schoolHoursSnap = await getDoc(doc(db, "settings", "schoolHours"));
+            if (schoolHoursSnap.exists()) {
+                schoolHours = schoolHoursSnap.data() as SchoolHours;
+            }
+        }
+
+        if (schoolHours) {
             // --- ROBUST TIME-SENSITIVE LOGIC ---
             
             // The exact moment of check-in, as a universal Date object.
@@ -185,7 +198,7 @@ export async function notifyOnAttendance(record: SerializableAttendanceRecord) {
 }
 
 type DetailedRecapParams = {
-    classInfo: Class;
+    classInfo: ClassInfo;
     month: number;
     year: number;
     summaryData: MonthlySummary;
@@ -326,3 +339,5 @@ export async function deleteAllPendingAndProcessingJobs(): Promise<{ success: bo
         return { success: false, count: 0, error: e.message };
     }
 }
+
+    
