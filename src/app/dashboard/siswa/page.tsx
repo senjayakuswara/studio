@@ -656,7 +656,7 @@ export default function SiswaPage() {
                                 </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {["X", "XI", "XII"].map(grade => (
+                              {["X", "XI", "XII", "Staf"].map(grade => (
                                 <SelectGroup key={grade}>
                                   <SelectLabel>Kelas {grade}</SelectLabel>
                                   {classes.filter(c => c.grade === grade).map(c => (
@@ -981,7 +981,7 @@ export default function SiswaPage() {
                   </SelectTrigger>
                   <SelectContent>
                       <SelectItem value="all">Semua Kelas</SelectItem>
-                       {["X", "XI", "XII"].map(grade => (
+                       {["X", "XI", "XII", "Staf"].map(grade => (
                           <SelectGroup key={grade}>
                             <SelectLabel>Kelas {grade}</SelectLabel>
                             {classes.filter(c => c.grade === grade).map(c => (

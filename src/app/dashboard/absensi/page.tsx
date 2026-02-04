@@ -168,73 +168,96 @@ export default function AbsensiPage() {
     resolver: zodResolver(attendanceEditSchema),
   })
 
-  const fetchData = async (selectedDate: Date) => {
-    setIsLoading(true)
-    try {
-      const selectedDateStart = startOfDay(selectedDate)
-      const selectedDateEnd = endOfDay(selectedDate)
-      
-      const [classesSnapshot, reportConfigSnap, studentsSnapshot, schoolHoursSnap] = await Promise.all([
-          getDocs(collection(db, "classes")),
-          getDoc(doc(db, "settings", "reportConfig")),
-          getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
-          getDoc(doc(db, "settings", "schoolHours")),
-      ]);
-
-      if(reportConfigSnap.exists()) {
-          setReportConfig(reportConfigSnap.data() as ReportConfig);
-      }
-      if(schoolHoursSnap.exists()) {
-          setSchoolHours(schoolHoursSnap.data() as SchoolHoursSettings);
-      }
-
-      const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
-      classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`))
-      setClasses(classList)
-      const classMap = new Map(classList.map(c => [c.id, c]))
-
-      const studentList = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
-      setAllStudents(studentList);
-
-      const attendanceQuery = query(
-        collection(db, "attendance"),
-        where("recordDate", ">=", selectedDateStart),
-        where("recordDate", "<=", selectedDateEnd)
-      )
-      const attendanceSnapshot = await getDocs(attendanceQuery)
-      const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
-      
-      const combinedRecords = records.map(record => {
-        const studentInfo = studentList.find(s => s.id === record.studentId);
-        return {
-          ...record,
-          classInfo: classMap.get(record.classId),
-          parentWaNumber: studentInfo?.parentWaNumber,
-        }
-      }).sort((a,b) => {
-          const classA = a.classInfo ? `${a.classInfo.grade}-${a.classInfo.name}` : ''
-          const classB = b.classInfo ? `${b.classInfo.grade}-${b.classInfo.name}` : ''
-          if (classA !== classB) return classA.localeCompare(classB);
-          return a.studentName.localeCompare(b.studentName);
-      })
-
-      setAttendanceRecords(combinedRecords)
-
-    } catch (error) {
-      console.error("Error fetching attendance data:", error)
-      toast({
-        variant: "destructive",
-        title: "Gagal Memuat Data",
-        description: "Gagal mengambil data absensi dari server.",
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
+  // Fetch static data like classes and students once on component mount.
   useEffect(() => {
-    fetchData(date)
-  }, [date, toast])
+    async function fetchStaticData() {
+      try {
+        const [classesSnapshot, reportConfigSnap, studentsSnapshot, schoolHoursSnap] = await Promise.all([
+            getDocs(collection(db, "classes")),
+            getDoc(doc(db, "settings", "reportConfig")),
+            getDocs(query(collection(db, "students"), where("status", "==", "Aktif"))),
+            getDoc(doc(db, "settings", "schoolHours")),
+        ]);
+
+        if(reportConfigSnap.exists()) {
+            setReportConfig(reportConfigSnap.data() as ReportConfig);
+        }
+        if(schoolHoursSnap.exists()) {
+            setSchoolHours(schoolHoursSnap.data() as SchoolHoursSettings);
+        }
+
+        const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
+        classList.sort((a, b) => `${a.grade}-${a.name}`.localeCompare(`${b.grade}-${a.name}`))
+        setClasses(classList)
+
+        const studentList = studentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Student[];
+        setAllStudents(studentList);
+
+      } catch (error) {
+        console.error("Error fetching static data:", error)
+        toast({
+          variant: "destructive",
+          title: "Gagal Memuat Data Awal",
+          description: "Gagal mengambil data kelas dan siswa dari server.",
+        })
+      }
+    }
+    fetchStaticData();
+  }, [toast]);
+
+  // Fetch dynamic attendance data whenever the date changes or after static data has loaded.
+  useEffect(() => {
+    // Don't fetch attendance until classes and students are loaded.
+    if (classes.length === 0 && allStudents.length === 0) {
+        // Initial load in progress via other useEffect.
+        return;
+    }
+
+    async function fetchAttendanceForDate(selectedDate: Date) {
+      setIsLoading(true)
+      try {
+        const selectedDateStart = startOfDay(selectedDate)
+        const selectedDateEnd = endOfDay(selectedDate)
+        
+        const attendanceQuery = query(
+          collection(db, "attendance"),
+          where("recordDate", ">=", selectedDateStart),
+          where("recordDate", "<=", selectedDateEnd)
+        )
+        const attendanceSnapshot = await getDocs(attendanceQuery)
+        const records = attendanceSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as AttendanceRecord[]
+        
+        const classMap = new Map(classes.map(c => [c.id, c]))
+        const combinedRecords = records.map(record => {
+          const studentInfo = allStudents.find(s => s.id === record.studentId);
+          return {
+            ...record,
+            classInfo: classMap.get(record.classId),
+            parentWaNumber: studentInfo?.parentWaNumber,
+          }
+        }).sort((a,b) => {
+            const classA = a.classInfo ? `${a.classInfo.grade}-${a.classInfo.name}` : ''
+            const classB = b.classInfo ? `${b.classInfo.grade}-${b.classInfo.name}` : ''
+            if (classA !== classB) return classA.localeCompare(classB);
+            return a.studentName.localeCompare(b.studentName);
+        })
+
+        setAttendanceRecords(combinedRecords)
+
+      } catch (error) {
+        console.error("Error fetching attendance data:", error)
+        toast({
+          variant: "destructive",
+          title: "Gagal Memuat Data Absensi",
+          description: "Gagal mengambil data absensi dari server untuk tanggal yang dipilih.",
+        })
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    fetchAttendanceForDate(date)
+  }, [date, classes, allStudents, toast])
+
 
   const studentsBelumAbsen = useMemo(() => {
     const studentsWithAttendance = new Set(attendanceRecords.map(rec => rec.studentId));
@@ -301,6 +324,8 @@ export default function AbsensiPage() {
     const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
     const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
     
+    const newAttendanceRecords: CombinedAttendanceRecord[] = [];
+
     for (const student of studentsToAttend) {
         try {
             const newRecordDocRef = doc(collection(db, "attendance"));
@@ -316,6 +341,7 @@ export default function AbsensiPage() {
                 recordDate: Timestamp.fromDate(startOfDay(date)),
             };
             await setDoc(newRecordDocRef, newRecord);
+            newAttendanceRecords.push({ id: newRecordDocRef.id, ...newRecord });
 
             const serializableRecord: SerializableAttendanceRecord = {
                 id: newRecordDocRef.id,
@@ -335,13 +361,13 @@ export default function AbsensiPage() {
         await new Promise(resolve => setTimeout(resolve, 500));
     }
     
+    setAttendanceRecords(prev => [...prev, ...newAttendanceRecords]);
+
     let description = `${totalSuccessCount} notifikasi berhasil dijadwalkan.`;
     if (totalFailCount > 0) {
         description += ` ${totalFailCount} gagal karena masalah koneksi/database.`;
     }
     toast({ title: "Proses Absen Masuk Selesai", description });
-
-    await fetchData(date);
     setIsMassProcessing(false);
   };
 
@@ -366,12 +392,16 @@ export default function AbsensiPage() {
     
     const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
     const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+    const exitTimestamp = Timestamp.fromDate(exitTime);
+
+    const updatedRecordIds = new Set<string>();
     
     for (const record of studentsToCheckOut) {
         try {
             if (!record.id) continue;
             const docRef = doc(db, "attendance", record.id);
-            await updateDoc(docRef, { timestampPulang: Timestamp.fromDate(exitTime) });
+            await updateDoc(docRef, { timestampPulang: exitTimestamp });
+            updatedRecordIds.add(record.id);
 
             const serializableRecord: SerializableAttendanceRecord = {
                 ...record,
@@ -389,14 +419,20 @@ export default function AbsensiPage() {
         }
         await new Promise(resolve => setTimeout(resolve, 500));
     }
+    
+    setAttendanceRecords(prevRecords => 
+        prevRecords.map(rec => 
+            rec.id && updatedRecordIds.has(rec.id) 
+            ? { ...rec, timestampPulang: exitTimestamp } 
+            : rec
+        )
+    );
 
     let description = `${totalSuccessCount} notifikasi pulang berhasil dijadwalkan.`;
     if (totalFailCount > 0) {
         description += ` ${totalFailCount} gagal.`;
     }
     toast({ title: "Proses Absen Pulang Selesai", description });
-
-    await fetchData(date);
     setIsMassProcessing(false);
   };
 
@@ -433,6 +469,8 @@ export default function AbsensiPage() {
         const updatePayload: { [key: string]: any } = {};
         const recordDate = startOfDay(date);
         let finalStatus: AttendanceStatus;
+        let newTimestampMasuk: Timestamp | null = null;
+        let newTimestampPulang: Timestamp | null = null;
 
         if (["Sakit", "Izin", "Alfa", "Dispen"].includes(status)) {
             updatePayload.timestampMasuk = null;
@@ -441,7 +479,7 @@ export default function AbsensiPage() {
             finalStatus = status;
         } else {
             const [hMasuk, mMasuk] = jamMasuk!.split(':').map(Number);
-            const newTimestampMasuk = Timestamp.fromDate(setMinutes(setHours(recordDate, hMasuk), mMasuk));
+            newTimestampMasuk = Timestamp.fromDate(setMinutes(setHours(recordDate, hMasuk), mMasuk));
             updatePayload.timestampMasuk = newTimestampMasuk;
 
             if (schoolHours) {
@@ -455,13 +493,23 @@ export default function AbsensiPage() {
 
             if (jamPulang) {
                 const [hPulang, mPulang] = jamPulang.split(':').map(Number);
-                updatePayload.timestampPulang = Timestamp.fromDate(setMinutes(setHours(recordDate, hPulang), mPulang));
+                newTimestampPulang = Timestamp.fromDate(setMinutes(setHours(recordDate, hPulang), mPulang));
+                updatePayload.timestampPulang = newTimestampPulang;
             } else {
                 updatePayload.timestampPulang = null;
             }
         }
         
         await updateDoc(docRef, updatePayload);
+
+        // Update local state to avoid refetch
+        setAttendanceRecords(prevRecords =>
+            prevRecords.map(rec =>
+                rec.id === editingRecord.id
+                ? { ...rec, ...updatePayload, status: finalStatus }
+                : rec
+            )
+        );
         
         toast({ title: "Sukses", description: "Data absensi berhasil diperbarui." });
         
@@ -474,8 +522,8 @@ export default function AbsensiPage() {
                 studentName: editingRecord.studentName,
                 classId: editingRecord.classId,
                 status: finalStatus,
-                timestampMasuk: (updatePayload.timestampMasuk as Timestamp | null)?.toDate().toISOString() ?? null,
-                timestampPulang: (updatePayload.timestampPulang as Timestamp | null)?.toDate().toISOString() ?? null,
+                timestampMasuk: newTimestampMasuk?.toDate().toISOString() ?? null,
+                timestampPulang: newTimestampPulang?.toDate().toISOString() ?? null,
                 recordDate: recordDate.toISOString(),
                 parentWaNumber: editingRecord.parentWaNumber
             };
@@ -489,8 +537,6 @@ export default function AbsensiPage() {
                 description: "Pembaruan data berhasil, tetapi notifikasi gagal dikirim.",
             });
         }
-
-        await fetchData(date);
         setIsFormDialogOpen(false);
 
     } catch (error) {
@@ -767,7 +813,7 @@ export default function AbsensiPage() {
                     </SelectTrigger>
                     <SelectContent>
                     <SelectItem value="all">Semua Kelas</SelectItem>
-                    {["X", "XI", "XII"].map(grade => (
+                    {["X", "XI", "XII", "Staf"].map(grade => (
                         <SelectGroup key={grade}>
                         <SelectLabel>Kelas {grade}</SelectLabel>
                         {classes.filter(c => c.grade === grade).map(c => (
@@ -913,3 +959,5 @@ export default function AbsensiPage() {
     </>
   )
 }
+
+    
