@@ -13,7 +13,7 @@ import { doc, getDoc, addDoc, collection, Timestamp, query, where, getDocs, writ
 import { db } from "@/lib/firebase";
 import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 import { id as localeID } from "date-fns/locale";
-import { differenceInMinutes, isSaturday, isSunday, addMinutes } from "date-fns";
+import { addMinutes, isSaturday, isSunday } from "date-fns";
 import type { MonthlySummary } from "@/app/dashboard/rekapitulasi/page";
 
 // Types
@@ -131,26 +131,26 @@ export async function notifyOnAttendance(
 
         if (schoolHours) {
             // --- ROBUST TIME-SENSITIVE LOGIC ---
-            
-            // The exact moment of check-in, as a universal Date object.
             const checkinTime = new Date(record.timestampMasuk);
 
             // 1. Get the date part (YYYY-MM-DD) of the check-in, according to WIB.
             const checkinDateString = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
             
-            // 2. Create the "jamMasuk" time for that specific date by building a string 
-            // representing the wall time in WIB, then parsing it into a universal Date object.
+            // 2. Create the "jamMasuk" time for that specific date.
             const jamMasukStringWIB = `${checkinDateString}T${schoolHours.jamMasuk}:00`;
             const jamMasukTime = toZonedTime(jamMasukStringWIB, timeZone);
             
-            // 3. Add the tolerance minutes to get the final deadline time.
-            const deadlineTime = addMinutes(jamMasukTime, parseInt(schoolHours.toleransi, 10));
+            // 3. Safely parse tolerance and add it to get the final deadline time.
+            const toleranceInMinutes = Number(schoolHours.toleransi) || 0;
+            const deadlineTime = addMinutes(jamMasukTime, toleranceInMinutes);
 
             // 4. Compare the two absolute Date objects.
             if (checkinTime.getTime() <= deadlineTime.getTime()) {
                 finalStatus = "Hadir (Tepat Waktu)";
             } else {
-                const minutesLate = differenceInMinutes(checkinTime, deadlineTime);
+                // Use milliseconds for more precise calculation
+                const millisLate = checkinTime.getTime() - deadlineTime.getTime();
+                const minutesLate = Math.ceil(millisLate / 60000);
                 finalStatus = `Terlambat (${minutesLate > 0 ? minutesLate : 1} menit)`;
             }
 
@@ -339,5 +339,3 @@ export async function deleteAllPendingAndProcessingJobs(): Promise<{ success: bo
         return { success: false, count: 0, error: e.message };
     }
 }
-
-    
