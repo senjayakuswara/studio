@@ -73,6 +73,18 @@ const chartConfig = {
   Absen: { label: "Absen", color: "hsl(var(--chart-3))" },
 } satisfies ChartConfig
 
+// --- Caching Logic ---
+type DashboardCache = {
+  stats: DashboardStats;
+  recentActivities: AttendanceRecord[];
+  chartData: ChartData[];
+  timestamp: number;
+}
+let dashboardCache: DashboardCache | null = null;
+const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes cache
+// --- End Caching Logic ---
+
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({
     totalStudents: 0,
@@ -98,6 +110,16 @@ export default function DashboardPage() {
     });
 
     async function fetchDashboardData() {
+      const now = Date.now();
+      // Check if valid cache exists
+      if (dashboardCache && (now - dashboardCache.timestamp < CACHE_DURATION_MS)) {
+          setStats(dashboardCache.stats);
+          setRecentActivities(dashboardCache.recentActivities);
+          setChartData(dashboardCache.chartData);
+          setIsLoading(false);
+          return;
+      }
+      
       setIsLoading(true)
       try {
         const todayStart = startOfDay(new Date())
@@ -139,12 +161,14 @@ export default function DashboardPage() {
             }
         })
         
-        setStats({ totalStudents, presentToday, lateToday, alfaToday, sickToday, permissionToday, dispensationToday })
+        const newStats = { totalStudents, presentToday, lateToday, alfaToday, sickToday, permissionToday, dispensationToday };
+        setStats(newStats);
 
         // Fetch recent activities
         const recentActivityQuery = query(collection(db, "attendance"), orderBy("recordDate", "desc"), limit(5))
         const recentActivitySnapshot = await getDocs(recentActivityQuery)
-        setRecentActivities(recentActivitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AttendanceRecord))
+        const newRecentActivities = recentActivitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AttendanceRecord);
+        setRecentActivities(newRecentActivities);
 
         // Fetch last 7 days attendance for chart
         const sevenDaysAgo = subDays(todayStart, 6);
@@ -165,6 +189,15 @@ export default function DashboardPage() {
             };
         });
         setChartData(processedChartData);
+
+        // Update cache
+        dashboardCache = {
+            stats: newStats,
+            recentActivities: newRecentActivities,
+            chartData: processedChartData,
+            timestamp: Date.now()
+        };
+
 
       } catch (error) {
         console.error("Error fetching dashboard data:", error)
