@@ -58,6 +58,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -155,13 +156,15 @@ export default function AbsensiPage() {
   const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
   const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true)
-  const [isPrinting, setIsPrinting] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(isPrinting)
   const [isMassProcessing, setIsMassProcessing] = useState(false);
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
   const [filterStatus, setFilterStatus] = useState<AttendanceStatus | "all">("all")
   const [isFormDialogOpen, setIsFormDialogOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<CombinedAttendanceRecord | null>(null)
+  const [massCheckInTime, setMassCheckInTime] = useState('');
+  const [massCheckOutTime, setMassCheckOutTime] = useState('');
   const { toast } = useToast()
 
   const form = useForm<z.infer<typeof attendanceEditSchema>>({
@@ -303,8 +306,8 @@ export default function AbsensiPage() {
   }, [allStudents, attendanceRecords, studentsBelumAbsen, filterClass, filterName, filterStatus, classes])
   
   const handleMassCheckIn = async () => {
-    if (!schoolHours || filterClass === 'all') {
-        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur atau kelas belum dipilih." });
+    if (!massCheckInTime || filterClass === 'all') {
+        toast({ variant: "destructive", title: "Gagal", description: "Waktu absen massal tidak valid atau kelas belum dipilih." });
         return;
     }
     setIsMassProcessing(true);
@@ -328,7 +331,7 @@ export default function AbsensiPage() {
     let totalSuccessCount = 0;
     let totalFailCount = 0;
 
-    const [hours, minutes] = schoolHours.jamMasuk.split(':').map(Number);
+    const [hours, minutes] = massCheckInTime.split(':').map(Number);
     const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
     
     const newAttendanceRecords: CombinedAttendanceRecord[] = [];
@@ -359,7 +362,7 @@ export default function AbsensiPage() {
                 parentWaNumber: student.parentWaNumber
             };
             
-            await notifyOnAttendance(serializableRecord, classInfo, schoolHours);
+            await notifyOnAttendance(serializableRecord, classInfo, schoolHours || undefined);
             totalSuccessCount++;
         } catch (error) {
             console.error(`Gagal memproses absen masuk untuk ${student.nama}:`, error);
@@ -379,8 +382,8 @@ export default function AbsensiPage() {
   };
 
   const handleMassCheckOut = async () => {
-    if (!schoolHours || filterClass === 'all') {
-        toast({ variant: "destructive", title: "Gagal", description: "Pengaturan jam sekolah belum diatur atau kelas belum dipilih." });
+    if (!massCheckOutTime || filterClass === 'all') {
+        toast({ variant: "destructive", title: "Gagal", description: "Waktu absen massal tidak valid atau kelas belum dipilih." });
         return;
     }
     setIsMassProcessing(true);
@@ -404,7 +407,7 @@ export default function AbsensiPage() {
     let totalSuccessCount = 0;
     let totalFailCount = 0;
     
-    const [hours, minutes] = schoolHours.jamPulang.split(':').map(Number);
+    const [hours, minutes] = massCheckOutTime.split(':').map(Number);
     const exitTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
     const exitTimestamp = Timestamp.fromDate(exitTime);
 
@@ -425,7 +428,7 @@ export default function AbsensiPage() {
                 timestampPulang: exitTime.toISOString(),
                 recordDate: (record.recordDate as Timestamp).toDate().toISOString(),
             };
-            await notifyOnAttendance(serializableRecord, classInfo, schoolHours);
+            await notifyOnAttendance(serializableRecord, classInfo, schoolHours || undefined);
             totalSuccessCount++;
         } catch (error) {
             console.error(`Gagal memproses absen pulang untuk ${record.studentName}:`, error);
@@ -856,7 +859,11 @@ export default function AbsensiPage() {
                 />
             </div>
              <div className="mt-4 flex flex-col md:flex-row gap-2">
-                <AlertDialog>
+                <AlertDialog onOpenChange={(open) => {
+                  if (open && schoolHours) {
+                    setMassCheckInTime(schoolHours.jamMasuk);
+                  }
+                }}>
                     <AlertDialogTrigger asChild>
                         <Button variant="secondary" className="w-full md:w-auto" disabled={isMassProcessing || isLoading || filterClass === 'all' || studentsInSelectedClassBelumAbsen.length === 0}>
                             {isMassProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
@@ -867,9 +874,18 @@ export default function AbsensiPage() {
                         <AlertDialogHeader>
                             <AlertDialogTitle>Konfirmasi Absen Masuk Massal</AlertDialogTitle>
                             <AlertDialogDescription>
-                                Anda akan menandai {studentsInSelectedClassBelumAbsen.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> sebagai 'Hadir' dan mengirim notifikasi. Lanjutkan?
+                                Anda akan menandai {studentsInSelectedClassBelumAbsen.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> sebagai 'Hadir'. Mohon konfirmasi atau ubah jam absen di bawah ini.
                             </AlertDialogDescription>
                         </AlertDialogHeader>
+                        <div className="py-2 space-y-2">
+                          <Label htmlFor="mass-check-in-time">Jam Absen Masuk</Label>
+                          <Input
+                            id="mass-check-in-time"
+                            type="time"
+                            value={massCheckInTime}
+                            onChange={(e) => setMassCheckInTime(e.target.value)}
+                          />
+                        </div>
                         <AlertDialogFooter>
                             <AlertDialogCancel>Batal</AlertDialogCancel>
                             <AlertDialogAction onClick={handleMassCheckIn}>Ya, Lanjutkan</AlertDialogAction>
@@ -877,7 +893,11 @@ export default function AbsensiPage() {
                     </AlertDialogContent>
                 </AlertDialog>
 
-                    <AlertDialog>
+                <AlertDialog onOpenChange={(open) => {
+                  if (open && schoolHours) {
+                    setMassCheckOutTime(schoolHours.jamPulang);
+                  }
+                }}>
                     <AlertDialogTrigger asChild>
                         <Button variant="secondary" className="w-full md:w-auto" disabled={isMassProcessing || isLoading || filterClass === 'all' || studentsInSelectedClassBelumPulang.length === 0}>
                             {isMassProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />}
@@ -888,9 +908,18 @@ export default function AbsensiPage() {
                         <AlertDialogHeader>
                             <AlertDialogTitle>Konfirmasi Absen Pulang Massal</AlertDialogTitle>
                             <AlertDialogDescription>
-                                Anda akan mencatat jam pulang untuk {studentsInSelectedClassBelumPulang.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> dan mengirim notifikasi. Lanjutkan?
+                                Anda akan mencatat jam pulang untuk {studentsInSelectedClassBelumPulang.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span>. Mohon konfirmasi atau ubah jam absen di bawah ini.
                             </AlertDialogDescription>
                         </AlertDialogHeader>
+                        <div className="py-2 space-y-2">
+                          <Label htmlFor="mass-check-out-time">Jam Absen Pulang</Label>
+                          <Input
+                            id="mass-check-out-time"
+                            type="time"
+                            value={massCheckOutTime}
+                            onChange={(e) => setMassCheckOutTime(e.target.value)}
+                          />
+                        </div>
                         <AlertDialogFooter>
                             <AlertDialogCancel>Batal</AlertDialogCancel>
                             <AlertDialogAction onClick={handleMassCheckOut}>Ya, Lanjutkan</AlertDialogAction>
@@ -974,4 +1003,5 @@ export default function AbsensiPage() {
   )
 }
 
+    
     
