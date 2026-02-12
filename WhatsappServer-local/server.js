@@ -128,7 +128,7 @@ function listenForNotificationJobs() {
             try {
                 await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now() });
 
-                const jobData = jobDoc.data();
+                const jobData = freshDoc.data();
                 const { recipient, message, fileUrl, fileMimetype, fileName } = jobData.payload;
 
                 if (!recipient) {
@@ -175,28 +175,30 @@ function listenForNotificationJobs() {
             } catch (error) {
                 logger.error(`[JOB] Gagal memproses tugas ${jobId}: ${error.message}`);
                 
+                const currentJobData = freshDoc.data() || {};
+                const currentRetryCount = currentJobData.retryCount || 0;
+
                 const errorPayload = {
                     status: "failed",
                     errorMessage: error.message,
-                    updatedAt: Timestamp.now()
+                    updatedAt: Timestamp.now(),
+                    retryCount: currentRetryCount + 1
                 };
 
-                if (error.message && (error.message.includes('rate-overlimit') || error.message.includes('too-many-messages'))) {
-                    logger.warn(`[RATE-LIMIT] Terkena rate-limit. Mereset tugas ${jobId} ke 'pending' untuk dicoba lagi nanti.`);
+                // If it's a rate-limit error AND we haven't retried too many times...
+                if (currentRetryCount < 3 && error.message && (error.message.includes('rate-overlimit') || error.message.includes('too-many-messages'))) {
+                    logger.warn(`[RATE-LIMIT] Terkena rate-limit. Mereset tugas ${jobId} ke 'pending' (Percobaan ke-${currentRetryCount + 1}).`);
                     errorPayload.status = "pending";
                     errorPayload.errorMessage = `Rate limit hit. Will be retried automatically.`;
+                } else if (currentRetryCount >= 3) {
+                    logger.error(`[JOB] Tugas ${jobId} mencapai batas percobaan ulang. Ditandai sebagai gagal permanen.`);
+                    errorPayload.errorMessage = `Permanently failed after ${currentRetryCount} retries. Original error: ${error.message}`;
                 }
-
+                
                 try {
-                    const docToUpdate = doc(db, "notification_queue", jobId);
-                    const docSnapshot = await getDoc(docToUpdate);
-                    if (docSnapshot.exists()) {
-                         await updateDoc(docToUpdate, errorPayload);
-                    } else {
-                        logger.error(`[JOB] Dokumen ${jobId} tidak ditemukan untuk ditandai gagal. Mungkin sudah dihapus atau diproses.`);
-                    }
+                    await updateDoc(jobRef, errorPayload);
                 } catch(updateError) {
-                     logger.error(`[JOB] KRITIS: Gagal menandai tugas ${jobId} sebagai gagal: ${updateError.message}`);
+                     logger.error(`[JOB] KRITIS: Gagal memperbarui status tugas ${jobId}: ${updateError.message}`);
                 }
             }
             
