@@ -214,6 +214,12 @@ setInterval(async () => {
     }
 }, 5 * 60 * 1000);
 
+const GROUP_CACHE_REFRESH_INTERVAL = 60 * 60 * 1000; // 1 hour
+setInterval(() => {
+    logger.info(`[CACHE] Menyegarkan cache nama grup untuk mengambil perubahan terbaru...`);
+    groupCache = {}; // Clear the cache to force a re-fetch on next group message
+}, GROUP_CACHE_REFRESH_INTERVAL);
+
 
 connectToWhatsApp();
 
