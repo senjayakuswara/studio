@@ -6,7 +6,7 @@ import type { DateRange } from "react-day-picker"
 import { collection, query, where, getDocs, Timestamp, doc, getDoc, orderBy } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 import { useToast } from "@/hooks/use-toast"
-import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, eachDayOfInterval, isSunday, isSaturday } from "date-fns"
+import { format, getDaysInMonth, startOfMonth, endOfMonth, getYear, getMonth, eachDayOfInterval, isSunday, isSaturday, startOfDay, endOfDay } from "date-fns"
 import { id as localeID } from "date-fns/locale"
 import { Download, Loader2, Printer, Search, Send } from "lucide-react"
 import jsPDF from "jspdf"
@@ -278,9 +278,9 @@ export default function RekapitulasiPage() {
                             summary[student.id].attendance[day] = statusChar;
                          }
                     } else {
-                        // If no record exists for a school day, do not count it as Alfa.
-                        // Mark it as empty in the PDF, but it won't be in the summary counts.
-                        summary[student.id].attendance[day] = '-';
+                        // If no record exists for a school day, it's 'Alfa'.
+                        summary[student.id].attendance[day] = 'A';
+                        summary[student.id].summary.A++;
                     }
                 }
             });
@@ -507,8 +507,8 @@ export default function RekapitulasiPage() {
 
         setIsGenerating(true);
         try {
-            const startDate = startOfMonth(dateRange.from);
-            const endDate = endOfMonth(dateRange.to || dateRange.from);
+            const startDate = startOfDay(dateRange.from);
+            const endDate = endOfDay(dateRange.to || dateRange.from);
             
             const q = query(
                 collection(db, "attendance"), 
@@ -713,7 +713,7 @@ export default function RekapitulasiPage() {
             try {
                 const imgWidth = pageWidth - pageMargin * 2;
                 const imgHeight = imgWidth * (150 / 950);
-                doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, lastY, imgHeight);
+                doc.addImage(reportConfig.headerImageUrl, 'PNG', pageMargin, lastY, imgWidth, imgHeight);
                 lastY += imgHeight + 10;
             } catch (e) { lastY = 50; }
         }

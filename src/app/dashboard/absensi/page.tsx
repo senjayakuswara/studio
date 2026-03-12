@@ -156,7 +156,7 @@ export default function AbsensiPage() {
   const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null)
   const [schoolHours, setSchoolHours] = useState<SchoolHoursSettings | null>(null);
   const [isLoading, setIsLoading] = useState(true)
-  const [isPrinting, setIsPrinting] = useState(isPrinting)
+  const [isPrinting, setIsPrinting] = useState(false)
   const [isMassProcessing, setIsMassProcessing] = useState(false);
   const [filterClass, setFilterClass] = useState("all")
   const [filterName, setFilterName] = useState("")
@@ -186,7 +186,10 @@ export default function AbsensiPage() {
             setReportConfig(reportConfigSnap.data() as ReportConfig);
         }
         if(schoolHoursSnap.exists()) {
-            setSchoolHours(schoolHoursSnap.data() as SchoolHoursSettings);
+            const hours = schoolHoursSnap.data() as SchoolHoursSettings;
+            setSchoolHours(hours);
+            setMassCheckInTime(hours.jamMasuk);
+            setMassCheckOutTime(hours.jamPulang);
         }
 
         const classList = classesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Class[]
@@ -333,6 +336,15 @@ export default function AbsensiPage() {
 
     const [hours, minutes] = massCheckInTime.split(':').map(Number);
     const entryTime = setSeconds(setMinutes(setHours(date, hours), minutes), 0);
+
+    let finalStatus: "Hadir" | "Terlambat" = "Hadir";
+    if (schoolHours) {
+        const [shHours, shMinutes] = schoolHours.jamMasuk.split(':').map(Number);
+        const deadlineTime = setMinutes(setHours(date, shHours), shMinutes + parseInt(schoolHours.toleransi));
+        if (entryTime > deadlineTime) {
+            finalStatus = "Terlambat";
+        }
+    }
     
     const newAttendanceRecords: CombinedAttendanceRecord[] = [];
 
@@ -344,7 +356,7 @@ export default function AbsensiPage() {
                 nisn: student.nisn,
                 studentName: student.nama,
                 classId: student.classId,
-                status: "Hadir",
+                status: finalStatus,
                 timestampMasuk: Timestamp.fromDate(entryTime),
                 timestampPulang: null,
                 notes: "Absensi massal oleh admin",
@@ -860,7 +872,7 @@ export default function AbsensiPage() {
             </div>
              <div className="mt-4 flex flex-col md:flex-row gap-2">
                 <AlertDialog onOpenChange={(open) => {
-                  if (open && schoolHours) {
+                  if (open && schoolHours && !massCheckInTime) {
                     setMassCheckInTime(schoolHours.jamMasuk);
                   }
                 }}>
@@ -874,7 +886,7 @@ export default function AbsensiPage() {
                         <AlertDialogHeader>
                             <AlertDialogTitle>Konfirmasi Absen Masuk Massal</AlertDialogTitle>
                             <AlertDialogDescription>
-                                Anda akan menandai {studentsInSelectedClassBelumAbsen.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span> sebagai 'Hadir'. Mohon konfirmasi atau ubah jam absen di bawah ini.
+                                Anda akan menandai {studentsInSelectedClassBelumAbsen.length} siswa di kelas <span className="font-bold">{classes.find(c => c.id === filterClass)?.name}</span>. Mohon konfirmasi atau ubah jam absen di bawah ini.
                             </AlertDialogDescription>
                         </AlertDialogHeader>
                         <div className="py-2 space-y-2">
@@ -894,7 +906,7 @@ export default function AbsensiPage() {
                 </AlertDialog>
 
                 <AlertDialog onOpenChange={(open) => {
-                  if (open && schoolHours) {
+                  if (open && schoolHours && !massCheckOutTime) {
                     setMassCheckOutTime(schoolHours.jamPulang);
                   }
                 }}>
@@ -1003,5 +1015,4 @@ export default function AbsensiPage() {
   )
 }
 
-    
     

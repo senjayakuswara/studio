@@ -126,7 +126,7 @@ export default function DashboardPage() {
         const todayEnd = endOfDay(new Date())
 
         // Fetch total students
-        const studentsSnapshot = await getDocs(collection(db, "students"))
+        const studentsSnapshot = await getDocs(query(collection(db, "students"), where("status", "==", "Aktif")))
         const totalStudents = studentsSnapshot.size
 
         // Fetch today's attendance records for stats cards
@@ -151,7 +151,7 @@ export default function DashboardPage() {
                     presentToday++;
                     break;
                 case "Terlambat":
-                    presentToday++;
+                    presentToday++; // Terlambat is still present
                     lateToday++;
                     break;
                 case "Sakit": sickToday++; break;
@@ -165,7 +165,7 @@ export default function DashboardPage() {
         setStats(newStats);
 
         // Fetch recent activities
-        const recentActivityQuery = query(collection(db, "attendance"), orderBy("recordDate", "desc"), limit(5))
+        const recentActivityQuery = query(collection(db, "attendance"), orderBy("timestampMasuk", "desc"), limit(5))
         const recentActivitySnapshot = await getDocs(recentActivityQuery)
         const newRecentActivities = recentActivitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as AttendanceRecord);
         setRecentActivities(newRecentActivities);
@@ -248,13 +248,13 @@ export default function DashboardPage() {
           <>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Siswa</CardTitle>
+                <CardTitle className="text-sm font-medium">Total Siswa Aktif</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalStudents}</div>
                 <p className="text-xs text-muted-foreground">
-                  Jumlah siswa terdaftar di sekolah
+                  Jumlah siswa berstatus aktif
                 </p>
               </CardContent>
             </Card>
@@ -266,7 +266,7 @@ export default function DashboardPage() {
               <CardContent>
                 <div className="text-2xl font-bold">{stats.presentToday}</div>
                 <p className="text-xs text-muted-foreground">
-                  dari {stats.totalStudents} siswa
+                  dari {stats.totalStudents} siswa aktif
                 </p>
               </CardContent>
             </Card>
@@ -309,7 +309,7 @@ export default function DashboardPage() {
              <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Izin</CardTitle>
-                <FileText className="h-4 w-4 text-yellow-500" />
+                <FileText className="h-4 w-4 text-blue-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.permissionToday}</div>
@@ -321,7 +321,7 @@ export default function DashboardPage() {
              <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Dispen</CardTitle>
-                <UserCog className="h-4 w-4 text-yellow-500" />
+                <UserCog className="h-4 w-4 text-indigo-500" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.dispensationToday}</div>
@@ -357,8 +357,8 @@ export default function DashboardPage() {
                     <YAxis allowDecimals={false} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="Hadir" stackId="a" fill="var(--color-Hadir)" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Terlambat" stackId="a" fill="var(--color-Terlambat)" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="Absen" stackId="a" fill="var(--color-Absen)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Terlambat" stackId="a" fill="var(--color-Terlambat)" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Absen" stackId="a" fill="var(--color-Absen)" radius={[0, 0, 0, 0]} />
                   </BarChart>
                 </ChartContainer>
               ) : (
@@ -372,7 +372,7 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Aktivitas Absensi Terbaru</CardTitle>
-             <CardDescription>Menampilkan 5 aktivitas terakhir.</CardDescription>
+             <CardDescription>Menampilkan 5 aktivitas masuk terakhir.</CardDescription>
           </CardHeader>
           <CardContent>
               {isLoading ? (
@@ -420,3 +420,5 @@ export default function DashboardPage() {
     </div>
   )
 }
+
+    

@@ -37,7 +37,7 @@ import { notifyOnAttendance, type SerializableAttendanceRecord } from "@/ai/flow
 
 // Types
 type Grade = "X" | "XI" | "XII" | "Staf";
-type Class = { id: string; name: string; grade: Grade }
+type Class = { id: string; name: string; grade: Grade, whatsappGroupName?: string; waliKelas?: string; }
 type Student = { 
     id: string; 
     nisn: string; 
@@ -323,6 +323,11 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
             if (!grades.includes(student.grade)) {
                 throw new Error(`Siswa salah ruang absen. Seharusnya di Kelas ${student.grade}.`);
             }
+            
+            const studentClass = classMap.get(student.classId);
+            if (!studentClass) {
+                throw new Error(`Informasi kelas untuk siswa tidak ditemukan.`);
+            }
 
             const existingRecord = attendanceData[student.id];
             if (existingRecord && ["Sakit", "Izin", "Alfa", "Dispen"].includes(existingRecord.status)) {
@@ -369,7 +374,7 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
                     timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
                     recordDate: finalRecord.recordDate.toDate().toISOString(),
                 };
-                await notifyOnAttendance(serializableRecord);
+                await notifyOnAttendance(serializableRecord, studentClass, schoolHours);
 
             // --- CHECK-IN LOGIC ---
             } else {
@@ -403,7 +408,7 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
                     timestampPulang: finalRecord.timestampPulang?.toDate().toISOString() ?? null,
                     recordDate: finalRecord.recordDate.toDate().toISOString(),
                 };
-                await notifyOnAttendance(serializableRecord);
+                await notifyOnAttendance(serializableRecord, studentClass, schoolHours);
             }
         } catch (error: any) {
             const errorMessage = error.message || "Terjadi kesalahan sistem.";
@@ -417,11 +422,14 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
             })
             cleanup('error', student, errorMessage);
         }
-    }, [schoolHours, allStudents, grades, attendanceData, addLog, playSound, toast]);
+    }, [schoolHours, allStudents, grades, attendanceData, addLog, playSound, toast, classMap]);
 
     const handleManualAttendance = async (studentId: string, status: AttendanceStatus) => {
         const student = allStudents.find(s => s.id === studentId);
         if (!student) return;
+
+        const studentClass = classMap.get(student.classId);
+        if (!studentClass) return;
 
         const now = new Date();
         const existingRecord = attendanceData[studentId];
@@ -457,7 +465,7 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
                 timestampPulang: newRecord.timestampPulang?.toDate().toISOString() ?? null,
                 recordDate: newRecord.recordDate.toDate().toISOString(),
             };
-            await notifyOnAttendance(serializableRecord);
+            await notifyOnAttendance(serializableRecord, studentClass);
 
         } catch (error: any) {
             console.error("Error updating manual attendance: ", error);
@@ -640,3 +648,5 @@ export function AttendancePageClient({ grades }: AttendancePageClientProps) {
     </>
   )
 }
+
+    
