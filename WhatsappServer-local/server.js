@@ -178,8 +178,8 @@ function listenForNotificationJobs() {
                 }
             }
             
-            // **CRUCIAL DELAY**: Wait for a short, random interval before processing the next job.
-            const delay = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
+            // **CRUCIAL DELAY**: Wait for a longer, random interval to better simulate human behavior.
+            const delay = Math.floor(Math.random() * 5000) + 8000; // 8-13 seconds
             logger.info(`[QUEUE] Menjeda ${delay}ms untuk mengurangi risiko blokir...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
