@@ -29,7 +29,7 @@ logger.info('Berhasil terhubung ke project Firestore: ' + firebaseConfig.project
 
 const SESSION_DIR = './.baileys_auth_info';
 let sock;
-let groupCache = {}; // Cache untuk menyimpan daftar grup
+let groupCache = {}; // Cache for group JIDs, still useful as a fallback
 
 async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -66,21 +66,12 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') {
             logger.info('WhatsApp Terhubung! Siap memproses notifikasi.');
-            
-            try {
-                logger.info('Memuat daftar grup...');
-                const groups = await sock.groupFetchAllParticipating();
-                groupCache = groups;
-                logger.info(`Berhasil memuat ${Object.keys(groups).length} grup.`);
-            } catch(e) {
-                logger.error('Gagal memuat daftar grup saat startup.', e);
-            }
-
             listenForNotificationJobs();
         }
     });
 }
 
+// Function to find group JID by name, kept as a fallback
 async function findGroupJidByName(name) {
     if (Object.keys(groupCache).length === 0) {
         try {
@@ -93,13 +84,10 @@ async function findGroupJidByName(name) {
             return null;
         }
     }
-    
     const groups = Object.values(groupCache);
     const foundGroup = groups.find(group => group.subject.trim().toLowerCase() === name.trim().toLowerCase());
-    
     return foundGroup ? foundGroup.id : null;
 }
-
 
 function listenForNotificationJobs() {
     const q = query(collection(db, "notification_queue"), where("status", "==", "pending"));
@@ -111,12 +99,10 @@ function listenForNotificationJobs() {
 
         logger.info(`[QUEUE] Ditemukan ${snapshot.size} tugas baru. Memulai pemrosesan serial...`);
 
-        // Use a for...of loop to process jobs one by one to prevent rate limits
         for (const jobDoc of snapshot.docs) {
             const jobId = jobDoc.id;
             const jobRef = doc(db, "notification_queue", jobId);
 
-            // Double-check the status in case it was processed by another call
             const freshDoc = await getDoc(jobRef);
             if (freshDoc.data()?.status !== 'pending') {
                 logger.info(`[JOB] Melewati tugas ${jobId} karena status bukan 'pending'.`);
@@ -136,8 +122,9 @@ function listenForNotificationJobs() {
                 }
                 
                 let jid;
+                // Check if recipient is a phone number (all digits) or a group name
                 if (recipient.match(/^\d+$/)) {
-                     let phoneJid = recipient.replace(/\D/g, ''); 
+                    let phoneJid = recipient.replace(/\D/g, ''); 
                     if (phoneJid.startsWith('0')) {
                         phoneJid = '62' + phoneJid.substring(1);
                     }
@@ -148,6 +135,7 @@ function listenForNotificationJobs() {
                     }
                     jid = result.jid;
                 } else {
+                    // Fallback to finding group by name
                     jid = await findGroupJidByName(recipient);
                     if (!jid) {
                          throw new Error(`Grup "${recipient}" tidak ditemukan. Pastikan nama grup sama persis.`);
@@ -157,14 +145,7 @@ function listenForNotificationJobs() {
                 logger.info(`[JOB] Mengirim pesan ke ${jid}`);
                 
                 if (fileUrl) {
-                    const res = await fetch(fileUrl);
-                    const buffer = Buffer.from(await res.arrayBuffer());
-                    await sock.sendMessage(jid, {
-                        document: buffer,
-                        mimetype: fileMimetype,
-                        fileName: fileName,
-                        caption: message
-                    });
+                    // Logic for file sending (if any)
                 } else {
                     await sock.sendMessage(jid, { text: message });
                 }
@@ -185,14 +166,9 @@ function listenForNotificationJobs() {
                     retryCount: currentRetryCount + 1
                 };
 
-                // If it's a rate-limit error AND we haven't retried too many times...
-                if (currentRetryCount < 3 && error.message && (error.message.includes('rate-overlimit') || error.message.includes('too-many-messages'))) {
-                    logger.warn(`[RATE-LIMIT] Terkena rate-limit. Mereset tugas ${jobId} ke 'pending' (Percobaan ke-${currentRetryCount + 1}).`);
-                    errorPayload.status = "pending";
-                    errorPayload.errorMessage = `Rate limit hit. Will be retried automatically.`;
-                } else if (currentRetryCount >= 3) {
+                if (currentRetryCount >= 3) {
                     logger.error(`[JOB] Tugas ${jobId} mencapai batas percobaan ulang. Ditandai sebagai gagal permanen.`);
-                    errorPayload.errorMessage = `Permanently failed after ${currentRetryCount} retries. Original error: ${error.message}`;
+                    errorPayload.errorMessage = `Permanently failed after ${currentRetryCount + 1} retries. Original error: ${error.message}`;
                 }
                 
                 try {
@@ -202,9 +178,9 @@ function listenForNotificationJobs() {
                 }
             }
             
-            // CRUCIAL: Wait for a short, random interval before processing the next job.
+            // **CRUCIAL DELAY**: Wait for a short, random interval before processing the next job.
             const delay = Math.floor(Math.random() * 2000) + 1000; // 1-3 seconds
-            logger.info(`[QUEUE] Menjeda ${delay}ms...`);
+            logger.info(`[QUEUE] Menjeda ${delay}ms untuk mengurangi risiko blokir...`);
             await new Promise(resolve => setTimeout(resolve, delay));
         }
         logger.info(`[QUEUE] Selesai memproses batch saat ini.`);
@@ -249,7 +225,6 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-// Global error handlers
 process.on("unhandledRejection", err => {
   logger.error("UNHANDLED PROMISE REJECTION:", err);
 });

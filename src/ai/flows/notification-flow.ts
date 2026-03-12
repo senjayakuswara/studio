@@ -86,15 +86,19 @@ async function queueNotification(recipient: string, message: string, type: 'atte
 
 
 /**
- * Queues a real-time attendance notification to a class WhatsApp group.
+ * Queues a real-time attendance notification to Firestore.
+ * This function prioritizes sending to the parent's WA number. If it doesn't exist,
+ * it falls back to the class's WhatsApp group name.
  * @param record The attendance record that triggered the notification.
+ * @param classInfo Optional pre-fetched class info.
+ * @param schoolHours Optional pre-fetched school hours.
  */
 export async function notifyOnAttendance(
     record: SerializableAttendanceRecord,
     classInfo?: ClassInfo,
     schoolHours?: SchoolHours
 ) {
-     if (!classInfo) {
+    if (!classInfo) {
         const classSnap = await getDoc(doc(db, "classes", record.classId));
         if (!classSnap.exists()) {
             console.error(`Class with ID ${record.classId} not found for notification.`);
@@ -103,9 +107,11 @@ export async function notifyOnAttendance(
         classInfo = classSnap.data() as ClassInfo;
     }
     
-    const recipient = classInfo.whatsappGroupName;
+    // **MODIFIED LOGIC**: Prioritize parent's number, fallback to group name.
+    const recipient = record.parentWaNumber || classInfo.whatsappGroupName;
+    
     if (!recipient) {
-        console.log(`WhatsApp group for class "${classInfo.name}" not set, skipping notification.`);
+        console.log(`No recipient (parent or group) for student "${record.studentName}" in class "${classInfo.name}", skipping notification.`);
         return;
     }
     
@@ -130,37 +136,25 @@ export async function notifyOnAttendance(
         }
 
         if (schoolHours) {
-            // --- ROBUST TIME-SENSITIVE LOGIC ---
             const checkinTime = new Date(record.timestampMasuk);
-
-            // 1. Get the date part (YYYY-MM-DD) of the check-in, according to WIB.
             const checkinDateString = formatInTimeZone(checkinTime, timeZone, 'yyyy-MM-dd');
-            
-            // 2. Create the "jamMasuk" time for that specific date.
             const jamMasukStringWIB = `${checkinDateString}T${schoolHours.jamMasuk}:00`;
             const jamMasukTime = toZonedTime(jamMasukStringWIB, timeZone);
-            
-            // 3. Safely parse tolerance and add it to get the final deadline time.
             const toleranceInMinutes = Number(schoolHours.toleransi) || 0;
             const deadlineTime = addMinutes(jamMasukTime, toleranceInMinutes);
 
-            // 4. Compare the two absolute Date objects.
             if (checkinTime.getTime() <= deadlineTime.getTime()) {
                 finalStatus = "Hadir (Tepat Waktu)";
             } else {
-                // Use milliseconds for more precise calculation
                 const millisLate = checkinTime.getTime() - deadlineTime.getTime();
                 const minutesLate = Math.ceil(millisLate / 60000);
                 finalStatus = `Terlambat (${minutesLate > 0 ? minutesLate : 1} menit)`;
             }
-
         } else {
-            // Fallback to the original status if schoolHours aren't set
             finalStatus = record.status;
         }
 
     } else {
-        // This case is for manual entries like Sakit/Izin/Alfa
         timestampStr = record.recordDate; 
         title = `Informasi Absensi`;
         finalStatus = record.status;
@@ -219,7 +213,6 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
 
     const monthName = formatInTimeZone(new Date(year, month), "Asia/Jakarta", "MMMM yyyy", { locale: localeID });
 
-    // --- Calculate Class-wide Stats ---
     let totalHadir = 0, totalAlfa = 0, totalSakit = 0, totalIzin = 0, totalDispen = 0;
     
     students.forEach(student => {
@@ -236,12 +229,10 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
     const totalPossibleAttendance = students.length * schoolDays;
     const averageKehadiran = totalPossibleAttendance > 0 ? (((totalHadir) / totalPossibleAttendance) * 100).toFixed(1) : "0.0";
     
-    // --- Build Student List ---
     const studentListString = students.map((student, index) => {
         const s = summaryData[student.id]?.summary;
         if (!s) return "";
         const hadir = s.H + s.T;
-        // Use a more compact representation for the list
         return `${index + 1}. ${student.nama}\n   ✅ H:${hadir} | ❌ A:${s.A} | 🤒 S:${s.S} | 📝 I:${s.I} | 🏃 D:${s.D}`;
     }).join('\n\n');
     
@@ -249,7 +240,6 @@ export async function queueDetailedClassRecapNotification(params: DetailedRecapP
         ? `*Akses Laporan Guru:*\n${GOOGLE_DRIVE_LINK_GURU}`
         : `*Akses Laporan Siswa:*\n${GOOGLE_DRIVE_LINK_SISWA}`;
 
-    // --- Assemble Final Message ---
     const messageLines = [
         "📊 *REKAP ABSENSI BULANAN KELAS*",
         "🏫 SMAS PGRI NARINGGUL",
