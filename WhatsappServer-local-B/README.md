@@ -1,13 +1,13 @@
-# Server Notifikasi AbTrack - SERVER A
+# Server Notifikasi AbTrack - SERVER B
 
-Server ini menggunakan pustaka Baileys untuk terhubung ke WhatsApp dan mengirimkan notifikasi absensi. Ini adalah **Server A** dari arsitektur dua server.
+Server ini menggunakan pustaka Baileys untuk terhubung ke WhatsApp dan mengirimkan notifikasi absensi. Ini adalah **Server B** dari arsitektur dua server.
 
 ## Arsitektur Dua Server
 
 Sistem ini dirancang untuk berjalan dengan dua server notifikasi (Server A dan Server B) secara bersamaan untuk meningkatkan keandalan. Keduanya memantau antrean yang sama, dan secara otomatis mendistribusikan beban kerja.
 
-- **Server A:** Folder `WhatsappServer-local` (folder ini).
-- **Server B:** Folder `WhatsappServer-local-B`.
+- **Server A:** Folder `WhatsappServer-local`.
+- **Server B:** Folder `WhatsappServer-local-B` (folder ini).
 
 Pastikan Anda menjalankan kedua server menggunakan nomor WhatsApp yang berbeda.
 
@@ -17,10 +17,9 @@ Pastikan Anda menjalankan kedua server menggunakan nomor WhatsApp yang berbeda.
 2.  Buka terminal (CMD atau PowerShell) di dalam folder ini.
 3.  Jalankan perintah `npm install` untuk mengunduh semua komponen yang diperlukan.
 
-## Menjalankan Server A
+## Menjalankan Server B
 
 1.  Dobel-klik file `start.bat`.
 2.  Sebuah terminal akan muncul dan menampilkan QR code.
-3.  Pindai QR code tersebut menggunakan HP dengan **Nomor WhatsApp Pertama Anda**.
+3.  Pindai QR code tersebut menggunakan HP dengan **Nomor WhatsApp Kedua Anda**.
 4.  Setelah terhubung, terminal akan menampilkan pesan "WhatsApp Terhubung!". Biarkan terminal ini tetap berjalan.
-5.  Lanjutkan untuk menjalankan Server B di folder `WhatsappServer-local-B`.

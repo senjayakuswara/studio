@@ -20,15 +20,15 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const logger = pino({ level: 'info' }).child({ server: 'A' });
+const logger = pino({ level: 'info' }).child({ server: 'B' });
 
 console.log('=======================================================');
 console.log('  AbTrack WhatsApp Server (v6.0 - Arsitektur Baileys)');
-console.log('                 INSTANCE A                           ');
+console.log('                 INSTANCE B                           ');
 console.log('=======================================================');
 logger.info('Berhasil terhubung ke project Firestore: ' + firebaseConfig.projectId);
 
-const SESSION_DIR = './.baileys_auth_info_A';
+const SESSION_DIR = './.baileys_auth_info_B';
 let sock;
 let groupCache = {}; // Cache for group JIDs, still useful as a fallback
 
@@ -49,7 +49,7 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
 
         if(qr) {
-            console.log('Pindai QR Code di bawah ini untuk terhubung (SERVER A):');
+            console.log('Pindai QR Code di bawah ini untuk terhubung (SERVER B):');
             qrcode.generate(qr, { small: true });
         }
 
@@ -59,7 +59,7 @@ async function connectToWhatsApp() {
             if (shouldReconnect) {
                 setTimeout(connectToWhatsApp, 5000);
             } else {
-                logger.error('Tidak dapat terhubung, keluar. Hapus folder .baileys_auth_info_A dan coba lagi.');
+                logger.error('Tidak dapat terhubung, keluar. Hapus folder .baileys_auth_info_B dan coba lagi.');
                 if (fs.existsSync(SESSION_DIR)) {
                     fs.rmSync(SESSION_DIR, { recursive: true, force: true });
                 }
@@ -107,7 +107,7 @@ function listenForNotificationJobs() {
             // ATOMIC CHECK: Try to lock the job for this server instance
             try {
                 // This transaction ensures that only one server instance can process a job.
-                await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now(), processingBy: 'ServerA' });
+                await updateDoc(jobRef, { status: "processing", updatedAt: Timestamp.now(), processingBy: 'ServerB' });
             } catch (e) {
                 // If this fails, it means another server instance already locked it.
                 logger.info(`[JOB] Melewati tugas ${jobId}, sudah diambil oleh server lain.`);

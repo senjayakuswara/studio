@@ -1,7 +1,7 @@
 {
-  "name": "baileys-whatsapp-server-a",
+  "name": "baileys-whatsapp-server-b",
   "version": "6.0.0",
-  "description": "WhatsApp server (A) menggunakan Baileys untuk AbTrack",
+  "description": "WhatsApp server (B) menggunakan Baileys untuk AbTrack",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
